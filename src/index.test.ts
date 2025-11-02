@@ -1,96 +1,417 @@
-import { describe, it, expect } from 'vitest';
-import { RuleEngine, createRule, combineResults } from './index.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import path from 'path';
+import { mkdirSync, writeFileSync, rmSync } from 'fs';
+import { discoverRuleFiles, readAndFormatRules } from './index.js';
 
-describe('RuleEngine', () => {
-  it('should create a rule engine instance', () => {
-    const engine = new RuleEngine();
-    expect(engine).toBeDefined();
-    expect(engine.getRules()).toEqual([]);
+// Create temporary test directories
+const testDir = '/tmp/opencode-rules-test';
+const globalRulesDir = path.join(testDir, '.config', 'opencode', 'rules');
+const projectRulesDir = path.join(testDir, 'project', '.opencode', 'rules');
+
+function setupTestDirs() {
+  // Clean up if exists
+  if (require('fs').existsSync(testDir)) {
+    rmSync(testDir, { recursive: true, force: true });
+  }
+  mkdirSync(globalRulesDir, { recursive: true });
+  mkdirSync(projectRulesDir, { recursive: true });
+}
+
+function teardownTestDirs() {
+  if (require('fs').existsSync(testDir)) {
+    rmSync(testDir, { recursive: true, force: true });
+  }
+}
+
+describe('discoverRuleFiles', () => {
+  beforeEach(() => {
+    setupTestDirs();
   });
 
-  it('should register and retrieve rules', () => {
-    const engine = new RuleEngine();
-    const rule = createRule(
-      'test-rule',
-      'Test Rule',
-      'A test rule',
-      'error',
-      () => ({ errors: [], warnings: [], info: [] })
-    );
-
-    engine.register(rule);
-    expect(engine.getRules()).toHaveLength(1);
-    expect(engine.getRule('test-rule')).toEqual(rule);
+  afterEach(() => {
+    teardownTestDirs();
+    vi.resetAllMocks();
   });
 
-  it('should validate input against rules', () => {
-    const engine = new RuleEngine();
-    const rule = createRule(
-      'test-rule',
-      'Test Rule',
-      'A test rule',
-      'error',
-      input => ({
-        errors: input === 'invalid' ? ['Input is invalid'] : [],
-        warnings: [],
-        info: [],
-      })
-    );
+  describe('global rules discovery', () => {
+    it('should discover markdown files from XDG_CONFIG_HOME/opencode/rules', async () => {
+      // Arrange
+      writeFileSync(path.join(globalRulesDir, 'rule1.md'), '# Rule 1');
+      writeFileSync(path.join(globalRulesDir, 'rule2.md'), '# Rule 2');
 
-    engine.register(rule);
+      // Mock XDG_CONFIG_HOME
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const validResult = engine.validate('valid');
-    expect(validResult.valid).toBe(true);
-    expect(validResult.errors).toEqual([]);
+      try {
+        // Act
+        const files = await discoverRuleFiles();
 
-    const invalidResult = engine.validate('invalid');
-    expect(invalidResult.valid).toBe(false);
-    expect(invalidResult.errors).toEqual(['Input is invalid']);
+        // Assert
+        expect(files).toContain(path.join(globalRulesDir, 'rule1.md'));
+        expect(files).toContain(path.join(globalRulesDir, 'rule2.md'));
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+      }
+    });
+
+    it('should use ~/.config/opencode/rules as fallback when XDG_CONFIG_HOME not set', async () => {
+      // Arrange
+      const homeDir = path.join(testDir, 'home');
+      mkdirSync(homeDir, { recursive: true });
+      const fallbackDir = path.join(homeDir, '.config', 'opencode', 'rules');
+      mkdirSync(fallbackDir, { recursive: true });
+      writeFileSync(path.join(fallbackDir, 'rule.md'), '# Rule');
+
+      // Mock environment
+      const originalHome = process.env.HOME;
+      const originalXDG = process.env.XDG_CONFIG_HOME;
+      process.env.HOME = homeDir;
+      delete process.env.XDG_CONFIG_HOME;
+
+      try {
+        // Act
+        const files = await discoverRuleFiles();
+
+        // Assert
+        expect(files).toContain(path.join(fallbackDir, 'rule.md'));
+      } finally {
+        process.env.HOME = originalHome;
+        process.env.XDG_CONFIG_HOME = originalXDG;
+      }
+    });
+
+    it('should handle missing global rules directory gracefully', async () => {
+      // Arrange
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+      try {
+        // Remove the directory to test graceful handling
+        rmSync(globalRulesDir, { recursive: true, force: true });
+
+        // Act & Assert - should not throw
+        const files = await discoverRuleFiles();
+        expect(files).toEqual([]);
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+      }
+    });
+
+    it('should only include .md files', async () => {
+      // Arrange
+      writeFileSync(path.join(globalRulesDir, 'rule.md'), '# Rule');
+      writeFileSync(path.join(globalRulesDir, 'rule.txt'), 'Not markdown');
+      writeFileSync(path.join(globalRulesDir, 'rule.json'), '{}');
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+      try {
+        // Act
+        const files = await discoverRuleFiles();
+
+        // Assert
+        expect(files).toHaveLength(1);
+        expect(files[0]).toMatch(/\.md$/);
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+      }
+    });
+
+    it('should exclude hidden files', async () => {
+      // Arrange
+      writeFileSync(path.join(globalRulesDir, 'rule.md'), '# Rule');
+      writeFileSync(path.join(globalRulesDir, '.hidden.md'), '# Hidden');
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+      try {
+        // Act
+        const files = await discoverRuleFiles();
+
+        // Assert
+        expect(files).not.toContainEqual(expect.stringContaining('.hidden.md'));
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+      }
+    });
+  });
+
+  describe('project rules discovery', () => {
+    it('should discover markdown files from .opencode/rules directory', async () => {
+      // Arrange
+      const projectDir = path.join(testDir, 'project');
+      mkdirSync(projectDir, { recursive: true });
+      const projRulesDir = path.join(projectDir, '.opencode', 'rules');
+      mkdirSync(projRulesDir, { recursive: true });
+      writeFileSync(path.join(projRulesDir, 'local-rule.md'), '# Local Rule');
+
+      // Act
+      const files = await discoverRuleFiles(projectDir);
+
+      // Assert
+      expect(files).toContain(path.join(projRulesDir, 'local-rule.md'));
+    });
+
+    it('should handle missing .opencode directory gracefully', async () => {
+      // Arrange
+      const projectDir = path.join(testDir, 'empty-project');
+      mkdirSync(projectDir, { recursive: true });
+
+      // Act & Assert - should not throw
+      const files = await discoverRuleFiles(projectDir);
+      expect(files).toEqual([]);
+    });
+
+    it('should discover rules from both global and project directories', async () => {
+      // Arrange
+      writeFileSync(path.join(globalRulesDir, 'global.md'), '# Global');
+
+      const projectDir = path.join(testDir, 'project');
+      mkdirSync(projectDir, { recursive: true });
+      const projRulesDir = path.join(projectDir, '.opencode', 'rules');
+      mkdirSync(projRulesDir, { recursive: true });
+      writeFileSync(path.join(projRulesDir, 'local.md'), '# Local');
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+      try {
+        // Act
+        const files = await discoverRuleFiles(projectDir);
+
+        // Assert
+        expect(files).toHaveLength(2);
+        expect(files).toContainEqual(expect.stringContaining('global.md'));
+        expect(files).toContainEqual(expect.stringContaining('local.md'));
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+      }
+    });
   });
 });
 
-describe('createRule', () => {
-  it('should create a rule with proper structure', () => {
-    const rule = createRule(
-      'test-rule',
-      'Test Rule',
-      'A test rule',
-      'warning',
-      () => ({ errors: [], warnings: ['test warning'], info: [] })
+describe('readAndFormatRules', () => {
+  beforeEach(() => {
+    setupTestDirs();
+  });
+
+  afterEach(() => {
+    teardownTestDirs();
+  });
+
+  it('should read and format rule files into a formatted string', async () => {
+    // Arrange
+    const rule1Path = path.join(globalRulesDir, 'rule1.md');
+    const rule2Path = path.join(globalRulesDir, 'rule2.md');
+    writeFileSync(rule1Path, '# Rule 1\nContent of rule 1');
+    writeFileSync(rule2Path, '# Rule 2\nContent of rule 2');
+
+    const files = [rule1Path, rule2Path];
+
+    // Act
+    const formatted = await readAndFormatRules(files);
+
+    // Assert
+    expect(formatted).toContain('OpenCode Rules');
+    expect(formatted).toContain('rule1.md');
+    expect(formatted).toContain('rule2.md');
+    expect(formatted).toContain('Rule 1');
+    expect(formatted).toContain('Rule 2');
+  });
+
+  it('should return empty string when no files provided', async () => {
+    // Act
+    const formatted = await readAndFormatRules([]);
+
+    // Assert
+    expect(formatted).toBe('');
+  });
+
+  it('should handle file read errors gracefully', async () => {
+    // Arrange
+    const nonExistentFile = path.join(globalRulesDir, 'nonexistent.md');
+    const validFile = path.join(globalRulesDir, 'valid.md');
+    writeFileSync(validFile, '# Valid Rule');
+
+    // Act & Assert - should not throw
+    const formatted = await readAndFormatRules([nonExistentFile, validFile]);
+
+    // Should still include the valid file
+    expect(formatted).toContain('valid.md');
+  });
+
+  it('should include filename as subheader in output', async () => {
+    // Arrange
+    const rulePath = path.join(globalRulesDir, 'my-rules.md');
+    writeFileSync(rulePath, 'Rule content');
+
+    // Act
+    const formatted = await readAndFormatRules([rulePath]);
+
+    // Assert
+    expect(formatted).toMatch(/##\s+my-rules\.md/);
+  });
+
+  it('should include instructions to follow rules', async () => {
+    // Arrange
+    const rulePath = path.join(globalRulesDir, 'rule.md');
+    writeFileSync(rulePath, 'Rule content');
+
+    // Act
+    const formatted = await readAndFormatRules([rulePath]);
+
+    // Assert - check for language indicating rules should be followed
+    expect(formatted.toLowerCase()).toMatch(
+      /follow|adhereread the following rules|must follow/i
     );
-
-    expect(rule.id).toBe('test-rule');
-    expect(rule.name).toBe('Test Rule');
-    expect(rule.description).toBe('A test rule');
-    expect(rule.severity).toBe('warning');
-
-    const result = rule.validate(null);
-    expect(result.valid).toBe(true); // No errors
-    expect(result.warnings).toEqual(['test warning']);
   });
 });
 
-describe('combineResults', () => {
-  it('should combine multiple validation results', () => {
-    const result1 = {
-      valid: true,
-      errors: [],
-      warnings: ['warning 1'],
-      info: ['info 1'],
+describe('OpenCodeRulesPlugin', () => {
+  beforeEach(() => {
+    setupTestDirs();
+  });
+
+  afterEach(() => {
+    teardownTestDirs();
+    vi.resetAllMocks();
+  });
+
+  it('should export a default plugin function', async () => {
+    const { default: plugin } = await import('./index.js');
+    expect(typeof plugin).toBe('function');
+  });
+
+  it('should return hooks object from plugin', async () => {
+    // Arrange
+    const { default: plugin } = await import('./index.js');
+    const mockInput = {
+      client: {} as any,
+      project: {} as any,
+      directory: testDir,
+      worktree: testDir,
+      $: {} as any,
     };
 
-    const result2 = {
-      valid: false,
-      errors: ['error 1'],
-      warnings: ['warning 2'],
-      info: ['info 2'],
+    // Act
+    const hooks = await plugin(mockInput);
+
+    // Assert
+    expect(hooks).toBeDefined();
+    expect(typeof hooks['chat.params']).toBe('function');
+  });
+
+  it('should modify chat params with system prompt suffix when rules exist', async () => {
+    // Arrange
+    const rulePath = path.join(globalRulesDir, 'rule.md');
+    writeFileSync(rulePath, '# Test Rule\nDo this always');
+
+    const { default: plugin } = await import('./index.js');
+    const mockInput = {
+      client: {} as any,
+      project: {} as any,
+      directory: testDir,
+      worktree: testDir,
+      $: {} as any,
     };
 
-    const combined = combineResults(result1, result2);
+    // Mock XDG_CONFIG_HOME to find our test rule
+    const originalEnv = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    expect(combined.valid).toBe(false);
-    expect(combined.errors).toEqual(['error 1']);
-    expect(combined.warnings).toEqual(['warning 1', 'warning 2']);
-    expect(combined.info).toEqual(['info 1', 'info 2']);
+    try {
+      // Act
+      const hooks = await plugin(mockInput);
+      const output = {
+        temperature: 0.7,
+        topP: 0.9,
+        options: {} as any,
+      };
+
+      await hooks['chat.params']!(
+        { model: {}, provider: {}, message: {} } as any,
+        output as any
+      );
+
+      // Assert
+      expect(output.options.systemPromptSuffix).toBeDefined();
+      expect(output.options.systemPromptSuffix).toContain('OpenCode Rules');
+      expect(output.options.systemPromptSuffix).toContain('Test Rule');
+    } finally {
+      process.env.XDG_CONFIG_HOME = originalEnv;
+    }
+  });
+
+  it('should not set system prompt suffix when no rules exist', async () => {
+    // Arrange
+    // Ensure no rules exist
+    const originalEnv = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const { default: plugin } = await import('./index.js');
+    const mockInput = {
+      client: {} as any,
+      project: {} as any,
+      directory: path.join(testDir, 'empty-project'),
+      worktree: testDir,
+      $: {} as any,
+    };
+
+    try {
+      // Act
+      const hooks = await plugin(mockInput);
+      const output = {
+        temperature: 0.7,
+        topP: 0.9,
+        options: {} as any,
+      };
+
+      await hooks['chat.params']!(
+        { model: {}, provider: {}, message: {} } as any,
+        output as any
+      );
+
+      // Assert
+      expect(output.options.systemPromptSuffix).toBeUndefined();
+    } finally {
+      process.env.XDG_CONFIG_HOME = originalEnv;
+    }
+  });
+
+  it('should discover rules from project directory', async () => {
+    // Arrange
+    const projectDir = path.join(testDir, 'myproject');
+    mkdirSync(projectDir, { recursive: true });
+    const projRulesDir = path.join(projectDir, '.opencode', 'rules');
+    mkdirSync(projRulesDir, { recursive: true });
+    writeFileSync(path.join(projRulesDir, 'project-rule.md'), '# Project Rule');
+
+    const { default: plugin } = await import('./index.js');
+    const mockInput = {
+      client: {} as any,
+      project: {} as any,
+      directory: projectDir,
+      worktree: testDir,
+      $: {} as any,
+    };
+
+    // Act
+    const hooks = await plugin(mockInput);
+    const output = {
+      temperature: 0.7,
+      topP: 0.9,
+      options: {} as any,
+    };
+
+    await hooks['chat.params']!(
+      { model: {}, provider: {}, message: {} } as any,
+      output as any
+    );
+
+    // Assert
+    expect(output.options.systemPromptSuffix).toContain('project-rule.md');
   });
 });
