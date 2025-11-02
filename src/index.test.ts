@@ -5,7 +5,7 @@ import {
   discoverRuleFiles,
   readAndFormatRules,
   parseRuleMetadata,
-} from './index.js';
+} from './utils.js';
 
 // Create temporary test directories
 const testDir = '/tmp/opencode-rules-test';
