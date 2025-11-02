@@ -342,6 +342,166 @@ describe('readAndFormatRules', () => {
       /follow|adhereread the following rules|must follow/i
     );
   });
+
+  it('should apply rules without metadata unconditionally', async () => {
+    // Arrange
+    const rulePath = path.join(globalRulesDir, 'unconditional.mdc');
+    writeFileSync(rulePath, 'This rule always applies');
+
+    // Act
+    const formatted = await readAndFormatRules(
+      [rulePath],
+      'src/utils/helpers.js'
+    );
+
+    // Assert - rule should be included even though file doesn't match any pattern
+    expect(formatted).toContain('unconditional.mdc');
+    expect(formatted).toContain('This rule always applies');
+  });
+
+  it('should include rule when file matches glob pattern in metadata', async () => {
+    // Arrange
+    const rulePath = path.join(globalRulesDir, 'typescript.mdc');
+    const ruleContent = `---
+globs:
+  - "src/components/**/*.ts"
+---
+
+This is a rule for TypeScript components.`;
+    writeFileSync(rulePath, ruleContent);
+
+    // Act - testing with a matching file path
+    const formatted = await readAndFormatRules(
+      [rulePath],
+      'src/components/button.ts'
+    );
+
+    // Assert
+    expect(formatted).toContain('typescript.mdc');
+    expect(formatted).toContain('This is a rule for TypeScript components.');
+  });
+
+  it('should exclude rule when file does not match glob pattern in metadata', async () => {
+    // Arrange
+    const rulePath = path.join(globalRulesDir, 'typescript.mdc');
+    const ruleContent = `---
+globs:
+  - "src/components/**/*.ts"
+---
+
+This is a rule for TypeScript components.`;
+    writeFileSync(rulePath, ruleContent);
+
+    // Act - testing with a non-matching file path
+    const formatted = await readAndFormatRules(
+      [rulePath],
+      'src/utils/helpers.js'
+    );
+
+    // Assert - should return empty because rule doesn't apply
+    expect(formatted).toBe('');
+  });
+
+  it('should include rule when file matches any of multiple glob patterns', async () => {
+    // Arrange
+    const rulePath = path.join(globalRulesDir, 'multi.mdc');
+    const ruleContent = `---
+globs:
+  - "src/components/**/*.ts"
+  - "lib/**/*.js"
+---
+
+Multi-pattern rule`;
+    writeFileSync(rulePath, ruleContent);
+
+    // Act - test with file matching second pattern
+    const formatted = await readAndFormatRules(
+      [rulePath],
+      'lib/utils/helper.js'
+    );
+
+    // Assert
+    expect(formatted).toContain('multi.mdc');
+    expect(formatted).toContain('Multi-pattern rule');
+  });
+
+  it('should handle mixed rules with and without metadata', async () => {
+    // Arrange
+    const unconditionalPath = path.join(globalRulesDir, 'always.md');
+    const conditionalPath = path.join(globalRulesDir, 'conditional.mdc');
+
+    writeFileSync(unconditionalPath, 'Always apply this');
+    writeFileSync(
+      conditionalPath,
+      `---
+globs:
+  - "src/**/*.ts"
+---
+
+Only for TypeScript`
+    );
+
+    // Act - test with matching TypeScript file
+    const formatted = await readAndFormatRules(
+      [unconditionalPath, conditionalPath],
+      'src/app.ts'
+    );
+
+    // Assert - both should be included
+    expect(formatted).toContain('always.md');
+    expect(formatted).toContain('Always apply this');
+    expect(formatted).toContain('conditional.mdc');
+    expect(formatted).toContain('Only for TypeScript');
+  });
+
+  it('should exclude conditional rule but include unconditional when file does not match', async () => {
+    // Arrange
+    const unconditionalPath = path.join(globalRulesDir, 'always.md');
+    const conditionalPath = path.join(globalRulesDir, 'conditional.mdc');
+
+    writeFileSync(unconditionalPath, 'Always apply this');
+    writeFileSync(
+      conditionalPath,
+      `---
+globs:
+  - "src/**/*.ts"
+---
+
+Only for TypeScript`
+    );
+
+    // Act - test with non-matching file
+    const formatted = await readAndFormatRules(
+      [unconditionalPath, conditionalPath],
+      'docs/readme.md'
+    );
+
+    // Assert - only unconditional rule should be included
+    expect(formatted).toContain('always.md');
+    expect(formatted).toContain('Always apply this');
+    expect(formatted).not.toContain('Only for TypeScript');
+  });
+
+  it('should apply all rules when no context file path provided', async () => {
+    // Arrange
+    const rulePath = path.join(globalRulesDir, 'conditional.mdc');
+    writeFileSync(
+      rulePath,
+      `---
+globs:
+  - "src/**/*.ts"
+---
+
+TypeScript only rule`
+    );
+
+    // Act - no file path provided
+    const formatted = await readAndFormatRules([rulePath]);
+
+    // Assert - rule should be applied (backward compatibility)
+    expect(formatted).toContain('conditional.mdc');
+    expect(formatted).toContain('TypeScript only rule');
+  });
 });
 
 describe('OpenCodeRulesPlugin', () => {

@@ -8,7 +8,15 @@
 import { readdirSync, readFileSync, existsSync } from 'fs';
 import path from 'path';
 import os from 'os';
+import minimatch from 'minimatch';
 import type { Plugin, PluginInput } from '@opencode-ai/plugin';
+
+/**
+ * Check if a file path matches any of the given glob patterns
+ */
+export function fileMatchesGlobs(filePath: string, globs: string[]): boolean {
+  return globs.some(glob => minimatch(filePath, glob, { matchBase: true }));
+}
 
 /**
  * Metadata extracted from .mdc file frontmatter
@@ -136,8 +144,13 @@ function getGlobalRulesDir(): string | null {
 
 /**
  * Read and format rule files for system prompt injection
+ * @param files - Array of rule file paths
+ * @param contextFilePath - Optional path of the file being processed (used to filter rules by metadata)
  */
-export async function readAndFormatRules(files: string[]): Promise<string> {
+export async function readAndFormatRules(
+  files: string[],
+  contextFilePath?: string
+): Promise<string> {
   if (files.length === 0) {
     return '';
   }
@@ -148,6 +161,19 @@ export async function readAndFormatRules(files: string[]): Promise<string> {
     try {
       const content = readFileSync(file, 'utf-8');
       const filename = path.basename(file);
+
+      // Parse metadata to check if rule should apply
+      const metadata = parseRuleMetadata(content);
+
+      // If metadata exists with globs and a context file path is provided,
+      // check if the context file matches any of the glob patterns
+      if (metadata && metadata.globs && contextFilePath) {
+        if (!fileMatchesGlobs(contextFilePath, metadata.globs)) {
+          // Rule does not apply to this file, skip it
+          continue;
+        }
+      }
+
       ruleContents.push(`## ${filename}\n\n${content}`);
     } catch (error) {
       // Log warning but continue with other files
