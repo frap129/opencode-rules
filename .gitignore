@@ -2,6 +2,7 @@
 node_modules/
 .pnp
 .pnp.js
+bun.lock
 package-lock.json
 
 # Build outputs
