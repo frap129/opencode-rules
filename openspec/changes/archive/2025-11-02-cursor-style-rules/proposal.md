@@ -1,0 +1,1 @@
+This proposal introduces a refactoring of the plugin implementation to support `.mdc` files and conditional rule injection based on metadata. This will allow for more flexible and powerful rule definition, enabling rules to be applied based on file paths or other conditions specified in the metadata.
