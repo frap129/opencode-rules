@@ -1,6 +1,6 @@
 {
   "name": "opencode-rules",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "OpenCode plugin that discovers and injects markdown rules into system prompts",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -37,17 +37,17 @@
   },
   "devDependencies": {
     "@types/minimatch": "^5.1.2",
-    "@types/node": "^20.0.0",
-    "@typescript-eslint/eslint-plugin": "^6.0.0",
-    "@typescript-eslint/parser": "^6.0.0",
-    "eslint": "^8.0.0",
-    "prettier": "^3.0.0",
-    "typescript": "^5.0.0",
-    "vitest": "^1.0.0"
+    "@types/node": "^20.19.24",
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
+    "eslint": "^8.57.1",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.3",
+    "vitest": "^1.6.1"
   },
   "dependencies": {
-    "@opencode-ai/plugin": "^1.0.11",
-    "@opencode-ai/sdk": "^1.0.11",
-    "minimatch": "^9.0.3"
+    "@opencode-ai/plugin": "^1.0.12",
+    "@opencode-ai/sdk": "^1.0.12",
+    "minimatch": "^9.0.5"
   }
 }
