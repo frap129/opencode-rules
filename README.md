@@ -1,148 +1,87 @@
 # OpenCode Rules Plugin
 
-A powerful OpenCode plugin that discovers and injects markdown rule files into system prompts, enabling flexible AI agent behavior customization.
+A lightweight OpenCode plugin that discovers and injects markdown rule files into AI agent system prompts, enabling flexible behavior customization without per-project configuration.
+
+## Overview
+
+OpenCode Rules automatically loads rule files from standard directories and integrates them into AI agent prompts, allowing you to:
+
+- Define global coding standards that apply across all projects
+- Create project-specific rules for team collaboration
+- Apply conditional rules based on file patterns
+- Maintain zero-configuration workflow with sensible defaults
 
 ## Features
 
 - **Dual-format support**: Load rules from both `.md` and `.mdc` files
-- **Metadata-driven filtering**: Apply rules conditionally based on file paths using glob patterns
+- **Conditional rules**: Apply rules based on file paths using glob patterns
 - **Global and project-level rules**: Define rules at both system and project scopes
 - **Zero-configuration**: Works out of the box with XDG Base Directory specification
-- **Backward compatible**: Existing `.md` rules continue to work as expected
+- **TypeScript-first**: Built with TypeScript for type safety and developer experience
+- **Performance optimized**: Efficient file discovery and minimal startup overhead
 
-## Installation
+## Quick Start
+
+### Installation
 
 ```bash
-npm install opencode-rules
+bun install opencode-rules
 ```
+
+### Create Your First Rule
+
+1. Create the global rules directory:
+
+   ```bash
+   mkdir -p ~/.config/opencode/rules
+   ```
+
+2. Add a simple rule file:
+
+   ```bash
+   cat > ~/.config/opencode/rules/coding-standards.md << 'EOF'
+   # Coding Standards
+
+   - Use meaningful variable names
+   - Follow the project's code style guide
+   - Write self-documenting code
+   EOF
+   ```
+
+That's it! The rule will now be automatically injected into all AI agent prompts.
 
 ## Configuration
 
-### Global Rules Directory
+### Rule Discovery Locations
 
-Rules are discovered from the following locations:
+Rules are automatically discovered from these directories:
 
 1. **Global rules**: `$XDG_CONFIG_HOME/opencode/rules/` (typically `~/.config/opencode/rules/`)
-2. **Project rules**: `.opencode/rules/` (in your project directory)
+2. **Project rules**: `.opencode/rules/` (in your project root)
 
-Create these directories and add your rule files to enable automatic rule injection.
+### Supported File Formats
 
-## Usage
+- `.md` - Standard markdown files with optional metadata
+- `.mdc` - Markdown files with optional metadata
 
-### Basic Rule File (`.md`)
+## Usage Examples
 
-Create a simple markdown rule file that applies unconditionally:
+### Basic Rule File
 
-```markdown
-# My Coding Rule
-
-Always use meaningful variable names.
-Follow the project's code style guide.
-```
-
-Save this as `~/.config/opencode/rules/naming-convention.md` and it will be automatically injected into all AI agent prompts.
-
-### Rule File with Metadata (`.mdc`)
-
-For more control, use the `.mdc` format which supports metadata-driven conditional rule application:
+Create `~/.config/opencode/rules/naming-convention.md`:
 
 ```markdown
----
-globs:
-  - 'src/components/**/*.ts'
----
+# Naming Convention Rules
 
-# TypeScript Component Rules
-
-- Always use TypeScript strict mode
-- Export components as named exports
-- Include PropTypes for React components
+- Use camelCase for variables and functions
+- Use PascalCase for classes and interfaces
+- Use UPPER_SNAKE_CASE for constants
+- Prefix private properties with underscore
 ```
 
-Save this as `~/.config/opencode/rules/typescript-components.mdc`.
+### Conditional Rule with Metadata
 
-This rule will only be applied when the AI agent is processing files matching the glob pattern `src/components/**/*.ts`.
-
-## Metadata Format
-
-The metadata section uses YAML front matter enclosed in `---` delimiters.
-
-### Supported Fields
-
-#### `globs` (optional)
-
-An array of glob patterns to match file paths for conditional rule application.
-
-```yaml
----
-globs:
-  - 'src/**/*.ts'
-  - 'lib/**/*.js'
-  - '*.test.ts'
----
-```
-
-When `globs` is specified:
-
-- The rule is only applied to files matching at least one glob pattern
-- Glob patterns use standard minimatch syntax
-- If no `globs` are specified, the rule applies unconditionally (backward compatible)
-
-## File Format Specifications
-
-### `.md` Files
-
-Standard Markdown files that are always applied unconditionally:
-
-```
-# Rule Title
-
-Rule content and instructions for AI agents.
-```
-
-**Behavior**: Always applied when discovered.
-
-### `.mdc` Files
-
-Markdown with optional metadata for conditional application:
-
-```
----
-globs:
-  - "pattern1/**/*.ext"
-  - "pattern2/**/*.ext"
----
-
-# Rule Title
-
-Rule content and instructions for AI agents.
-```
-
-**Behavior**:
-
-- If metadata with `globs` is present: Applied only to matching files
-- If no metadata is present: Applied unconditionally (same as `.md`)
-
-## Examples
-
-### Example 1: Universal Code Style Rule
-
-File: `~/.config/opencode/rules/code-style.md`
-
-```markdown
-# Code Style Guidelines
-
-1. Use 2-space indentation
-2. Maximum line length of 100 characters
-3. Use single quotes for strings (JavaScript)
-4. Add JSDoc comments for all functions
-```
-
-This rule applies to all files in all projects.
-
-### Example 2: TypeScript-Only Rule
-
-File: `~/.config/opencode/rules/typescript.mdc`
+Create `~/.config/opencode/rules/typescript.mdc`:
 
 ```markdown
 ---
@@ -155,15 +94,16 @@ globs:
 
 - Always use `const` and `let`, avoid `var`
 - Use interfaces for object types
-- Use type annotations for function parameters
+- Add type annotations for function parameters
 - Avoid `any` type without justification
+- Enable strict mode in tsconfig.json
 ```
 
 This rule only applies when processing TypeScript files.
 
-### Example 3: React Component Rule
+### Project-Specific Rules
 
-File: `.opencode/rules/react-components.mdc`
+Create `.opencode/rules/react-components.mdc` in your project:
 
 ```markdown
 ---
@@ -174,46 +114,34 @@ globs:
 # React Component Guidelines
 
 - Use functional components with hooks
-- Components should be in their own directory with index.ts
-- Include Storybook stories for UI components
+- Export components as named exports
+- Include PropTypes or TypeScript interfaces
 - Use React.memo for expensive components
+- Co-locate styles with components
 ```
 
-This project-level rule applies only to React components in the src/components directory.
+## Metadata Format
 
-### Example 4: Multiple Patterns
+Both `.md` and `.mdc` files support optional YAML metadata for conditional rule application:
 
-File: `~/.config/opencode/rules/testing.mdc`
-
-```markdown
+```yaml
 ---
 globs:
-  - '**/*.test.ts'
-  - '**/*.test.tsx'
-  - '**/*.spec.ts'
+  - 'src/**/*.ts'
+  - 'lib/**/*.js'
+  - '*.test.ts'
 ---
-
-# Testing Guidelines
-
-- Use descriptive test names
-- Follow Arrange-Act-Assert pattern
-- Keep tests focused and small
-- Avoid test interdependencies
 ```
 
-This rule applies to all test files across your projects.
+### Supported Fields
 
-## Glob Pattern Matching
+- `globs` (optional): Array of glob patterns for conditional application
+  - If specified: Rule applies only to files matching at least one pattern
+  - If omitted: Rule applies unconditionally
 
-The plugin uses the `minimatch` library for glob pattern matching. Patterns support:
+## Glob Pattern Reference
 
-- `*` - matches any character except path separators
-- `**` - matches zero or more directories
-- `?` - matches exactly one character
-- `[...]` - character ranges
-- `{a,b,c}` - alternatives
-
-### Common Patterns
+The plugin uses `minimatch` for pattern matching:
 
 | Pattern                       | Matches                                         |
 | ----------------------------- | ----------------------------------------------- |
@@ -223,119 +151,102 @@ The plugin uses the `minimatch` library for glob pattern matching. Patterns supp
 | `*.json`                      | JSON files in root directory only               |
 | `lib/{utils,helpers}/**/*.js` | JavaScript files in specific lib subdirectories |
 
-## API Reference
+## Development
 
-### `parseRuleMetadata(content: string): RuleMetadata \| undefined`
+### Project Structure
 
-Extracts metadata from rule file content.
-
-```typescript
-const metadata = parseRuleMetadata(ruleContent);
-if (metadata?.globs) {
-  console.log('Rule applies to:', metadata.globs);
-}
+```
+opencode-rules/
+├── src/
+│   ├── index.ts          # Main plugin entry point
+│   ├── utils.ts          # File discovery and processing utilities
+│   └── index.test.ts     # Test suite
+├── docs/
+│   └── rules.md          # Detailed usage documentation
+├── openspec/             # Project specifications and proposals
+└── dist/                 # Compiled JavaScript output
 ```
 
-### `fileMatchesGlobs(filePath: string, globs: string[]): boolean`
+### Build and Test
 
-Checks if a file path matches any glob patterns.
+```bash
+# Install dependencies
+bun install
 
-```typescript
-const matches = fileMatchesGlobs('src/app.ts', ['src/**/*.ts', 'lib/**/*.js']);
+# Run tests in watch mode
+bun run test
+
+# Run tests once
+bun run test:run
+
+# Build the project
+bun run build
+
+# Watch for changes and rebuild
+bun run dev
+
+# Format code
+bun run format
+
+# Lint code
+bun run lint
 ```
 
-### `discoverRuleFiles(projectDir?: string): Promise<string[]>`
+### Tech Stack
 
-Discovers all rule files from global and optional project directories.
-
-```typescript
-const ruleFiles = await discoverRuleFiles('/path/to/project');
-```
-
-### `readAndFormatRules(files: string[], contextFilePath?: string): Promise<string>`
-
-Reads rule files and formats them for system prompt injection, optionally filtering by context file.
-
-```typescript
-const formatted = await readAndFormatRules(
-  ruleFiles,
-  'src/components/button.tsx'
-);
-```
+- **TypeScript** - Type-safe development
+- **@opencode-ai/plugin** - OpenCode plugin framework
+- **Vitest** - Fast unit testing
+- **Prettier** - Code formatting
+- **ESLint** - Linting and code quality
 
 ## How It Works
 
-1. **Discovery Phase**: The plugin scans `$XDG_CONFIG_HOME/opencode/rules/` and `.opencode/rules/` directories for `.md` and `.mdc` files
-2. **Parsing Phase**: For each discovered file, metadata (if present) is extracted from YAML front matter
-3. **Filtering Phase**: If a context file path is provided, rules are filtered based on glob patterns
-4. **Injection Phase**: Formatted rules are injected as a system prompt suffix to AI agents
+1. **Discovery**: Scan global and project directories for `.md` and `.mdc` files
+2. **Parsing**: Extract metadata from files with YAML front matter
+3. **Filtering**: Apply conditional rules based on file patterns
+4. **Injection**: Format and inject rules as system prompt suffix
 
-## Backward Compatibility
+## Performance
 
-- Existing `.md` rule files continue to work unchanged
-- Rules without metadata are always applied (default behavior)
-- The plugin gracefully handles missing directories and unreadable files
-
-## Performance Considerations
-
-- Rule discovery is performed once at plugin initialization
-- Metadata parsing uses simple regex (no external YAML parser required)
-- Glob matching is optimized through the `minimatch` library
-- Large rule files have minimal performance impact due to async file reading
+- Rule discovery performed once at plugin initialization
+- Async file operations to prevent blocking
+- Optimized glob matching with `minimatch`
+- Minimal memory footprint with efficient file reading
 
 ## Troubleshooting
 
-### Rules not appearing in prompts
+### Rules Not Appearing
 
-1. Check that rule files exist in the correct directories:
-   - Global: `~/.config/opencode/rules/` or `$XDG_CONFIG_HOME/opencode/rules/`
-   - Project: `.opencode/rules/`
+1. Verify directories exist: `~/.config/opencode/rules/` and/or `.opencode/rules/`
+2. Check file extensions are `.md` or `.mdc`
+3. Ensure files with metadata have properly formatted YAML
+4. Test glob patterns using the `fileMatchesGlobs()` function
 
-2. Verify file extensions are `.md` or `.mdc` (not `.txt`, `.markdown`, etc.)
+### Common Issues
 
-3. For `.mdc` files with metadata, ensure glob patterns match your file paths
-
-4. Check that metadata is properly formatted with `---` delimiters
-
-### Conditional rules not applying
-
-1. Verify glob patterns use correct minimatch syntax
-2. Test patterns using the `fileMatchesGlobs()` function
-3. Ensure file paths are relative to the project root
-4. Check that `globs` is a properly formatted YAML array
-
-## Testing
-
-The plugin includes comprehensive test coverage:
-
-```bash
-npm run test       # Run tests in watch mode
-npm run test:run   # Run tests once
-```
-
-Tests cover:
-
-- Metadata parsing from various formats
-- File discovery in global and project directories
-- Conditional rule filtering
-- Rule formatting and injection
-- Error handling and edge cases
+- **Missing directories**: Plugin gracefully handles missing directories
+- **Invalid YAML**: Metadata parsing errors are logged but don't crash the plugin
+- **Pattern mismatches**: Use relative paths from project root for glob patterns
 
 ## Contributing
 
-Contributions are welcome! Please ensure:
+We welcome contributions! Please:
 
-1. All tests pass: `npm run test:run`
-2. Code is formatted: `npm run format`
-3. No linting errors: `npm run lint`
-4. New features include tests
+1. Fork the repository
+2. Create a feature branch
+3. Add tests for new functionality
+4. Ensure all tests pass: `bun run test:run`
+5. Format code: `bun run format`
+6. Submit a pull request
 
-## License
+### Development Guidelines
 
-MIT
+- Follow existing code style (Prettier configuration)
+- Add comprehensive tests for new features
+- Update documentation for API changes
+- Use TypeScript for all new code
 
 ## See Also
 
 - [OpenCode Documentation](https://docs.opencode.ai/)
-- [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html)
-- [Minimatch Patterns](https://github.com/isaacs/minimatch)
