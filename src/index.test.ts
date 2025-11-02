@@ -30,10 +30,10 @@ describe('RuleEngine', () => {
       'Test Rule',
       'A test rule',
       'error',
-      (input) => ({
+      input => ({
         errors: input === 'invalid' ? ['Input is invalid'] : [],
         warnings: [],
-        info: []
+        info: [],
       })
     );
 
@@ -76,14 +76,14 @@ describe('combineResults', () => {
       valid: true,
       errors: [],
       warnings: ['warning 1'],
-      info: ['info 1']
+      info: ['info 1'],
     };
 
     const result2 = {
       valid: false,
       errors: ['error 1'],
       warnings: ['warning 2'],
-      info: ['info 2']
+      info: ['info 2'],
     };
 
     const combined = combineResults(result1, result2);
