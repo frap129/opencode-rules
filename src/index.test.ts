@@ -1,7 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import path from 'path';
 import { mkdirSync, writeFileSync, rmSync } from 'fs';
-import { discoverRuleFiles, readAndFormatRules } from './index.js';
+import {
+  discoverRuleFiles,
+  readAndFormatRules,
+  parseRuleMetadata,
+} from './index.js';
 
 // Create temporary test directories
 const testDir = '/tmp/opencode-rules-test';
@@ -22,6 +26,71 @@ function teardownTestDirs() {
     rmSync(testDir, { recursive: true, force: true });
   }
 }
+
+describe('parseRuleMetadata', () => {
+  it('should parse YAML metadata from .mdc files', () => {
+    // Arrange
+    const content = `---
+globs:
+  - "src/components/**/*.ts"
+---
+
+This is a rule for TypeScript components.`;
+
+    // Act
+    const metadata = parseRuleMetadata(content);
+
+    // Assert
+    expect(metadata).toBeDefined();
+    expect(metadata?.globs).toEqual(['src/components/**/*.ts']);
+  });
+
+  it('should return undefined for files without metadata', () => {
+    // Arrange
+    const content = 'This rule should always apply.';
+
+    // Act
+    const metadata = parseRuleMetadata(content);
+
+    // Assert
+    expect(metadata).toBeUndefined();
+  });
+
+  it('should extract rule content without metadata', () => {
+    // Arrange
+    const content = `---
+globs:
+  - "src/**/*.ts"
+---
+
+Rule content here`;
+
+    // Act
+    const metadata = parseRuleMetadata(content);
+    const ruleContent = content.replace(/^---[\s\S]*?---\n/, '');
+
+    // Assert
+    expect(metadata?.globs).toBeDefined();
+    expect(ruleContent).toBe('\nRule content here');
+  });
+
+  it('should handle multiple globs in metadata', () => {
+    // Arrange
+    const content = `---
+globs:
+  - "src/**/*.ts"
+  - "lib/**/*.js"
+---
+
+Rule content`;
+
+    // Act
+    const metadata = parseRuleMetadata(content);
+
+    // Assert
+    expect(metadata?.globs).toEqual(['src/**/*.ts', 'lib/**/*.js']);
+  });
+});
 
 describe('discoverRuleFiles', () => {
   beforeEach(() => {
@@ -98,9 +167,13 @@ describe('discoverRuleFiles', () => {
       }
     });
 
-    it('should only include .md files', async () => {
+    it('should include both .md and .mdc files', async () => {
       // Arrange
       writeFileSync(path.join(globalRulesDir, 'rule.md'), '# Rule');
+      writeFileSync(
+        path.join(globalRulesDir, 'rule.mdc'),
+        '# Rule with metadata'
+      );
       writeFileSync(path.join(globalRulesDir, 'rule.txt'), 'Not markdown');
       writeFileSync(path.join(globalRulesDir, 'rule.json'), '{}');
 
@@ -112,8 +185,9 @@ describe('discoverRuleFiles', () => {
         const files = await discoverRuleFiles();
 
         // Assert
-        expect(files).toHaveLength(1);
-        expect(files[0]).toMatch(/\.md$/);
+        expect(files).toHaveLength(2);
+        expect(files.some(f => f.endsWith('.md'))).toBe(true);
+        expect(files.some(f => f.endsWith('.mdc'))).toBe(true);
       } finally {
         process.env.XDG_CONFIG_HOME = originalEnv;
       }

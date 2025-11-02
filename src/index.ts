@@ -11,10 +11,65 @@ import os from 'os';
 import type { Plugin, PluginInput } from '@opencode-ai/plugin';
 
 /**
+ * Metadata extracted from .mdc file frontmatter
+ */
+export interface RuleMetadata {
+  globs?: string[];
+}
+
+/**
+ * Parse YAML metadata from rule file content
+ * Extracts frontmatter (---) and returns metadata object
+ */
+export function parseRuleMetadata(content: string): RuleMetadata | undefined {
+  // Check if content starts with frontmatter
+  if (!content.startsWith('---')) {
+    return undefined;
+  }
+
+  // Find the closing --- marker
+  const endIndex = content.indexOf('---', 3);
+  if (endIndex === -1) {
+    return undefined;
+  }
+
+  // Extract the YAML frontmatter
+  const frontmatter = content.substring(3, endIndex).trim();
+
+  // Parse globs from YAML
+  const metadata: RuleMetadata = {};
+  const globsMatch = frontmatter.match(/globs:\s*\n([\s\S]*?)(?=\n[a-z]|\n*$)/);
+
+  if (globsMatch) {
+    // Extract array items (lines starting with "- ")
+    const globs: string[] = [];
+    const globLines = globsMatch[1].split('\n');
+    for (const line of globLines) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('- ')) {
+        const glob = trimmed
+          .substring(2)
+          .replace(/^["']|["']$/g, '')
+          .trim();
+        if (glob) {
+          globs.push(glob);
+        }
+      }
+    }
+    if (globs.length > 0) {
+      metadata.globs = globs;
+    }
+  }
+
+  // Return metadata only if it has content
+  return Object.keys(metadata).length > 0 ? metadata : undefined;
+}
+
+/**
  * Discover markdown rule files from standard directories
  * Searches in:
- * - $XDG_CONFIG_HOME/opencode/rules/*.md (or ~/.config/opencode/rules as fallback)
- * - .opencode/rules/*.md (in project directory if provided)
+ * - $XDG_CONFIG_HOME/opencode/rules/*.{md,mdc} (or ~/.config/opencode/rules as fallback)
+ * - .opencode/rules/*.{md,mdc} (in project directory if provided)
  */
 export async function discoverRuleFiles(
   projectDir?: string
@@ -28,7 +83,10 @@ export async function discoverRuleFiles(
       const entries = readdirSync(globalRulesDir);
       for (const entry of entries) {
         // Skip hidden files and non-markdown files
-        if (entry.startsWith('.') || !entry.endsWith('.md')) {
+        if (
+          entry.startsWith('.') ||
+          (!entry.endsWith('.md') && !entry.endsWith('.mdc'))
+        ) {
           continue;
         }
         files.push(path.join(globalRulesDir, entry));
@@ -46,7 +104,10 @@ export async function discoverRuleFiles(
         const entries = readdirSync(projectRulesDir);
         for (const entry of entries) {
           // Skip hidden files and non-markdown files
-          if (entry.startsWith('.') || !entry.endsWith('.md')) {
+          if (
+            entry.startsWith('.') ||
+            (!entry.endsWith('.md') && !entry.endsWith('.mdc'))
+          ) {
             continue;
           }
           files.push(path.join(projectRulesDir, entry));
