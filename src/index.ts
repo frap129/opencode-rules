@@ -8,7 +8,7 @@
 import { readdirSync, readFileSync, existsSync } from 'fs';
 import path from 'path';
 import os from 'os';
-import minimatch from 'minimatch';
+import { minimatch } from 'minimatch';
 import type { Plugin, PluginInput } from '@opencode-ai/plugin';
 
 /**
