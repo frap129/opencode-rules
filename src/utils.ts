@@ -106,7 +106,11 @@ export async function discoverRuleFiles(
         ) {
           continue;
         }
-        files.push(path.join(globalRulesDir, entry));
+        const filePath = path.join(globalRulesDir, entry);
+        console.debug(
+          `[opencode-rules] Discovered global rule: ${entry} (${filePath})`
+        );
+        files.push(filePath);
       }
     } catch (error) {
       // Silently ignore directory read errors
@@ -127,7 +131,11 @@ export async function discoverRuleFiles(
           ) {
             continue;
           }
-          files.push(path.join(projectRulesDir, entry));
+          const filePath = path.join(projectRulesDir, entry);
+          console.debug(
+            `[opencode-rules] Discovered project rule: ${entry} (${filePath})`
+          );
+          files.push(filePath);
         }
       } catch (error) {
         // Silently ignore directory read errors

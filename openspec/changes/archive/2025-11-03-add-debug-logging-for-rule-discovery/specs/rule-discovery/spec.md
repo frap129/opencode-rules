@@ -1,8 +1,5 @@
-# rule-discovery Specification
+## MODIFIED Requirements
 
-## Purpose
-TBD - created by archiving change cursor-style-rules. Update Purpose after archive.
-## Requirements
 ### Requirement: Rule File Formats
 
 The system MUST support rule definitions in both `.md` and `.mdc` file formats.
@@ -56,6 +53,8 @@ The system MUST support rule definitions in both `.md` and `.mdc` file formats.
 - When the system discovers rules
 - Then the rule `another-rule` should be loaded and applied unconditionally.
 
+## ADDED Requirements
+
 ### Requirement: Debug Logging for Rule Discovery
 
 The system SHALL provide debug logging capabilities to display discovered rule files during the discovery process.
@@ -87,4 +86,3 @@ The system SHALL provide debug logging capabilities to display discovered rule f
 - And no rule files exist in the searched directories
 - When the system discovers rules
 - Then the system SHALL NOT log any rule discovery messages
-
