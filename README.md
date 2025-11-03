@@ -24,8 +24,13 @@ OpenCode Rules automatically loads rule files from standard directories and inte
 
 ### Installation
 
-```bash
-bun install opencode-rules
+Add the plugin to your opoencode config:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["opencode-rules"]
+}
 ```
 
 ### Create Your First Rule
