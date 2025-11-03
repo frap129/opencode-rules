@@ -16,6 +16,7 @@ OpenCode Rules automatically loads rule files from standard directories and inte
 - **Dual-format support**: Load rules from both `.md` and `.mdc` files
 - **Conditional rules**: Apply rules based on file paths using glob patterns
 - **Global and project-level rules**: Define rules at both system and project scopes
+- **Session-aware**: Rules persist across messages and survive session compactions
 - **Zero-configuration**: Works out of the box with XDG Base Directory specification
 - **TypeScript-first**: Built with TypeScript for type safety and developer experience
 - **Performance optimized**: Efficient file discovery and minimal startup overhead
@@ -210,7 +211,45 @@ bun run lint
 1. **Discovery**: Scan global and project directories for `.md` and `.mdc` files
 2. **Parsing**: Extract metadata from files with YAML front matter
 3. **Filtering**: Apply conditional rules based on file patterns
-4. **Injection**: Format and inject rules as system prompt suffix
+4. **Silent Messaging**: Send rules as silent messages (no AI response) on session events
+5. **Session Tracking**: Track which sessions have received rules to avoid duplication
+6. **Compaction Handling**: Automatically re-send rules when sessions are compacted
+
+### Silent Message Pattern
+
+The plugin uses OpenCode's `noReply` message pattern to inject rules without triggering AI responses:
+
+```typescript
+await client.session.prompt({
+  path: { id: sessionID },
+  body: {
+    noReply: true, // Silent message - no AI response
+    parts: [{ type: 'text', text: rules }],
+  },
+});
+```
+
+This ensures rules are added to the conversation context cleanly and efficiently.
+
+## Session Compaction Support
+
+When OpenCode compacts a session (summarizes conversation history to save context), the rules are automatically re-sent to ensure they remain in the AI's context.
+
+### How It Works
+
+1. Rules are sent as silent messages when a new session is created
+2. The plugin tracks which sessions have received rules
+3. When a session is compacted, rules are immediately re-sent
+4. This ensures rules survive context compression
+
+### Event-Driven Architecture
+
+The plugin listens for two key events:
+
+- **`session.created`**: Sends rules when a new session starts
+- **`session.compacted`**: Re-sends rules after history compression
+
+This behavior is transparent and requires no configuration - your rules will always be available to the AI agent, even in long conversations.
 
 ## Performance
 
@@ -218,6 +257,7 @@ bun run lint
 - Async file operations to prevent blocking
 - Optimized glob matching with `minimatch`
 - Minimal memory footprint with efficient file reading
+- Session tracking uses memory-efficient Set data structure
 
 ## Troubleshooting
 
