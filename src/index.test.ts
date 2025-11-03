@@ -234,9 +234,17 @@ describe('discoverRuleFiles', () => {
       const projectDir = path.join(testDir, 'empty-project');
       mkdirSync(projectDir, { recursive: true });
 
-      // Act & Assert - should not throw
-      const files = await discoverRuleFiles(projectDir);
-      expect(files).toEqual([]);
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+      try {
+        // Act & Assert - should not throw
+        const files = await discoverRuleFiles(projectDir);
+        // Should return empty since we set XDG_CONFIG_HOME to test dir with no rules
+        expect(files).toEqual([]);
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+      }
     });
 
     it('should discover rules from both global and project directories', async () => {
@@ -535,10 +543,10 @@ describe('OpenCodeRulesPlugin', () => {
 
     // Assert
     expect(hooks).toBeDefined();
-    expect(typeof hooks['chat.params']).toBe('function');
+    expect(typeof hooks['chat.message']).toBe('function');
   });
 
-  it('should modify chat params with system prompt suffix when rules exist', async () => {
+  it('should prepend rules to first message text when rules exist', async () => {
     // Arrange
     const rulePath = path.join(globalRulesDir, 'rule.md');
     writeFileSync(rulePath, '# Test Rule\nDo this always');
@@ -560,26 +568,35 @@ describe('OpenCodeRulesPlugin', () => {
       // Act
       const hooks = await plugin(mockInput);
       const output = {
-        temperature: 0.7,
-        topP: 0.9,
-        options: {} as any,
+        message: {
+          id: 'msg_123',
+          sessionID: 'ses_456',
+        },
+        parts: [
+          {
+            id: 'prt_789',
+            type: 'text',
+            text: 'hello',
+          },
+        ],
       };
 
-      await hooks['chat.params']!(
-        { model: {}, provider: {}, message: {} } as any,
-        output as any
-      );
+      await hooks['chat.message']!({} as any, output as any);
 
       // Assert
-      expect(output.options.systemPromptSuffix).toBeDefined();
-      expect(output.options.systemPromptSuffix).toContain('OpenCode Rules');
-      expect(output.options.systemPromptSuffix).toContain('Test Rule');
+      expect(output.parts[0].text).toContain('OpenCode Rules');
+      expect(output.parts[0].text).toContain('Test Rule');
+      expect(output.parts[0].text).toContain('hello');
+      // Verify rules come before the original message
+      const rulesIndex = output.parts[0].text.indexOf('OpenCode Rules');
+      const helloIndex = output.parts[0].text.indexOf('hello');
+      expect(rulesIndex).toBeLessThan(helloIndex);
     } finally {
       process.env.XDG_CONFIG_HOME = originalEnv;
     }
   });
 
-  it('should not set system prompt suffix when no rules exist', async () => {
+  it('should not modify message text when no rules exist', async () => {
     // Arrange
     // Ensure no rules exist
     const originalEnv = process.env.XDG_CONFIG_HOME;
@@ -598,18 +615,23 @@ describe('OpenCodeRulesPlugin', () => {
       // Act
       const hooks = await plugin(mockInput);
       const output = {
-        temperature: 0.7,
-        topP: 0.9,
-        options: {} as any,
+        message: {
+          id: 'msg_123',
+          sessionID: 'ses_456',
+        },
+        parts: [
+          {
+            id: 'prt_789',
+            type: 'text',
+            text: 'hello',
+          },
+        ],
       };
 
-      await hooks['chat.params']!(
-        { model: {}, provider: {}, message: {} } as any,
-        output as any
-      );
+      await hooks['chat.message']!({} as any, output as any);
 
       // Assert
-      expect(output.options.systemPromptSuffix).toBeUndefined();
+      expect(output.parts[0].text).toBe('hello');
     } finally {
       process.env.XDG_CONFIG_HOME = originalEnv;
     }
@@ -634,18 +656,158 @@ describe('OpenCodeRulesPlugin', () => {
 
     // Act
     const hooks = await plugin(mockInput);
+    const input = {
+      messages: [], // Empty messages array = first message
+    };
     const output = {
-      temperature: 0.7,
-      topP: 0.9,
-      options: {} as any,
+      message: {
+        id: 'msg_123',
+        sessionID: 'ses_456',
+      },
+      parts: [
+        {
+          id: 'prt_789',
+          type: 'text',
+          text: 'hello',
+        },
+      ],
     };
 
-    await hooks['chat.params']!(
-      { model: {}, provider: {}, message: {} } as any,
-      output as any
-    );
+    await hooks['chat.message']!(input as any, output as any);
 
     // Assert
-    expect(output.options.systemPromptSuffix).toContain('project-rule.md');
+    expect(output.parts[0].text).toContain('project-rule.md');
+  });
+
+  it('should not add rules to subsequent messages', async () => {
+    // Arrange
+    const rulePath = path.join(globalRulesDir, 'rule.md');
+    writeFileSync(rulePath, '# Test Rule\nDo this always');
+
+    const { default: plugin } = await import('./index.js');
+    const mockInput = {
+      client: {} as any,
+      project: {} as any,
+      directory: testDir,
+      worktree: testDir,
+      $: {} as any,
+    };
+
+    const originalEnv = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    try {
+      // Act
+      const hooks = await plugin(mockInput);
+
+      // First message - should get rules
+      const firstOutput = {
+        message: {
+          id: 'msg_first',
+          sessionID: 'ses_456',
+        },
+        parts: [
+          {
+            id: 'prt_first',
+            type: 'text',
+            text: 'hello',
+          },
+        ],
+      };
+
+      await hooks['chat.message']!({} as any, firstOutput as any);
+
+      // Verify first message got rules
+      expect(firstOutput.parts[0].text).toContain('OpenCode Rules');
+
+      // Second message - should NOT get rules
+      const secondOutput = {
+        message: {
+          id: 'msg_second',
+          sessionID: 'ses_456', // Same session
+        },
+        parts: [
+          {
+            id: 'prt_789',
+            type: 'text',
+            text: 'second message',
+          },
+        ],
+      };
+
+      await hooks['chat.message']!({} as any, secondOutput as any);
+
+      // Assert - second message should not have rules
+      expect(secondOutput.parts[0].text).toBe('second message');
+      expect(secondOutput.parts[0].text).not.toContain('OpenCode Rules');
+    } finally {
+      process.env.XDG_CONFIG_HOME = originalEnv;
+    }
+  });
+
+  it('should add rules to new session after previous session', async () => {
+    // Arrange
+    const rulePath = path.join(globalRulesDir, 'rule.md');
+    writeFileSync(rulePath, '# Test Rule\nDo this always');
+
+    const { default: plugin } = await import('./index.js');
+    const mockInput = {
+      client: {} as any,
+      project: {} as any,
+      directory: testDir,
+      worktree: testDir,
+      $: {} as any,
+    };
+
+    const originalEnv = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    try {
+      // Act
+      const hooks = await plugin(mockInput);
+
+      // First session, first message
+      const firstSessionOutput = {
+        message: {
+          id: 'msg_123',
+          sessionID: 'ses_first',
+        },
+        parts: [
+          {
+            id: 'prt_789',
+            type: 'text',
+            text: 'hello',
+          },
+        ],
+      };
+
+      await hooks['chat.message']!({} as any, firstSessionOutput as any);
+
+      // Assert - first session got rules
+      expect(firstSessionOutput.parts[0].text).toContain('OpenCode Rules');
+
+      // Second session, first message
+      const secondSessionOutput = {
+        message: {
+          id: 'msg_456',
+          sessionID: 'ses_second',
+        },
+        parts: [
+          {
+            id: 'prt_def',
+            type: 'text',
+            text: 'another hello',
+          },
+        ],
+      };
+
+      await hooks['chat.message']!({} as any, secondSessionOutput as any);
+
+      // Assert - second session also got rules
+      expect(secondSessionOutput.parts[0].text).toContain('OpenCode Rules');
+      expect(secondSessionOutput.parts[0].text).toContain('Test Rule');
+    } finally {
+      process.env.XDG_CONFIG_HOME = originalEnv;
+    }
   });
 });
