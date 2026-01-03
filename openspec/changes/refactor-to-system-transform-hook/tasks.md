@@ -31,7 +31,7 @@
   - Remove compaction handling tests
   - Add system transform hook tests
 
-- [ ] 2.3 Add integration test for conditional rules
+- [x] 2.3 Add integration test for conditional rules
   - Verify .mdc rules filter correctly based on message context
 
 ## 3. Documentation
