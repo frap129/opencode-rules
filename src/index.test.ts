@@ -1335,4 +1335,288 @@ describe('OpenCodeRulesPlugin', () => {
       process.env.XDG_CONFIG_HOME = originalEnv;
     }
   });
+
+  describe('conditional rules integration', () => {
+    it('should include conditional rule when message context matches glob', async () => {
+      // Arrange
+      writeFileSync(
+        path.join(globalRulesDir, 'typescript.mdc'),
+        `---
+globs:
+  - "src/components/**/*.tsx"
+---
+
+Use React best practices for components.`
+      );
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+      const { default: plugin } = await import('./index.js');
+      const mockInput = {
+        client: {} as any,
+        project: {} as any,
+        directory: testDir,
+        worktree: testDir,
+        $: {} as any,
+      };
+
+      try {
+        // Act
+        const hooks = await plugin(mockInput);
+
+        // Create a shared output object for both transforms
+        const sharedOutput = { system: 'Base prompt.' };
+
+        // First, process messages with a matching file reference
+        const messagesTransform = hooks[
+          'experimental.chat.messages.transform'
+        ] as any;
+        await messagesTransform({
+          output: {
+            messages: [
+              {
+                role: 'assistant',
+                parts: [
+                  {
+                    type: 'tool-invocation',
+                    toolInvocation: {
+                      toolName: 'read',
+                      args: { filePath: 'src/components/Button.tsx' },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        });
+
+        // Then, get the system prompt using the same output object
+        const systemTransform = hooks[
+          'experimental.chat.system.transform'
+        ] as any;
+        const result = await systemTransform({
+          output: sharedOutput,
+        });
+
+        // Assert - conditional rule should be included
+        expect(result.system).toContain('React best practices');
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+      }
+    });
+
+    it('should exclude conditional rule when message context does not match glob', async () => {
+      // Arrange
+      writeFileSync(
+        path.join(globalRulesDir, 'typescript.mdc'),
+        `---
+globs:
+  - "src/components/**/*.tsx"
+---
+
+Use React best practices for components.`
+      );
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+      const { default: plugin } = await import('./index.js');
+      const mockInput = {
+        client: {} as any,
+        project: {} as any,
+        directory: testDir,
+        worktree: testDir,
+        $: {} as any,
+      };
+
+      try {
+        // Act
+        const hooks = await plugin(mockInput);
+
+        // Reuse the same output object that will be shared
+        const sharedOutput: any = {
+          messages: [
+            {
+              role: 'assistant',
+              parts: [
+                {
+                  type: 'tool-invocation',
+                  toolInvocation: {
+                    toolName: 'read',
+                    args: { filePath: 'src/utils/helpers.ts' },
+                  },
+                },
+              ],
+            },
+          ],
+          system: 'Base prompt.',
+        };
+
+        // Process messages with NON-matching file reference
+        const messagesTransform = hooks[
+          'experimental.chat.messages.transform'
+        ] as any;
+        await messagesTransform({
+          output: sharedOutput,
+        });
+
+        // Get the system prompt using the SAME output object
+        const systemTransform = hooks[
+          'experimental.chat.system.transform'
+        ] as any;
+        const result = await systemTransform({
+          output: sharedOutput,
+        });
+
+        // Assert - conditional rule should NOT be included
+        expect(result.system).not.toContain('React best practices');
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+      }
+    });
+
+    it('should include unconditional rules regardless of context', async () => {
+      // Arrange
+      writeFileSync(
+        path.join(globalRulesDir, 'always.md'),
+        '# Always Apply\nThis rule always applies.'
+      );
+      writeFileSync(
+        path.join(globalRulesDir, 'conditional.mdc'),
+        `---
+globs:
+  - "src/special/**/*"
+---
+
+Special rule content.`
+      );
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+      const { default: plugin } = await import('./index.js');
+      const mockInput = {
+        client: {} as any,
+        project: {} as any,
+        directory: testDir,
+        worktree: testDir,
+        $: {} as any,
+      };
+
+      try {
+        // Act
+        const hooks = await plugin(mockInput);
+
+        // Reuse the same output object for both hooks
+        const sharedOutput: any = {
+          messages: [
+            {
+              role: 'user',
+              parts: [{ type: 'text', text: 'Check src/index.ts' }],
+            },
+          ],
+          system: '',
+        };
+
+        // Process with non-matching context
+        const messagesTransform = hooks[
+          'experimental.chat.messages.transform'
+        ] as any;
+        await messagesTransform({
+          output: sharedOutput,
+        });
+
+        const systemTransform = hooks[
+          'experimental.chat.system.transform'
+        ] as any;
+        const result = await systemTransform({
+          output: sharedOutput,
+        });
+
+        // Assert
+        expect(result.system).toContain('Always Apply');
+        expect(result.system).toContain('This rule always applies');
+        expect(result.system).not.toContain('Special rule content');
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+      }
+    });
+
+    it('should handle multiple matching files for conditional rules', async () => {
+      // Arrange
+      writeFileSync(
+        path.join(globalRulesDir, 'multi.mdc'),
+        `---
+globs:
+  - "**/*.test.ts"
+---
+
+Follow testing best practices.`
+      );
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+      const { default: plugin } = await import('./index.js');
+      const mockInput = {
+        client: {} as any,
+        project: {} as any,
+        directory: testDir,
+        worktree: testDir,
+        $: {} as any,
+      };
+
+      try {
+        // Act
+        const hooks = await plugin(mockInput);
+
+        // Reuse the same output object for both hooks
+        const sharedOutput: any = {
+          messages: [
+            {
+              role: 'assistant',
+              parts: [
+                {
+                  type: 'tool-invocation',
+                  toolInvocation: {
+                    toolName: 'read',
+                    args: { filePath: 'src/utils.ts' },
+                  },
+                },
+                {
+                  type: 'tool-invocation',
+                  toolInvocation: {
+                    toolName: 'read',
+                    args: { filePath: 'src/utils.test.ts' },
+                  },
+                },
+              ],
+            },
+          ],
+          system: '',
+        };
+
+        // Process with one matching and one non-matching file
+        const messagesTransform = hooks[
+          'experimental.chat.messages.transform'
+        ] as any;
+        await messagesTransform({
+          output: sharedOutput,
+        });
+
+        const systemTransform = hooks[
+          'experimental.chat.system.transform'
+        ] as any;
+        const result = await systemTransform({
+          output: sharedOutput,
+        });
+
+        // Assert - rule should be included because at least one file matches
+        expect(result.system).toContain('testing best practices');
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+      }
+    });
+  });
 });

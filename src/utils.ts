@@ -147,6 +147,25 @@ export async function discoverRuleFiles(
 }
 
 /**
+ * Strip YAML frontmatter from rule content
+ */
+function stripFrontmatter(content: string): string {
+  // Check if content starts with frontmatter
+  if (!content.startsWith('---')) {
+    return content;
+  }
+
+  // Find the closing --- marker
+  const endIndex = content.indexOf('---', 3);
+  if (endIndex === -1) {
+    return content;
+  }
+
+  // Return content after the closing marker, trimming leading newline
+  return content.substring(endIndex + 3).trimStart();
+}
+
+/**
  * Read and format rule files for system prompt injection
  * @param files - Array of rule file paths
  * @param contextFilePaths - Optional array of file paths from conversation context (used to filter conditional rules)
@@ -190,7 +209,9 @@ export async function readAndFormatRules(
         // If no context paths provided, include the rule (backward compatibility)
       }
 
-      ruleContents.push(`## ${filename}\n\n${content}`);
+      // Strip frontmatter before adding to output
+      const cleanContent = stripFrontmatter(content);
+      ruleContents.push(`## ${filename}\n\n${cleanContent}`);
     } catch (error) {
       // Log warning but continue with other files
       console.warn(`Warning: Failed to read rule file: ${file}`);
