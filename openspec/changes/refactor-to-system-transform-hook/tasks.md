@@ -15,7 +15,7 @@
   - Modify `readAndFormatRules()` to accept array of context file paths
   - Filter conditional rules (.mdc with globs) against all discovered paths
 
-- [ ] 1.4 Update debug logging
+- [x] 1.4 Update debug logging
   - Log discovered file paths during context gathering
   - Log which rules are being injected
 
