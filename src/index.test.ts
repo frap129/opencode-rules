@@ -149,7 +149,7 @@ describe('extractFilePathsFromMessages', () => {
     expect(paths).toContain('src/lib');
   });
 
-  it('should extract paths from grep include patterns', () => {
+  it('should only extract path argument from grep, not include patterns', () => {
     // Arrange
     const messages = [
       {
@@ -171,6 +171,8 @@ describe('extractFilePathsFromMessages', () => {
 
     // Assert
     expect(paths).toContain('src');
+    // Verify that include pattern '*.ts' is not extracted
+    expect(paths).not.toContain('*.ts');
   });
 
   it('should extract file paths from text content using regex', () => {
@@ -498,6 +500,126 @@ describe('extractFilePathsFromMessages', () => {
     expect(paths).toContain('src/config.json');
     expect(paths).toContain('lib/utils.js');
     expect(paths).toContain('docs/readme.md');
+  });
+
+  it('should trim trailing periods from extracted paths', () => {
+    // Arrange
+    const messages = [
+      {
+        role: 'user',
+        parts: [
+          {
+            type: 'text' as const,
+            text: 'Check src/index.ts. It has the implementation.',
+          },
+        ],
+      },
+    ];
+
+    // Act
+    const paths = extractFilePathsFromMessages(messages);
+
+    // Assert
+    expect(paths).toContain('src/index.ts');
+    expect(paths).not.toContain('src/index.ts.');
+  });
+
+  it('should trim trailing commas from extracted paths', () => {
+    // Arrange
+    const messages = [
+      {
+        role: 'user',
+        parts: [
+          {
+            type: 'text' as const,
+            text: 'Modified src/utils.ts, lib/helpers.js, and docs/guide.md',
+          },
+        ],
+      },
+    ];
+
+    // Act
+    const paths = extractFilePathsFromMessages(messages);
+
+    // Assert
+    expect(paths).toContain('src/utils.ts');
+    expect(paths).toContain('lib/helpers.js');
+    expect(paths).toContain('docs/guide.md');
+    expect(paths).not.toContain('src/utils.ts,');
+  });
+
+  it('should trim multiple trailing punctuation marks from extracted paths', () => {
+    // Arrange
+    const messages = [
+      {
+        role: 'user',
+        parts: [
+          {
+            type: 'text' as const,
+            text: 'Updated src/app.ts!!! src/config.json?? lib/utils.js:: docs/readme.md;',
+          },
+        ],
+      },
+    ];
+
+    // Act
+    const paths = extractFilePathsFromMessages(messages);
+
+    // Assert
+    expect(paths).toContain('src/app.ts');
+    expect(paths).toContain('src/config.json');
+    expect(paths).toContain('lib/utils.js');
+    expect(paths).toContain('docs/readme.md');
+  });
+
+  it('should handle glob patterns without slashes', () => {
+    // Arrange
+    const messages = [
+      {
+        role: 'user',
+        parts: [
+          {
+            type: 'tool-invocation' as const,
+            toolInvocation: {
+              toolName: 'glob',
+              args: { pattern: 'test*' },
+            },
+          },
+        ],
+      },
+    ];
+
+    // Act
+    const paths = extractFilePathsFromMessages(messages);
+
+    // Assert
+    // When pattern has glob characters but no slashes, should not extract file prefix
+    expect(paths).toEqual([]);
+  });
+
+  it('should extract directory from glob patterns without glob in directory part', () => {
+    // Arrange
+    const messages = [
+      {
+        role: 'user',
+        parts: [
+          {
+            type: 'tool-invocation' as const,
+            toolInvocation: {
+              toolName: 'glob',
+              args: { pattern: 'src/test*' },
+            },
+          },
+        ],
+      },
+    ];
+
+    // Act
+    const paths = extractFilePathsFromMessages(messages);
+
+    // Assert
+    // Pattern has slashes before glob, so should extract the directory
+    expect(paths).toContain('src');
   });
 });
 

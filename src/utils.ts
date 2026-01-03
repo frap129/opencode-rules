@@ -262,7 +262,7 @@ function extractPathsFromToolCall(
     edit: ['filePath'],
     write: ['filePath'],
     glob: ['pattern', 'path'],
-    grep: ['path', 'include'],
+    grep: ['path'],
   };
 
   const argNames = pathArgTools[toolName];
@@ -303,7 +303,11 @@ function extractDirFromGlob(pattern: string): string | null {
   const beforeGlob = pattern.substring(0, firstGlobIndex);
   const lastSlash = beforeGlob.lastIndexOf('/');
 
-  if (lastSlash === -1) return beforeGlob;
+  if (lastSlash === -1) {
+    // If no slash and pattern has glob characters, it's just a file prefix, not a directory
+    if (firstGlobIndex < pattern.length) return null;
+    return beforeGlob;
+  }
   return beforeGlob.substring(0, lastSlash);
 }
 
@@ -320,7 +324,10 @@ function extractPathsFromText(text: string, paths: Set<string>): void {
 
   let match;
   while ((match = pathRegex.exec(text)) !== null) {
-    const potentialPath = match[1];
+    let potentialPath = match[1];
+
+    // Trim trailing punctuation that likely belongs to prose, not the path
+    potentialPath = potentialPath.replace(/[.,!?:;]+$/, '');
 
     // Filter out URLs and other non-paths
     if (
