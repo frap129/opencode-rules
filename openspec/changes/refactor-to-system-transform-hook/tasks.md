@@ -1,6 +1,6 @@
 ## 1. Implementation
 
-- [ ] 1.1 Add `extractFilePathsFromMessages()` utility to `utils.ts`
+- [x] 1.1 Add `extractFilePathsFromMessages()` utility to `utils.ts`
   - Parse tool call arguments (read, edit, glob, grep results)
   - Regex scan message content for path-like strings
   - Return deduplicated array of file paths
@@ -21,7 +21,7 @@
 
 ## 2. Testing
 
-- [ ] 2.1 Add unit tests for `extractFilePathsFromMessages()`
+- [x] 2.1 Add unit tests for `extractFilePathsFromMessages()`
   - Test tool call argument parsing
   - Test regex path extraction from message content
   - Test deduplication
