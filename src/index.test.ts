@@ -1366,29 +1366,30 @@ Use React best practices for components.`
         const hooks = await plugin(mockInput);
 
         // Create a shared output object for both transforms
-        const sharedOutput = { system: 'Base prompt.' };
+        const sharedOutput: any = {
+          messages: [
+            {
+              role: 'assistant',
+              parts: [
+                {
+                  type: 'tool-invocation',
+                  toolInvocation: {
+                    toolName: 'read',
+                    args: { filePath: 'src/components/Button.tsx' },
+                  },
+                },
+              ],
+            },
+          ],
+          system: 'Base prompt.',
+        };
 
         // First, process messages with a matching file reference
         const messagesTransform = hooks[
           'experimental.chat.messages.transform'
         ] as any;
         await messagesTransform({
-          output: {
-            messages: [
-              {
-                role: 'assistant',
-                parts: [
-                  {
-                    type: 'tool-invocation',
-                    toolInvocation: {
-                      toolName: 'read',
-                      args: { filePath: 'src/components/Button.tsx' },
-                    },
-                  },
-                ],
-              },
-            ],
-          },
+          output: sharedOutput,
         });
 
         // Then, get the system prompt using the same output object
