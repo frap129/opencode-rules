@@ -955,7 +955,7 @@ describe('readAndFormatRules', () => {
     // Act
     const formatted = await readAndFormatRules(
       [rulePath],
-      'src/utils/helpers.js'
+      ['src/utils/helpers.js']
     );
 
     // Assert - rule should be included even though file doesn't match any pattern
@@ -977,7 +977,7 @@ This is a rule for TypeScript components.`;
     // Act - testing with a matching file path
     const formatted = await readAndFormatRules(
       [rulePath],
-      'src/components/button.ts'
+      ['src/components/button.ts']
     );
 
     // Assert
@@ -999,7 +999,7 @@ This is a rule for TypeScript components.`;
     // Act - testing with a non-matching file path
     const formatted = await readAndFormatRules(
       [rulePath],
-      'src/utils/helpers.js'
+      ['src/utils/helpers.js']
     );
 
     // Assert - should return empty because rule doesn't apply
@@ -1021,7 +1021,7 @@ Multi-pattern rule`;
     // Act - test with file matching second pattern
     const formatted = await readAndFormatRules(
       [rulePath],
-      'lib/utils/helper.js'
+      ['lib/utils/helper.js']
     );
 
     // Assert
@@ -1048,7 +1048,7 @@ Only for TypeScript`
     // Act - test with matching TypeScript file
     const formatted = await readAndFormatRules(
       [unconditionalPath, conditionalPath],
-      'src/app.ts'
+      ['src/app.ts']
     );
 
     // Assert - both should be included
@@ -1077,7 +1077,7 @@ Only for TypeScript`
     // Act - test with non-matching file
     const formatted = await readAndFormatRules(
       [unconditionalPath, conditionalPath],
-      'docs/readme.md'
+      ['docs/readme.md']
     );
 
     // Assert - only unconditional rule should be included
@@ -1123,106 +1123,17 @@ describe('OpenCodeRulesPlugin', () => {
     expect(typeof plugin).toBe('function');
   });
 
-  it('should return hooks object from plugin', async () => {
+  it('should return transform hooks even when no rules exist', async () => {
     // Arrange
+    const originalEnv = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = path.join(testDir, 'empty-config');
+    mkdirSync(path.join(testDir, 'empty-config', 'opencode', 'rules'), {
+      recursive: true,
+    });
+
     const { default: plugin } = await import('./index.js');
     const mockInput = {
       client: {} as any,
-      project: {} as any,
-      directory: testDir,
-      worktree: testDir,
-      $: {} as any,
-    };
-
-    // Act
-    const hooks = await plugin(mockInput);
-
-    // Assert
-    expect(hooks).toBeDefined();
-    expect(typeof hooks.event).toBe('function');
-  });
-
-  it('should send silent message with rules on session.created event', async () => {
-    // Arrange
-    const rulePath = path.join(globalRulesDir, 'rule.md');
-    writeFileSync(rulePath, '# Test Rule\nDo this always');
-
-    const mockPrompt = vi.fn().mockResolvedValue({});
-    const { default: plugin } = await import('./index.js');
-    const mockInput = {
-      client: {
-        session: {
-          prompt: mockPrompt,
-        },
-      } as any,
-      project: {} as any,
-      directory: testDir,
-      worktree: testDir,
-      $: {} as any,
-    };
-
-    // Mock XDG_CONFIG_HOME to find our test rule
-    const originalEnv = process.env.XDG_CONFIG_HOME;
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
-    try {
-      // Act
-      const hooks = await plugin(mockInput);
-      await hooks.event!({
-        event: {
-          type: 'session.created',
-          properties: {
-            info: {
-              id: 'ses_456',
-            },
-          },
-        } as any,
-      });
-
-      // Assert
-      expect(mockPrompt).toHaveBeenCalledWith({
-        path: { id: 'ses_456' },
-        body: {
-          noReply: true,
-          parts: [
-            {
-              type: 'text',
-              text: expect.stringContaining('OpenCode Rules'),
-            },
-          ],
-        },
-      });
-      expect(mockPrompt).toHaveBeenCalledWith({
-        path: { id: 'ses_456' },
-        body: {
-          noReply: true,
-          parts: [
-            {
-              type: 'text',
-              text: expect.stringContaining('Test Rule'),
-            },
-          ],
-        },
-      });
-    } finally {
-      process.env.XDG_CONFIG_HOME = originalEnv;
-    }
-  });
-
-  it('should not send message when no rules exist', async () => {
-    // Arrange
-    // Ensure no rules exist
-    const originalEnv = process.env.XDG_CONFIG_HOME;
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
-    const mockPrompt = vi.fn().mockResolvedValue({});
-    const { default: plugin } = await import('./index.js');
-    const mockInput = {
-      client: {
-        session: {
-          prompt: mockPrompt,
-        },
-      } as any,
       project: {} as any,
       directory: path.join(testDir, 'empty-project'),
       worktree: testDir,
@@ -1232,314 +1143,194 @@ describe('OpenCodeRulesPlugin', () => {
     try {
       // Act
       const hooks = await plugin(mockInput);
-      await hooks.event!({
-        event: {
-          type: 'session.created',
-          properties: {
-            info: {
-              id: 'ses_456',
-            },
-          },
-        } as any,
-      });
 
-      // Assert - no message should be sent
-      expect(mockPrompt).not.toHaveBeenCalled();
+      // Assert - hooks are returned even when no rules exist
+      // They handle the empty case gracefully
+      expect(hooks).toHaveProperty('experimental.chat.messages.transform');
+      expect(hooks).toHaveProperty('experimental.chat.system.transform');
+      expect(typeof hooks['experimental.chat.messages.transform']).toBe(
+        'function'
+      );
+      expect(typeof hooks['experimental.chat.system.transform']).toBe(
+        'function'
+      );
     } finally {
       process.env.XDG_CONFIG_HOME = originalEnv;
     }
   });
 
-  it('should discover and send rules from project directory', async () => {
+  it('should return transform hooks when rules exist', async () => {
     // Arrange
-    const projectDir = path.join(testDir, 'myproject');
-    mkdirSync(projectDir, { recursive: true });
-    const projRulesDir = path.join(projectDir, '.opencode', 'rules');
-    mkdirSync(projRulesDir, { recursive: true });
-    writeFileSync(path.join(projRulesDir, 'project-rule.md'), '# Project Rule');
+    writeFileSync(path.join(globalRulesDir, 'rule.md'), '# Test Rule');
 
-    const mockPrompt = vi.fn().mockResolvedValue({});
+    const originalEnv = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
     const { default: plugin } = await import('./index.js');
     const mockInput = {
-      client: {
-        session: {
-          prompt: mockPrompt,
-        },
-      } as any,
-      project: {} as any,
-      directory: projectDir,
-      worktree: testDir,
-      $: {} as any,
-    };
-
-    // Act
-    const hooks = await plugin(mockInput);
-    await hooks.event!({
-      event: {
-        type: 'session.created',
-        properties: {
-          info: {
-            id: 'ses_456',
-          },
-        },
-      } as any,
-    });
-
-    // Assert
-    expect(mockPrompt).toHaveBeenCalledWith({
-      path: { id: 'ses_456' },
-      body: {
-        noReply: true,
-        parts: [
-          {
-            type: 'text',
-            text: expect.stringContaining('project-rule.md'),
-          },
-        ],
-      },
-    });
-  });
-
-  it('should not send rules twice to the same session', async () => {
-    // Arrange
-    const rulePath = path.join(globalRulesDir, 'rule.md');
-    writeFileSync(rulePath, '# Test Rule\nDo this always');
-
-    const mockPrompt = vi.fn().mockResolvedValue({});
-    const { default: plugin } = await import('./index.js');
-    const mockInput = {
-      client: {
-        session: {
-          prompt: mockPrompt,
-        },
-      } as any,
+      client: {} as any,
       project: {} as any,
       directory: testDir,
       worktree: testDir,
       $: {} as any,
     };
 
-    const originalEnv = process.env.XDG_CONFIG_HOME;
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
     try {
       // Act
       const hooks = await plugin(mockInput);
 
-      // First session.created event
-      await hooks.event!({
-        event: {
-          type: 'session.created',
-          properties: {
-            info: {
-              id: 'ses_456',
-            },
-          },
-        } as any,
-      });
-
-      // Second session.created event for same session (shouldn't happen normally)
-      await hooks.event!({
-        event: {
-          type: 'session.created',
-          properties: {
-            info: {
-              id: 'ses_456',
-            },
-          },
-        } as any,
-      });
-
-      // Assert - should only be called once
-      expect(mockPrompt).toHaveBeenCalledTimes(1);
+      // Assert
+      expect(hooks).toHaveProperty('experimental.chat.messages.transform');
+      expect(hooks).toHaveProperty('experimental.chat.system.transform');
+      expect(typeof hooks['experimental.chat.messages.transform']).toBe(
+        'function'
+      );
+      expect(typeof hooks['experimental.chat.system.transform']).toBe(
+        'function'
+      );
     } finally {
       process.env.XDG_CONFIG_HOME = originalEnv;
     }
   });
 
-  it('should send rules to multiple different sessions', async () => {
+  it('should inject rules into system prompt via system.transform hook', async () => {
     // Arrange
-    const rulePath = path.join(globalRulesDir, 'rule.md');
-    writeFileSync(rulePath, '# Test Rule\nDo this always');
+    writeFileSync(
+      path.join(globalRulesDir, 'rule.md'),
+      '# Test Rule\nDo this always'
+    );
 
-    const mockPrompt = vi.fn().mockResolvedValue({});
+    const originalEnv = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
     const { default: plugin } = await import('./index.js');
     const mockInput = {
-      client: {
-        session: {
-          prompt: mockPrompt,
-        },
-      } as any,
+      client: {} as any,
       project: {} as any,
       directory: testDir,
       worktree: testDir,
       $: {} as any,
     };
 
-    const originalEnv = process.env.XDG_CONFIG_HOME;
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
     try {
       // Act
       const hooks = await plugin(mockInput);
-
-      // First session created
-      await hooks.event!({
-        event: {
-          type: 'session.created',
-          properties: {
-            info: {
-              id: 'ses_first',
-            },
-          },
-        } as any,
+      const systemTransform = hooks[
+        'experimental.chat.system.transform'
+      ] as any;
+      const result = await systemTransform({
+        output: { system: 'You are a helpful assistant.' },
       });
 
-      // Second session created
-      await hooks.event!({
-        event: {
-          type: 'session.created',
-          properties: {
-            info: {
-              id: 'ses_second',
-            },
-          },
-        } as any,
-      });
-
-      // Assert - both sessions should receive rules
-      expect(mockPrompt).toHaveBeenCalledTimes(2);
-      expect(mockPrompt).toHaveBeenCalledWith({
-        path: { id: 'ses_first' },
-        body: expect.objectContaining({ noReply: true }),
-      });
-      expect(mockPrompt).toHaveBeenCalledWith({
-        path: { id: 'ses_second' },
-        body: expect.objectContaining({ noReply: true }),
-      });
+      // Assert
+      expect(result.system).toContain('You are a helpful assistant.');
+      expect(result.system).toContain('OpenCode Rules');
+      expect(result.system).toContain('Test Rule');
     } finally {
       process.env.XDG_CONFIG_HOME = originalEnv;
     }
   });
 
-  it('should re-send rules after session compaction', async () => {
+  it('should append rules to existing system prompt', async () => {
     // Arrange
-    const rulePath = path.join(globalRulesDir, 'rule.md');
-    writeFileSync(rulePath, '# Test Rule\nDo this always');
+    writeFileSync(path.join(globalRulesDir, 'rule.md'), '# My Rule');
 
-    const mockPrompt = vi.fn().mockResolvedValue({});
+    const originalEnv = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
     const { default: plugin } = await import('./index.js');
     const mockInput = {
-      client: {
-        session: {
-          prompt: mockPrompt,
-        },
-      } as any,
+      client: {} as any,
       project: {} as any,
       directory: testDir,
       worktree: testDir,
       $: {} as any,
     };
 
-    const originalEnv = process.env.XDG_CONFIG_HOME;
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
     try {
       // Act
       const hooks = await plugin(mockInput);
-
-      // Session created - rules sent
-      await hooks.event!({
-        event: {
-          type: 'session.created',
-          properties: {
-            info: {
-              id: 'ses_compact_test',
-            },
-          },
-        } as any,
+      const systemTransform = hooks[
+        'experimental.chat.system.transform'
+      ] as any;
+      const result = await systemTransform({
+        output: { system: 'Original system prompt.' },
       });
 
-      expect(mockPrompt).toHaveBeenCalledTimes(1);
-
-      // Session compacted - rules should be re-sent
-      await hooks.event!({
-        event: {
-          type: 'session.compacted',
-          properties: {
-            sessionID: 'ses_compact_test',
-          },
-        } as any,
-      });
-
-      // Assert - rules should be sent twice (creation + compaction)
-      expect(mockPrompt).toHaveBeenCalledTimes(2);
-      expect(mockPrompt).toHaveBeenNthCalledWith(2, {
-        path: { id: 'ses_compact_test' },
-        body: {
-          noReply: true,
-          parts: [
-            {
-              type: 'text',
-              text: expect.stringContaining('OpenCode Rules'),
-            },
-          ],
-        },
-      });
+      // Assert - original comes first, rules appended
+      expect(result.system).toMatch(/^Original system prompt\./);
+      expect(result.system).toContain('My Rule');
     } finally {
       process.env.XDG_CONFIG_HOME = originalEnv;
     }
   });
 
-  it('should handle compaction event for unknown session gracefully', async () => {
+  it('should handle empty system prompt', async () => {
     // Arrange
-    const rulePath = path.join(globalRulesDir, 'rule.md');
-    writeFileSync(rulePath, '# Test Rule\nDo this always');
+    writeFileSync(path.join(globalRulesDir, 'rule.md'), '# Rule Content');
 
-    const mockPrompt = vi.fn().mockResolvedValue({});
+    const originalEnv = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
     const { default: plugin } = await import('./index.js');
     const mockInput = {
-      client: {
-        session: {
-          prompt: mockPrompt,
-        },
-      } as any,
+      client: {} as any,
       project: {} as any,
       directory: testDir,
       worktree: testDir,
       $: {} as any,
     };
 
+    try {
+      // Act
+      const hooks = await plugin(mockInput);
+      const systemTransform = hooks[
+        'experimental.chat.system.transform'
+      ] as any;
+      const result = await systemTransform({
+        output: { system: '' },
+      });
+
+      // Assert
+      expect(result.system).toContain('OpenCode Rules');
+      expect(result.system).toContain('Rule Content');
+    } finally {
+      process.env.XDG_CONFIG_HOME = originalEnv;
+    }
+  });
+
+  it('should not modify messages in messages.transform hook', async () => {
+    // Arrange
+    writeFileSync(path.join(globalRulesDir, 'rule.md'), '# Rule');
+
     const originalEnv = process.env.XDG_CONFIG_HOME;
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const { default: plugin } = await import('./index.js');
+    const mockInput = {
+      client: {} as any,
+      project: {} as any,
+      directory: testDir,
+      worktree: testDir,
+      $: {} as any,
+    };
+
+    const originalMessages = [
+      { role: 'user', parts: [{ type: 'text', text: 'Hello' }] },
+    ];
 
     try {
       // Act
       const hooks = await plugin(mockInput);
-
-      // Compaction event for a session that was never created
-      await hooks.event!({
-        event: {
-          type: 'session.compacted',
-          properties: {
-            sessionID: 'unknown_session',
-          },
-        } as any,
+      const messagesTransform = hooks[
+        'experimental.chat.messages.transform'
+      ] as any;
+      const result = await messagesTransform({
+        output: { messages: originalMessages },
       });
 
-      // Assert - should still send rules (compaction implies session exists)
-      expect(mockPrompt).toHaveBeenCalledWith({
-        path: { id: 'unknown_session' },
-        body: {
-          noReply: true,
-          parts: [
-            {
-              type: 'text',
-              text: expect.stringContaining('OpenCode Rules'),
-            },
-          ],
-        },
-      });
+      // Assert - messages unchanged
+      expect(result.messages).toEqual(originalMessages);
     } finally {
       process.env.XDG_CONFIG_HOME = originalEnv;
     }
