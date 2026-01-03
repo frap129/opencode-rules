@@ -36,6 +36,6 @@
 
 ## 3. Documentation
 
-- [ ] 3.1 Update README with architecture notes
+- [x] 3.1 Update README with architecture notes
   - Document the two-hook approach
   - Note experimental API dependency
