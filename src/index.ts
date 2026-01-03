@@ -2,79 +2,85 @@
  * OpenCode Rules Plugin
  *
  * This plugin discovers markdown rule files from standard directories
- * and injects them via silent messages when sessions are created or compacted.
+ * and injects them into the system prompt via transform hooks.
  */
 
 import type { Plugin, PluginInput } from '@opencode-ai/plugin';
-import { discoverRuleFiles, readAndFormatRules } from './utils.js';
+import {
+  discoverRuleFiles,
+  readAndFormatRules,
+  extractFilePathsFromMessages,
+} from './utils.js';
+
+/**
+ * Module-level storage for file context between hook calls.
+ * The messages.transform hook populates this, system.transform reads it.
+ */
+let currentContextPaths: string[] = [];
 
 /**
  * OpenCode Rules Plugin
- * Discovers markdown rule files and sends them as silent messages
- * on session creation and compaction events.
+ * Discovers markdown rule files and injects them into the system prompt
+ * using experimental transform hooks.
  */
 const openCodeRulesPlugin: Plugin = async (input: PluginInput) => {
   // Discover rule files from global and project directories
   const ruleFiles = await discoverRuleFiles(input.directory);
-  const formattedRules = await readAndFormatRules(ruleFiles);
 
-  // Track which sessions have received rules to avoid duplicates
-  const sessionsWithRules = new Set<string>();
-
-  /**
-   * Send a silent message (no AI response) with the rules
-   */
-  const sendRulesMessage = async (sessionID: string) => {
-    if (!formattedRules) {
-      return;
-    }
-
-    try {
-      await input.client.session.prompt({
-        path: { id: sessionID },
-        body: {
-          noReply: true, // Silent message - no AI response
-          parts: [{ type: 'text', text: formattedRules }],
-        },
-      });
-
-      sessionsWithRules.add(sessionID);
-      console.log(`[opencode-rules] Sent rules to session ${sessionID}`);
-    } catch (error) {
-      console.error(
-        `[opencode-rules] Failed to send rules to session ${sessionID}:`,
-        error
-      );
-    }
-  };
+  console.debug(`[opencode-rules] Discovered ${ruleFiles.length} rule file(s)`);
 
   return {
     /**
-     * Handle session events for creation and compaction
+     * Extract file paths from messages for conditional rule filtering.
+     * This hook fires before system.transform.
      */
-    event: async ({ event }) => {
+    'experimental.chat.messages.transform': async ({
+      output,
+    }: {
+      output: any;
+    }) => {
+      // Extract paths from all messages
+      currentContextPaths = extractFilePathsFromMessages(output.messages);
+
+      console.debug(
+        `[opencode-rules] Extracted ${currentContextPaths.length} context path(s) from messages`
+      );
+
+      // Don't modify messages - just extract context
+      return output;
+    },
+
+    /**
+     * Inject rules into the system prompt.
+     * Uses context paths from the messages.transform hook.
+     */
+    'experimental.chat.system.transform': async ({
+      output,
+    }: {
+      output: any;
+    }) => {
+      // Format rules, filtering by context paths
+      const formattedRules = await readAndFormatRules(
+        ruleFiles,
+        currentContextPaths
+      );
+
       if (!formattedRules) {
-        return;
-      }
-
-      // Send rules when a new session is created
-      if (event.type === 'session.created') {
-        const sessionID = event.properties.info.id;
-        if (!sessionsWithRules.has(sessionID)) {
-          await sendRulesMessage(sessionID);
-        }
-      }
-
-      // Re-send rules when a session is compacted
-      if (event.type === 'session.compacted') {
-        const sessionID = event.properties.sessionID;
-        // Remove from tracking and re-send
-        sessionsWithRules.delete(sessionID);
-        await sendRulesMessage(sessionID);
-        console.log(
-          `[opencode-rules] Session ${sessionID} compacted - rules re-sent`
+        console.debug(
+          '[opencode-rules] No applicable rules for current context'
         );
+        return output;
       }
+
+      console.debug('[opencode-rules] Injecting rules into system prompt');
+
+      // Append rules to system prompt
+      return {
+        ...output,
+        system: output.system
+          ? `${output.system}\n\n${formattedRules}`
+          : formattedRules,
+      };
     },
   };
 };
