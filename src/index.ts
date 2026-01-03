@@ -46,9 +46,13 @@ const openCodeRulesPlugin = async (input: PluginInput) => {
       const contextPaths = extractFilePathsFromMessages(output.messages);
       sessionContextMap.set(output, contextPaths);
 
-      console.debug(
-        `[opencode-rules] Extracted ${contextPaths.length} context path(s) from messages`
-      );
+      if (contextPaths.length > 0) {
+        console.debug(
+          `[opencode-rules] Extracted ${contextPaths.length} context path(s): ${contextPaths.slice(0, 5).join(', ')}${contextPaths.length > 5 ? '...' : ''}`
+        );
+      } else {
+        console.debug('[opencode-rules] No file paths found in messages');
+      }
 
       // Don't modify messages - just extract context
       return output;
