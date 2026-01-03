@@ -26,7 +26,7 @@
   - Test regex path extraction from message content
   - Test deduplication
 
-- [ ] 2.2 Update existing tests for new architecture
+- [x] 2.2 Update existing tests for new architecture
   - Remove session tracking tests
   - Remove compaction handling tests
   - Add system transform hook tests
