@@ -11,7 +11,7 @@
   - Add `experimental.chat.system.transform` hook for rule injection
   - Store file context in module-level variable between hook calls
 
-- [ ] 1.3 Update rule filtering logic
+- [x] 1.3 Update rule filtering logic
   - Modify `readAndFormatRules()` to accept array of context file paths
   - Filter conditional rules (.mdc with globs) against all discovered paths
 
