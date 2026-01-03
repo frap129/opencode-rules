@@ -5,7 +5,7 @@
   - Regex scan message content for path-like strings
   - Return deduplicated array of file paths
 
-- [ ] 1.2 Refactor `index.ts` to use new hook architecture
+- [x] 1.2 Refactor `index.ts` to use new hook architecture
   - Remove `event` hook and session tracking logic
   - Add `experimental.chat.messages.transform` hook for context gathering
   - Add `experimental.chat.system.transform` hook for rule injection
