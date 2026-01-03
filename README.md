@@ -16,7 +16,7 @@ OpenCode Rules automatically loads rule files from standard directories and inte
 - **Dual-format support**: Load rules from both `.md` and `.mdc` files
 - **Conditional rules**: Apply rules based on file paths using glob patterns
 - **Global and project-level rules**: Define rules at both system and project scopes
-- **Session-aware**: Rules persist across messages and survive session compactions
+- **Context-aware injection**: Rules filtered by extracted file paths from messages
 - **Zero-configuration**: Works out of the box with XDG Base Directory specification
 - **TypeScript-first**: Built with TypeScript for type safety and developer experience
 - **Performance optimized**: Efficient file discovery and minimal startup overhead
@@ -206,50 +206,46 @@ bun run lint
 - **Prettier** - Code formatting
 - **ESLint** - Linting and code quality
 
+## Architecture
+
+This plugin uses OpenCode's experimental transform hooks to inject rules into the LLM context:
+
+### Two-Hook Approach
+
+1. **`experimental.chat.messages.transform`** - Fires before each LLM call
+   - Extracts file paths from conversation messages (tool calls, text content)
+   - Stores paths for conditional rule filtering
+   - Does NOT modify messages
+
+2. **`experimental.chat.system.transform`** - Fires after messages.transform
+   - Reads discovered rule files
+   - Filters conditional rules (`.mdc` with `globs`) against extracted file paths
+   - Appends formatted rules to the system prompt
+
+### Benefits Over Previous Approach
+
+- **No session tracking** - Rules are injected fresh on every LLM call
+- **No compaction handling** - System prompt is rebuilt automatically
+- **Cleaner injection** - Rules in system prompt instead of conversation messages
+- **Context-aware filtering** - Conditional rules only apply when relevant files are referenced
+
+### Experimental API Notice
+
+This plugin depends on experimental OpenCode APIs:
+
+- `experimental.chat.messages.transform`
+- `experimental.chat.system.transform`
+
+These APIs may change in future OpenCode versions. Check OpenCode release notes when upgrading.
+
 ## How It Works
 
 1. **Discovery**: Scan global and project directories for `.md` and `.mdc` files
 2. **Parsing**: Extract metadata from files with YAML front matter
-3. **Filtering**: Apply conditional rules based on file patterns
-4. **Silent Messaging**: Send rules as silent messages (no AI response) on session events
-5. **Session Tracking**: Track which sessions have received rules to avoid duplication
-6. **Compaction Handling**: Automatically re-send rules when sessions are compacted
-
-### Silent Message Pattern
-
-The plugin uses OpenCode's `noReply` message pattern to inject rules without triggering AI responses:
-
-```typescript
-await client.session.prompt({
-  path: { id: sessionID },
-  body: {
-    noReply: true, // Silent message - no AI response
-    parts: [{ type: 'text', text: rules }],
-  },
-});
-```
-
-This ensures rules are added to the conversation context cleanly and efficiently.
-
-## Session Compaction Support
-
-When OpenCode compacts a session (summarizes conversation history to save context), the rules are automatically re-sent to ensure they remain in the AI's context.
-
-### How It Works
-
-1. Rules are sent as silent messages when a new session is created
-2. The plugin tracks which sessions have received rules
-3. When a session is compacted, rules are immediately re-sent
-4. This ensures rules survive context compression
-
-### Event-Driven Architecture
-
-The plugin listens for two key events:
-
-- **`session.created`**: Sends rules when a new session starts
-- **`session.compacted`**: Re-sends rules after history compression
-
-This behavior is transparent and requires no configuration - your rules will always be available to the AI agent, even in long conversations.
+3. **Messages Transform**: Extract file paths from message content for context awareness
+4. **Filtering**: Apply conditional rules based on extracted file paths
+5. **System Transform**: Append filtered rules to the system prompt
+6. **Fresh Injection**: Rules are re-evaluated on every LLM call, ensuring always-current context
 
 ## Performance
 
@@ -257,7 +253,7 @@ This behavior is transparent and requires no configuration - your rules will alw
 - Async file operations to prevent blocking
 - Optimized glob matching with `minimatch`
 - Minimal memory footprint with efficient file reading
-- Session tracking uses memory-efficient Set data structure
+- Per-call context extraction using WeakMap to prevent memory leaks
 
 ## Troubleshooting
 
