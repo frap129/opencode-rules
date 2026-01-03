@@ -149,11 +149,11 @@ export async function discoverRuleFiles(
 /**
  * Read and format rule files for system prompt injection
  * @param files - Array of rule file paths
- * @param contextFilePath - Optional path of the file being processed (used to filter rules by metadata)
+ * @param contextFilePaths - Optional array of file paths from conversation context (used to filter conditional rules)
  */
 export async function readAndFormatRules(
   files: string[],
-  contextFilePath?: string
+  contextFilePaths?: string[]
 ): Promise<string> {
   if (files.length === 0) {
     return '';
@@ -169,13 +169,25 @@ export async function readAndFormatRules(
       // Parse metadata to check if rule should apply
       const metadata = parseRuleMetadata(content);
 
-      // If metadata exists with globs and a context file path is provided,
-      // check if the context file matches any of the glob patterns
-      if (metadata && metadata.globs && contextFilePath) {
-        if (!fileMatchesGlobs(contextFilePath, metadata.globs)) {
-          // Rule does not apply to this file, skip it
-          continue;
+      // If metadata exists with globs, check if any context path matches
+      if (metadata?.globs) {
+        // If we have context paths, filter by them
+        if (contextFilePaths && contextFilePaths.length > 0) {
+          const anyMatch = contextFilePaths.some(contextPath =>
+            fileMatchesGlobs(contextPath, metadata.globs!)
+          );
+          if (!anyMatch) {
+            // Rule does not apply to any file in context, skip it
+            console.debug(
+              `[opencode-rules] Skipping conditional rule: ${filename} (no matching paths)`
+            );
+            continue;
+          }
+          console.debug(
+            `[opencode-rules] Including conditional rule: ${filename}`
+          );
         }
+        // If no context paths provided, include the rule (backward compatibility)
       }
 
       ruleContents.push(`## ${filename}\n\n${content}`);
