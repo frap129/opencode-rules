@@ -71,11 +71,7 @@ const openCodeRulesPlugin = async (input: PluginInput) => {
       const contextPaths = sessionContextMap.get(output) || [];
 
       // Format rules, filtering by context paths
-      // TODO(Task 1.3): Fix readAndFormatRules signature to accept string[] for proper multi-file filtering
-      const formattedRules = await readAndFormatRules(
-        ruleFiles,
-        contextPaths as any
-      );
+      const formattedRules = await readAndFormatRules(ruleFiles, contextPaths);
 
       if (!formattedRules) {
         console.debug(
