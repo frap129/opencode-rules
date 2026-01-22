@@ -15,10 +15,35 @@ export function fileMatchesGlobs(filePath: string, globs: string[]): boolean {
 }
 
 /**
+ * Check if a user prompt matches any of the given keywords.
+ * Uses case-insensitive word-boundary matching.
+ *
+ * @param prompt - The user's prompt text
+ * @param keywords - Array of keywords to match
+ * @returns true if any keyword matches the prompt
+ */
+export function promptMatchesKeywords(
+  prompt: string,
+  keywords: string[]
+): boolean {
+  const lowerPrompt = prompt.toLowerCase();
+
+  return keywords.some(keyword => {
+    const lowerKeyword = keyword.toLowerCase();
+    // Escape special regex characters in the keyword
+    const escaped = lowerKeyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Word boundary at start, but allow continuation at end (e.g., "test" matches "testing")
+    const regex = new RegExp(`\\b${escaped}`, 'i');
+    return regex.test(lowerPrompt);
+  });
+}
+
+/**
  * Metadata extracted from .mdc file frontmatter
  */
 export interface RuleMetadata {
   globs?: string[];
+  keywords?: string[];
 }
 
 /**
@@ -62,6 +87,32 @@ export function parseRuleMetadata(content: string): RuleMetadata | undefined {
     }
     if (globs.length > 0) {
       metadata.globs = globs;
+    }
+  }
+
+  // Parse keywords from YAML
+  const keywordsMatch = frontmatter.match(
+    /keywords:\s*\n([\s\S]*?)(?=\n[a-z]|\n*$)/
+  );
+
+  if (keywordsMatch) {
+    // Extract array items (lines starting with "- ")
+    const keywords: string[] = [];
+    const keywordLines = keywordsMatch[1].split('\n');
+    for (const line of keywordLines) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('- ')) {
+        const keyword = trimmed
+          .substring(2)
+          .replace(/^["']|["']$/g, '')
+          .trim();
+        if (keyword) {
+          keywords.push(keyword);
+        }
+      }
+    }
+    if (keywords.length > 0) {
+      metadata.keywords = keywords;
     }
   }
 
@@ -193,10 +244,12 @@ function stripFrontmatter(content: string): string {
  * Read and format rule files for system prompt injection
  * @param files - Array of rule file paths
  * @param contextFilePaths - Optional array of file paths from conversation context (used to filter conditional rules)
+ * @param userPrompt - Optional user prompt text (used for keyword matching)
  */
 export async function readAndFormatRules(
   files: string[],
-  contextFilePaths?: string[]
+  contextFilePaths?: string[],
+  userPrompt?: string
 ): Promise<string> {
   if (files.length === 0) {
     return '';
@@ -212,25 +265,35 @@ export async function readAndFormatRules(
       // Parse metadata to check if rule should apply
       const metadata = parseRuleMetadata(content);
 
-      // If metadata exists with globs, check if any context path matches
-      if (metadata?.globs) {
-        // If we have context paths, filter by them
-        if (contextFilePaths && contextFilePaths.length > 0) {
-          const anyMatch = contextFilePaths.some(contextPath =>
+      // Rules with metadata (globs or keywords) require matching
+      // OR logic: rule applies if keywords match OR globs match
+      if (metadata?.globs || metadata?.keywords) {
+        let globsMatch = false;
+        let keywordsMatch = false;
+
+        // Check globs against context file paths
+        if (metadata.globs && contextFilePaths && contextFilePaths.length > 0) {
+          globsMatch = contextFilePaths.some(contextPath =>
             fileMatchesGlobs(contextPath, metadata.globs!)
           );
-          if (!anyMatch) {
-            // Rule does not apply to any file in context, skip it
-            console.debug(
-              `[opencode-rules] Skipping conditional rule: ${filename} (no matching paths)`
-            );
-            continue;
-          }
-          console.debug(
-            `[opencode-rules] Including conditional rule: ${filename}`
-          );
         }
-        // If no context paths provided, include the rule (backward compatibility)
+
+        // Check keywords against user prompt
+        if (metadata.keywords && userPrompt) {
+          keywordsMatch = promptMatchesKeywords(userPrompt, metadata.keywords);
+        }
+
+        // If rule has conditions but none match, skip it
+        if (!globsMatch && !keywordsMatch) {
+          console.debug(
+            `[opencode-rules] Skipping conditional rule: ${filename} (no matching paths or keywords)`
+          );
+          continue;
+        }
+
+        console.debug(
+          `[opencode-rules] Including conditional rule: ${filename} (globs: ${globsMatch}, keywords: ${keywordsMatch})`
+        );
       }
 
       // Strip frontmatter before adding to output

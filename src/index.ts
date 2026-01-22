@@ -13,12 +13,40 @@ import {
 } from './utils.js';
 
 /**
- * Per-session storage for file context between hook calls.
+ * Per-session storage for context between hook calls.
  * Uses a Map keyed by the output object reference to avoid race conditions.
  * The messages.transform hook populates this, system.transform reads it,
  * then cleanup removes the entry to prevent memory leaks.
  */
-const sessionContextMap = new WeakMap<object, string[]>();
+interface SessionContext {
+  filePaths: string[];
+  userPrompt: string | undefined;
+}
+
+const sessionContextMap = new WeakMap<object, SessionContext>();
+
+/**
+ * Extract the latest user message text from messages array.
+ * @param messages - Array of conversation messages
+ * @returns The text content of the last user message, or undefined
+ */
+function extractLatestUserPrompt(messages: any[]): string | undefined {
+  // Find the last user message
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message.role === 'user') {
+      // Extract text from parts
+      const textParts = message.parts
+        ?.filter((part: any) => part.type === 'text')
+        .map((part: any) => part.text);
+
+      if (textParts && textParts.length > 0) {
+        return textParts.join(' ');
+      }
+    }
+  }
+  return undefined;
+}
 
 /**
  * OpenCode Rules Plugin
@@ -42,9 +70,16 @@ const openCodeRulesPlugin = async (input: PluginInput) => {
     }: {
       output: any;
     }) => {
-      // Extract paths from all messages and store per-session
+      // Extract paths from all messages
       const contextPaths = extractFilePathsFromMessages(output.messages);
-      sessionContextMap.set(output, contextPaths);
+      // Extract latest user prompt for keyword matching
+      const userPrompt = extractLatestUserPrompt(output.messages);
+
+      // Store both in session context
+      sessionContextMap.set(output, {
+        filePaths: contextPaths,
+        userPrompt,
+      });
 
       if (contextPaths.length > 0) {
         console.debug(
@@ -52,6 +87,12 @@ const openCodeRulesPlugin = async (input: PluginInput) => {
         );
       } else {
         console.debug('[opencode-rules] No file paths found in messages');
+      }
+
+      if (userPrompt) {
+        console.debug(
+          `[opencode-rules] User prompt: "${userPrompt.slice(0, 50)}${userPrompt.length > 50 ? '...' : ''}"`
+        );
       }
 
       // Don't modify messages - just extract context
@@ -67,11 +108,17 @@ const openCodeRulesPlugin = async (input: PluginInput) => {
     }: {
       output: any;
     }) => {
-      // Retrieve context paths specific to this session
-      const contextPaths = sessionContextMap.get(output) || [];
+      // Retrieve context specific to this session
+      const sessionContext = sessionContextMap.get(output);
+      const contextPaths = sessionContext?.filePaths || [];
+      const userPrompt = sessionContext?.userPrompt;
 
-      // Format rules, filtering by context paths
-      const formattedRules = await readAndFormatRules(ruleFiles, contextPaths);
+      // Format rules, filtering by context paths and user prompt
+      const formattedRules = await readAndFormatRules(
+        ruleFiles,
+        contextPaths,
+        userPrompt
+      );
 
       if (!formattedRules) {
         console.debug(

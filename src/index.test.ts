@@ -6,6 +6,7 @@ import {
   readAndFormatRules,
   parseRuleMetadata,
   extractFilePathsFromMessages,
+  promptMatchesKeywords,
 } from './utils.js';
 
 // Create temporary test directories
@@ -623,6 +624,68 @@ describe('extractFilePathsFromMessages', () => {
   });
 });
 
+describe('promptMatchesKeywords', () => {
+  it('should return true when keyword matches prompt', () => {
+    expect(
+      promptMatchesKeywords('I need help testing this function', ['testing'])
+    ).toBe(true);
+  });
+
+  it('should return false when keyword does not match prompt', () => {
+    expect(
+      promptMatchesKeywords('help me with the database', ['testing', 'jest'])
+    ).toBe(false);
+  });
+
+  it('should be case-insensitive', () => {
+    expect(promptMatchesKeywords('testing', ['Testing'])).toBe(true);
+    expect(promptMatchesKeywords('TESTING', ['testing'])).toBe(true);
+  });
+
+  it('should match at word boundaries (start of word)', () => {
+    // "test" should match "testing" (word boundary at start, keyword is prefix)
+    expect(promptMatchesKeywords('I am testing this', ['test'])).toBe(true);
+  });
+
+  it('should not match mid-word', () => {
+    // "test" should NOT match "contest" (not at word boundary)
+    expect(promptMatchesKeywords('I entered a contest', ['test'])).toBe(false);
+  });
+
+  it('should handle multi-word keywords', () => {
+    expect(
+      promptMatchesKeywords('I need help with unit test coverage', [
+        'unit test',
+      ])
+    ).toBe(true);
+  });
+
+  it('should return true if any keyword matches (OR logic)', () => {
+    expect(
+      promptMatchesKeywords('please help with jest', [
+        'testing',
+        'jest',
+        'vitest',
+      ])
+    ).toBe(true);
+  });
+
+  it('should return false for empty keywords array', () => {
+    expect(promptMatchesKeywords('some prompt', [])).toBe(false);
+  });
+
+  it('should return false for empty prompt', () => {
+    expect(promptMatchesKeywords('', ['testing'])).toBe(false);
+  });
+
+  it('should escape special regex characters in keywords', () => {
+    // "test.ts" keyword should match literally (dot is escaped)
+    expect(promptMatchesKeywords('file.test.ts', ['test.ts'])).toBe(true);
+    // Verify that without escaping, ".ts" would match anything like "tests" (but it doesn't)
+    expect(promptMatchesKeywords('run tests now', ['test.ts'])).toBe(false);
+  });
+});
+
 describe('parseRuleMetadata', () => {
   it('should parse YAML metadata from .mdc files', () => {
     // Arrange
@@ -685,6 +748,62 @@ Rule content`;
 
     // Assert
     expect(metadata?.globs).toEqual(['src/**/*.ts', 'lib/**/*.js']);
+  });
+
+  it('should parse keywords from YAML metadata', () => {
+    // Arrange
+    const content = `---
+keywords:
+  - "testing"
+  - "unit test"
+---
+
+Follow testing best practices.`;
+
+    // Act
+    const metadata = parseRuleMetadata(content);
+
+    // Assert
+    expect(metadata).toBeDefined();
+    expect(metadata?.keywords).toEqual(['testing', 'unit test']);
+  });
+
+  it('should parse both globs and keywords from metadata', () => {
+    // Arrange
+    const content = `---
+globs:
+  - "**/*.test.ts"
+keywords:
+  - "testing"
+---
+
+Testing rule content.`;
+
+    // Act
+    const metadata = parseRuleMetadata(content);
+
+    // Assert
+    expect(metadata?.globs).toEqual(['**/*.test.ts']);
+    expect(metadata?.keywords).toEqual(['testing']);
+  });
+
+  it('should handle keywords before globs in YAML', () => {
+    // Arrange
+    const content = `---
+keywords:
+  - "refactor"
+globs:
+  - "src/**/*.ts"
+---
+
+Refactoring rules.`;
+
+    // Act
+    const metadata = parseRuleMetadata(content);
+
+    // Assert
+    expect(metadata?.keywords).toEqual(['refactor']);
+    expect(metadata?.globs).toEqual(['src/**/*.ts']);
   });
 });
 
@@ -1201,7 +1320,7 @@ Only for TypeScript`
     expect(formatted).not.toContain('Only for TypeScript');
   });
 
-  it('should apply all rules when no context file path provided', async () => {
+  it('should skip conditional rule when no context is provided', async () => {
     // Arrange
     const rulePath = path.join(globalRulesDir, 'conditional.mdc');
     writeFileSync(
@@ -1217,9 +1336,211 @@ TypeScript only rule`
     // Act - no file path provided
     const formatted = await readAndFormatRules([rulePath]);
 
-    // Assert - rule should be applied (backward compatibility)
-    expect(formatted).toContain('conditional.mdc');
-    expect(formatted).toContain('TypeScript only rule');
+    // Assert - rule should NOT be applied (conditions not satisfied)
+    expect(formatted).toBe('');
+  });
+
+  it('should include rule when user prompt matches keywords', async () => {
+    // Arrange
+    const rulePath = path.join(globalRulesDir, 'testing-rule.mdc');
+    writeFileSync(
+      rulePath,
+      `---
+keywords:
+  - "testing"
+  - "jest"
+---
+
+Follow testing best practices.`
+    );
+
+    // Act - prompt matches keyword
+    const formatted = await readAndFormatRules(
+      [rulePath],
+      [],
+      'I need help testing this function'
+    );
+
+    // Assert
+    expect(formatted).toContain('testing-rule.mdc');
+    expect(formatted).toContain('Follow testing best practices');
+  });
+
+  it('should exclude rule when user prompt does not match keywords', async () => {
+    // Arrange
+    const rulePath = path.join(globalRulesDir, 'testing-rule.mdc');
+    writeFileSync(
+      rulePath,
+      `---
+keywords:
+  - "testing"
+  - "jest"
+---
+
+Follow testing best practices.`
+    );
+
+    // Act - prompt does not match
+    const formatted = await readAndFormatRules(
+      [rulePath],
+      [],
+      'help me with the database'
+    );
+
+    // Assert
+    expect(formatted).toBe('');
+  });
+
+  it('should include rule when either keywords OR globs match (keywords match)', async () => {
+    // Arrange
+    const rulePath = path.join(globalRulesDir, 'test-rule.mdc');
+    writeFileSync(
+      rulePath,
+      `---
+globs:
+  - "**/*.test.ts"
+keywords:
+  - "testing"
+---
+
+Testing standards.`
+    );
+
+    // Act - keywords match but no test files in context
+    const formatted = await readAndFormatRules(
+      [rulePath],
+      ['src/app.ts'],
+      'help with testing'
+    );
+
+    // Assert - rule should be included (keywords matched)
+    expect(formatted).toContain('test-rule.mdc');
+    expect(formatted).toContain('Testing standards');
+  });
+
+  it('should include rule when either keywords OR globs match (globs match)', async () => {
+    // Arrange
+    const rulePath = path.join(globalRulesDir, 'test-rule.mdc');
+    writeFileSync(
+      rulePath,
+      `---
+globs:
+  - "**/*.test.ts"
+keywords:
+  - "testing"
+---
+
+Testing standards.`
+    );
+
+    // Act - globs match but prompt doesn't mention testing
+    const formatted = await readAndFormatRules(
+      [rulePath],
+      ['src/utils.test.ts'],
+      'fix the import error'
+    );
+
+    // Assert - rule should be included (globs matched)
+    expect(formatted).toContain('test-rule.mdc');
+    expect(formatted).toContain('Testing standards');
+  });
+
+  it('should exclude rule when neither keywords nor globs match', async () => {
+    // Arrange
+    const rulePath = path.join(globalRulesDir, 'test-rule.mdc');
+    writeFileSync(
+      rulePath,
+      `---
+globs:
+  - "**/*.test.ts"
+keywords:
+  - "testing"
+---
+
+Testing standards.`
+    );
+
+    // Act - neither matches
+    const formatted = await readAndFormatRules(
+      [rulePath],
+      ['src/app.ts'],
+      'update the readme'
+    );
+
+    // Assert - rule should NOT be included
+    expect(formatted).toBe('');
+  });
+
+  it('should handle case-insensitive keyword matching', async () => {
+    // Arrange
+    const rulePath = path.join(globalRulesDir, 'case-rule.mdc');
+    writeFileSync(
+      rulePath,
+      `---
+keywords:
+  - "Testing"
+---
+
+Testing rule.`
+    );
+
+    // Act - lowercase in prompt
+    const formatted = await readAndFormatRules(
+      [rulePath],
+      [],
+      'testing in lowercase'
+    );
+
+    // Assert
+    expect(formatted).toContain('case-rule.mdc');
+  });
+
+  it('should match keyword at word boundary (prefix matching)', async () => {
+    // Arrange
+    const rulePath = path.join(globalRulesDir, 'boundary-rule.mdc');
+    writeFileSync(
+      rulePath,
+      `---
+keywords:
+  - "test"
+---
+
+Test rule.`
+    );
+
+    // Act - "test" should match "testing"
+    const formatted = await readAndFormatRules(
+      [rulePath],
+      [],
+      'I am testing this'
+    );
+
+    // Assert
+    expect(formatted).toContain('boundary-rule.mdc');
+  });
+
+  it('should not match keyword mid-word', async () => {
+    // Arrange
+    const rulePath = path.join(globalRulesDir, 'midword-rule.mdc');
+    writeFileSync(
+      rulePath,
+      `---
+keywords:
+  - "test"
+---
+
+Test rule.`
+    );
+
+    // Act - "test" should NOT match "contest"
+    const formatted = await readAndFormatRules(
+      [rulePath],
+      [],
+      'I entered a contest'
+    );
+
+    // Assert
+    expect(formatted).toBe('');
   });
 });
 

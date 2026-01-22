@@ -8,15 +8,16 @@ OpenCode Rules automatically loads rule files from standard directories and inte
 
 - Define global coding standards that apply across all projects
 - Create project-specific rules for team collaboration
-- Apply conditional rules based on file patterns
+- Apply conditional rules based on file patterns or prompt keywords
 - Maintain zero-configuration workflow with sensible defaults
 
 ## Features
 
 - **Dual-format support**: Load rules from both `.md` and `.mdc` files
-- **Conditional rules**: Apply rules based on file paths using glob patterns
+- **Conditional rules**: Apply rules based on file paths using glob patterns or prompt keywords
+- **Keyword matching**: Apply rules when the user's prompt contains specific keywords
 - **Global and project-level rules**: Define rules at both system and project scopes
-- **Context-aware injection**: Rules filtered by extracted file paths from messages
+- **Context-aware injection**: Rules filtered by extracted file paths and user prompts
 - **Zero-configuration**: Works out of the box with XDG Base Directory specification
 - **TypeScript-first**: Built with TypeScript for type safety and developer experience
 - **Performance optimized**: Efficient file discovery and minimal startup overhead
@@ -109,6 +110,51 @@ globs:
 
 This rule only applies when processing TypeScript files.
 
+### Keyword-Based Rule
+
+Create `~/.config/opencode/rules/testing.mdc`:
+
+```markdown
+---
+keywords:
+  - 'testing'
+  - 'unit test'
+  - 'jest'
+  - 'vitest'
+---
+
+# Testing Best Practices
+
+- Write tests before implementing features (TDD)
+- Use descriptive test names that explain the expected behavior
+- Mock external dependencies
+- Aim for high test coverage on critical paths
+```
+
+This rule applies when the user's prompt mentions testing-related terms.
+
+### Combined Globs and Keywords Rule
+
+Create `~/.config/opencode/rules/test-files.mdc`:
+
+```markdown
+---
+globs:
+  - '**/*.test.ts'
+  - '**/*.spec.ts'
+keywords:
+  - 'testing'
+---
+
+# Test File Standards
+
+- Use `describe` blocks to group related tests
+- Use `it` or `test` with clear descriptions
+- Follow AAA pattern: Arrange, Act, Assert
+```
+
+This rule applies when EITHER a test file is in context OR the user mentions testing (OR logic).
+
 ### Organized Rules with Subdirectories
 
 You can organize rules into subdirectories for better management. Rules are discovered recursively from all subdirectories:
@@ -155,15 +201,27 @@ Both `.md` and `.mdc` files support optional YAML metadata for conditional rule 
 globs:
   - 'src/**/*.ts'
   - 'lib/**/*.js'
-  - '*.test.ts'
+keywords:
+  - 'refactoring'
+  - 'cleanup'
 ---
 ```
 
 ### Supported Fields
 
-- `globs` (optional): Array of glob patterns for conditional application
-  - If specified: Rule applies only to files matching at least one pattern
-  - If omitted: Rule applies unconditionally
+- `globs` (optional): Array of glob patterns for file-based matching
+  - Rule applies when any file in context matches a pattern
+- `keywords` (optional): Array of keywords for prompt-based matching
+  - Rule applies when the user's prompt contains any keyword
+  - Case-insensitive, word-boundary matching (e.g., "test" matches "testing")
+  - Does NOT match mid-word (e.g., "test" does NOT match "contest")
+
+### Matching Behavior
+
+- **No metadata**: Rule applies unconditionally (always included)
+- **Only globs**: Rule applies when any context file matches
+- **Only keywords**: Rule applies when the user's prompt contains any keyword
+- **Both globs and keywords**: Rule applies when EITHER condition matches (OR logic)
 
 ## Glob Pattern Reference
 

@@ -33,13 +33,11 @@ Hidden files and directories (starting with `.`) are automatically excluded from
 
 ## Conditional Rules
 
-You can define conditional rules in both `.md` and `.mdc` files. This is done by adding a YAML frontmatter to the file with a `globs` key.
+You can define conditional rules in both `.md` and `.mdc` files using YAML frontmatter with `globs` and/or `keywords` fields.
 
-The `globs` key should contain a list of glob patterns. The rule will only be applied if the file being processed matches one of the glob patterns.
+### File-Based Conditions (globs)
 
-### Example
-
-Here is an example of a conditional rule that only applies to TypeScript files in the `src/components` directory:
+The `globs` key contains a list of glob patterns. The rule applies if any file in the conversation context matches one of the patterns.
 
 ```markdown
 ---
@@ -50,4 +48,43 @@ globs:
 This is a rule for TypeScript components.
 ```
 
-If no `globs` are specified, the rule will be applied to all files.
+### Prompt-Based Conditions (keywords)
+
+The `keywords` key contains a list of keywords. The rule applies if the user's prompt contains any of the keywords (case-insensitive, word-boundary matching).
+
+```markdown
+---
+keywords:
+  - 'testing'
+  - 'unit test'
+  - 'jest'
+---
+
+Follow these testing best practices.
+```
+
+Keyword matching uses word boundaries, so:
+
+- "test" matches "testing" (prefix match)
+- "test" does NOT match "contest" (mid-word)
+
+### Combined Conditions (OR logic)
+
+You can use both `globs` and `keywords` together. The rule applies if EITHER condition matches:
+
+```markdown
+---
+globs:
+  - '**/*.test.ts'
+keywords:
+  - 'testing'
+---
+
+Testing standards for the project.
+```
+
+This rule applies when EITHER a test file is in context OR the user mentions testing.
+
+### Unconditional Rules
+
+If no `globs` or `keywords` are specified, the rule is applied unconditionally to all prompts.
