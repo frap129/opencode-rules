@@ -3,61 +3,36 @@
 ## Purpose
 
 This specification defines how the opencode-rules plugin discovers, loads, and delivers markdown-based rule files to OpenCode sessions. The plugin supports both unconditional and conditional rules (via glob patterns), and delivers them as silent messages to sessions when they are created or compacted.
-
 ## Requirements
-
 ### Requirement: Rule File Formats
 
-The system MUST support rule definitions in both `.md` and `.mdc` file formats and send them as silent messages when sessions are created or compacted.
+The system MUST support rule definitions in both `.md` and `.mdc` file formats and inject them into the system prompt.
 
 #### Scenario: Loading a standard markdown rule
 
-- Given a rule file named `my-rule.md`
-- When the system discovers rules
-- Then the rule `my-rule` should be loaded and sent via silent message when a session is created.
+- **GIVEN** a rule file named `my-rule.md`
+- **WHEN** the system discovers rules
+- **THEN** the rule `my-rule` SHALL be loaded and injected via system prompt on every LLM call
 
 #### Scenario: Loading a markdown with metadata rule
 
-- Given a rule file named `my-rule.mdc` with the following content:
-
-  ```
-  ---
-  globs:
-    - "src/components/**/*.ts"
-  ---
-
-  This is a rule for TypeScript components.
-  ```
-
-- When the system discovers rules
-- And a file at `src/components/button.ts` is being processed
-- Then the rule `my-rule` should be applied and sent via silent message when a session is created.
+- **GIVEN** a rule file named `my-rule.mdc` with glob patterns
+- **AND** the conversation references a file matching those patterns
+- **WHEN** the `experimental.chat.system.transform` hook is triggered
+- **THEN** the rule `my-rule` SHALL be included in the system prompt
 
 #### Scenario: Loading a markdown with metadata rule that does not apply
 
-- Given a rule file named `my-rule.mdc` with the following content:
-
-  ```
-  ---
-  globs:
-    - "src/components/**/*.ts"
-  ---
-
-  This is a rule for TypeScript components.
-  ```
-
-- When the system discovers rules
-- And a file at `src/utils/helpers.js` is being processed
-- Then the rule `my-rule` should NOT be applied.
+- **GIVEN** a rule file named `my-rule.mdc` with glob pattern `src/components/**/*.ts`
+- **AND** the conversation only references files in `src/utils/`
+- **WHEN** the `experimental.chat.system.transform` hook is triggered
+- **THEN** the rule `my-rule` SHALL NOT be included in the system prompt
 
 #### Scenario: Loading a rule with no metadata
 
-- Given a rule file named `another-rule.mdc` with the following content:
-  ```
-  This rule should always apply.
-  ```
-- When the system discovers rules
-- Then the rule `another-rule` should be loaded and sent via silent message when a session is created unconditionally.
+- **GIVEN** a rule file named `another-rule.mdc` with no frontmatter
+- **WHEN** the system discovers rules
+- **THEN** the rule `another-rule` SHALL be loaded and injected unconditionally
 
 ### Requirement: Debug Logging for Rule Discovery
 
@@ -65,98 +40,77 @@ The system SHALL provide debug logging capabilities to display discovered rule f
 
 #### Scenario: Debug logging enabled for global rules
 
-- Given debug logging is enabled
-- And global rules directory contains `global-rule.md` and `another-rule.mdc`
-- When the system discovers rules
-- Then the system SHALL log "Discovered global rule: global-rule.md"
-- And the system SHALL log "Discovered global rule: another-rule.mdc"
+- **GIVEN** debug logging is enabled
+- **AND** global rules directory contains `global-rule.md` and `another-rule.mdc`
+- **WHEN** the system discovers rules
+- **THEN** the system SHALL log "Discovered global rule: global-rule.md"
+- **AND** the system SHALL log "Discovered global rule: another-rule.mdc"
 
 #### Scenario: Debug logging enabled for project rules
 
-- Given debug logging is enabled
-- And project rules directory contains `project-rule.md`
-- When the system discovers rules
-- Then the system SHALL log "Discovered project rule: project-rule.md"
+- **GIVEN** debug logging is enabled
+- **AND** project rules directory contains `project-rule.md`
+- **WHEN** the system discovers rules
+- **THEN** the system SHALL log "Discovered project rule: project-rule.md"
 
-#### Scenario: Debug logging disabled
+#### Scenario: Debug logging for injected rules
 
-- Given debug logging is disabled
-- When the system discovers rules
-- Then the system SHALL NOT log any rule discovery messages
+- **GIVEN** debug logging is enabled
+- **WHEN** rules are injected via `experimental.chat.system.transform`
+- **THEN** the system SHALL log which rules are being injected
+- **AND** the system SHALL log the number of context file paths discovered
 
-#### Scenario: Debug logging with no rules found
+### Requirement: System Prompt Rule Injection
 
-- Given debug logging is enabled
-- And no rule files exist in the searched directories
-- When the system discovers rules
-- Then the system SHALL NOT log any rule discovery messages
+The system SHALL inject formatted rules directly into the system prompt using the `experimental.chat.system.transform` hook, ensuring rules are present for every LLM call.
 
-### Requirement: Silent Message Rule Injection
+#### Scenario: Rules injected on every LLM call
 
-The system SHALL send formatted rules as silent messages (using `noReply: true`) when sessions are created or compacted, using the `event` hook and `client.session.prompt()` API.
+- **GIVEN** rule files have been discovered
+- **WHEN** the `experimental.chat.system.transform` hook is triggered
+- **THEN** the system SHALL append formatted rules to `output.system`
+- **AND** the rules SHALL be formatted with headers and separators
 
-#### Scenario: Rules sent on session creation
+#### Scenario: No rules when no files discovered
 
-- **GIVEN** a new session is created
-- **WHEN** the `session.created` event is received
-- **THEN** the system SHALL call `client.session.prompt()` with `noReply: true`
-- **AND** the message SHALL contain the formatted rules
-- **AND** the session ID SHALL be added to the tracking set
+- **GIVEN** no rule files were discovered during initialization
+- **WHEN** the `experimental.chat.system.transform` hook is triggered
+- **THEN** the system SHALL NOT modify `output.system`
 
-#### Scenario: Rules not sent twice to same session
+#### Scenario: Conditional rules filtered by message context
 
-- **GIVEN** a session has already received rules
-- **WHEN** another `session.created` event is received for the same session ID
-- **THEN** the system SHALL NOT send rules again
-- **AND** the `client.session.prompt()` method SHALL NOT be called
+- **GIVEN** a rule file `component-rules.mdc` with glob pattern `src/components/**/*.ts`
+- **AND** the conversation contains references to `src/components/Button.tsx`
+- **WHEN** the `experimental.chat.system.transform` hook is triggered
+- **THEN** the rule SHALL be included in the system prompt
 
-#### Scenario: Rules re-sent on session compaction
+#### Scenario: Conditional rules excluded when no matching context
 
-- **GIVEN** a session exists and has received rules
-- **WHEN** a `session.compacted` event is received
-- **THEN** the session ID SHALL be removed from the tracking set
-- **AND** the system SHALL immediately call `client.session.prompt()` with `noReply: true`
-- **AND** the message SHALL contain the formatted rules
-- **AND** the session ID SHALL be added back to the tracking set
+- **GIVEN** a rule file `component-rules.mdc` with glob pattern `src/components/**/*.ts`
+- **AND** the conversation contains no references to matching file paths
+- **WHEN** the `experimental.chat.system.transform` hook is triggered
+- **THEN** the rule SHALL NOT be included in the system prompt
 
-#### Scenario: Compaction for unknown session
+### Requirement: Message Context Extraction
 
-- **GIVEN** a `session.compacted` event is received for a session not in the tracking set
-- **WHEN** the event is processed
-- **THEN** the system SHALL send rules to that session
-- **AND** the session ID SHALL be added to the tracking set
+The system SHALL use the `experimental.chat.messages.transform` hook to extract file path context from conversation messages for conditional rule filtering.
 
-#### Scenario: Silent message format
+#### Scenario: Extract paths from tool call arguments
 
-- **GIVEN** rules are being sent to a session
-- **WHEN** the system calls `client.session.prompt()`
-- **THEN** the request body SHALL include `noReply: true`
-- **AND** the request body SHALL include a parts array with a single text part
-- **AND** the text part SHALL contain the formatted rules
+- **GIVEN** a message contains a tool call to `read` with path `/src/utils/helper.ts`
+- **WHEN** the `experimental.chat.messages.transform` hook is triggered
+- **THEN** the path `/src/utils/helper.ts` SHALL be extracted and stored for rule filtering
 
-#### Scenario: Error handling during message send
+#### Scenario: Extract paths from message content
 
-- **GIVEN** rules are being sent to a session
-- **WHEN** the `client.session.prompt()` call fails
-- **THEN** the error SHALL be logged with context
-- **AND** the session SHALL NOT be added to the tracking set
-- **AND** the system SHALL continue operating normally
+- **GIVEN** a user message contains text "please check the file src/index.ts"
+- **WHEN** the `experimental.chat.messages.transform` hook is triggered
+- **THEN** the path `src/index.ts` SHALL be extracted and stored for rule filtering
 
-### Requirement: Event-Driven Architecture
+#### Scenario: No mutation of messages
 
-The system SHALL use the `event` hook to listen for session lifecycle events rather than the `chat.message` hook.
+- **GIVEN** the `experimental.chat.messages.transform` hook is triggered
+- **WHEN** file paths are extracted from messages
+- **THEN** the `output.messages` array SHALL NOT be modified
+- **AND** the hook SHALL only read message content
 
-#### Scenario: Event hook registered
-
-- **GIVEN** the plugin is initialized
-- **WHEN** hooks are returned from the plugin
-- **THEN** an `event` hook function SHALL be present
-- **AND** the `event` hook SHALL handle `session.created` events
-- **AND** the `event` hook SHALL handle `session.compacted` events
-
-#### Scenario: No rules when formattedRules is empty
-
-- **GIVEN** no rule files were discovered
-- **WHEN** any session event is received
-- **THEN** the system SHALL NOT send any messages
-- **AND** the system SHALL return early from the event handler

@@ -1,4 +1,18 @@
-## MODIFIED Requirements
+## REMOVED Requirements
+
+### Requirement: Silent Message Rule Injection
+
+**Reason**: Replaced by `System Prompt Rule Injection`. Rules are now injected directly into the system prompt instead of being sent as silent messages.
+
+**Migration**: No user action required. Rules will automatically be injected via the new mechanism.
+
+### Requirement: Event-Driven Architecture
+
+**Reason**: The `event` hook for `session.created` and `session.compacted` is no longer needed. The `experimental.chat.system.transform` hook fires before every LLM call, automatically handling both new sessions and post-compaction scenarios.
+
+**Migration**: No user action required. The new hook-based architecture handles all cases automatically.
+
+## ADDED Requirements
 
 ### Requirement: System Prompt Rule Injection
 
@@ -53,6 +67,8 @@ The system SHALL use the `experimental.chat.messages.transform` hook to extract 
 - **WHEN** file paths are extracted from messages
 - **THEN** the `output.messages` array SHALL NOT be modified
 - **AND** the hook SHALL only read message content
+
+## MODIFIED Requirements
 
 ### Requirement: Rule File Formats
 
