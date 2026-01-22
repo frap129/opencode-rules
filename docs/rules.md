@@ -9,6 +9,28 @@ Rules are defined in Markdown files (`.md` or `.mdc`). These files can be locate
 - **Global Rules:** `~/.config/opencode/rules/`
 - **Project Rules:** `.opencode/rules/` in the root of your project.
 
+Both directories are scanned **recursively**, so you can organize your rules into subdirectories.
+
+### Organizing Rules with Subdirectories
+
+You can create subdirectories to group related rules:
+
+```
+~/.config/opencode/rules/
+├── coding-standards.md       # Root-level rule (always applied)
+├── languages/
+│   ├── typescript.mdc        # TypeScript-specific (conditional)
+│   └── python.mdc            # Python-specific (conditional)
+├── frameworks/
+│   ├── react.mdc             # React rules
+│   └── nextjs.mdc            # Next.js rules
+└── workflows/
+    ├── testing.md            # Testing guidelines
+    └── git.md                # Git commit conventions
+```
+
+Hidden files and directories (starting with `.`) are automatically excluded from discovery.
+
 ## Conditional Rules
 
 You can define conditional rules in both `.md` and `.mdc` files. This is done by adding a YAML frontmatter to the file with a `globs` key.

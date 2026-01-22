@@ -869,6 +869,121 @@ describe('discoverRuleFiles', () => {
       }
     });
   });
+
+  describe('subdirectory scanning', () => {
+    it('should discover rules in nested subdirectories', async () => {
+      // Arrange
+      const nestedDir = path.join(globalRulesDir, 'typescript');
+      mkdirSync(nestedDir, { recursive: true });
+      writeFileSync(path.join(nestedDir, 'react.md'), '# React Rules');
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+      try {
+        // Act
+        const files = await discoverRuleFiles();
+
+        // Assert
+        expect(files).toContain(path.join(nestedDir, 'react.md'));
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+      }
+    });
+
+    it('should discover rules in deeply nested subdirectories (multiple levels)', async () => {
+      // Arrange
+      const deepDir = path.join(
+        globalRulesDir,
+        'lang',
+        'typescript',
+        'framework'
+      );
+      mkdirSync(deepDir, { recursive: true });
+      writeFileSync(path.join(deepDir, 'nextjs.md'), '# Next.js Rules');
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+      try {
+        // Act
+        const files = await discoverRuleFiles();
+
+        // Assert
+        expect(files).toContain(path.join(deepDir, 'nextjs.md'));
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+      }
+    });
+
+    it('should exclude hidden subdirectories', async () => {
+      // Arrange
+      const hiddenDir = path.join(globalRulesDir, '.hidden');
+      mkdirSync(hiddenDir, { recursive: true });
+      writeFileSync(path.join(hiddenDir, 'secret.md'), '# Secret Rule');
+      writeFileSync(path.join(globalRulesDir, 'visible.md'), '# Visible Rule');
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+      try {
+        // Act
+        const files = await discoverRuleFiles();
+
+        // Assert
+        expect(files).not.toContainEqual(expect.stringContaining('.hidden'));
+        expect(files).not.toContainEqual(expect.stringContaining('secret.md'));
+        expect(files).toContain(path.join(globalRulesDir, 'visible.md'));
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+      }
+    });
+
+    it('should discover rules from mixed flat and nested structures', async () => {
+      // Arrange
+      writeFileSync(path.join(globalRulesDir, 'root.md'), '# Root Rule');
+      const nestedDir = path.join(globalRulesDir, 'nested');
+      mkdirSync(nestedDir, { recursive: true });
+      writeFileSync(path.join(nestedDir, 'child.md'), '# Child Rule');
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+      try {
+        // Act
+        const files = await discoverRuleFiles();
+
+        // Assert
+        expect(files).toHaveLength(2);
+        expect(files).toContain(path.join(globalRulesDir, 'root.md'));
+        expect(files).toContain(path.join(nestedDir, 'child.md'));
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+      }
+    });
+
+    it('should discover rules in project subdirectories', async () => {
+      // Arrange
+      const projectDir = path.join(testDir, 'project');
+      const projRulesDir = path.join(projectDir, '.opencode', 'rules');
+      const nestedDir = path.join(projRulesDir, 'frontend');
+      mkdirSync(nestedDir, { recursive: true });
+      writeFileSync(path.join(nestedDir, 'react.md'), '# React Rules');
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+      try {
+        // Act
+        const files = await discoverRuleFiles(projectDir);
+
+        // Assert
+        expect(files).toContain(path.join(nestedDir, 'react.md'));
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+      }
+    });
+  });
 });
 
 describe('readAndFormatRules', () => {

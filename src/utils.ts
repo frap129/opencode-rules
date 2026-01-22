@@ -83,63 +83,87 @@ function getGlobalRulesDir(): string | null {
 }
 
 /**
+ * Recursively scan a directory for markdown rule files
+ * Skips hidden files and directories (starting with .)
+ * @param dir - Directory to scan
+ * @param baseDir - Base directory for relative path calculation
+ * @returns Array of discovered file paths with their relative paths from baseDir
+ */
+function scanDirectoryRecursively(
+  dir: string,
+  baseDir: string
+): Array<{ filePath: string; relativePath: string }> {
+  const results: Array<{ filePath: string; relativePath: string }> = [];
+
+  if (!existsSync(dir)) {
+    return results;
+  }
+
+  try {
+    const entries = readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      // Skip hidden files and directories
+      if (entry.name.startsWith('.')) {
+        continue;
+      }
+
+      const fullPath = path.join(dir, entry.name);
+
+      if (entry.isDirectory()) {
+        // Recurse into subdirectory
+        results.push(...scanDirectoryRecursively(fullPath, baseDir));
+      } else if (entry.name.endsWith('.md') || entry.name.endsWith('.mdc')) {
+        // Add markdown file
+        const relativePath = path.relative(baseDir, fullPath);
+        results.push({ filePath: fullPath, relativePath });
+      }
+    }
+  } catch {
+    // Silently ignore directory read errors
+  }
+
+  return results;
+}
+
+/**
  * Discover markdown rule files from standard directories
- * Searches in:
- * - $XDG_CONFIG_HOME/opencode/rules/*.{md,mdc} (or ~/.config/opencode/rules as fallback)
- * - .opencode/rules/*.{md,mdc} (in project directory if provided)
+ * Searches recursively in:
+ * - $XDG_CONFIG_HOME/opencode/rules/ (or ~/.config/opencode/rules as fallback)
+ * - .opencode/rules/ (in project directory if provided)
+ * Finds all .md and .mdc files including nested subdirectories.
  */
 export async function discoverRuleFiles(
   projectDir?: string
 ): Promise<string[]> {
   const files: string[] = [];
 
-  // Discover global rules
+  // Discover global rules (recursively)
   const globalRulesDir = getGlobalRulesDir();
-  if (globalRulesDir && existsSync(globalRulesDir)) {
-    try {
-      const entries = readdirSync(globalRulesDir);
-      for (const entry of entries) {
-        // Skip hidden files and non-markdown files
-        if (
-          entry.startsWith('.') ||
-          (!entry.endsWith('.md') && !entry.endsWith('.mdc'))
-        ) {
-          continue;
-        }
-        const filePath = path.join(globalRulesDir, entry);
-        console.debug(
-          `[opencode-rules] Discovered global rule: ${entry} (${filePath})`
-        );
-        files.push(filePath);
-      }
-    } catch (error) {
-      // Silently ignore directory read errors
+  if (globalRulesDir) {
+    const globalRules = scanDirectoryRecursively(
+      globalRulesDir,
+      globalRulesDir
+    );
+    for (const { filePath, relativePath } of globalRules) {
+      console.debug(
+        `[opencode-rules] Discovered global rule: ${relativePath} (${filePath})`
+      );
+      files.push(filePath);
     }
   }
 
-  // Discover project-local rules if project directory is provided
+  // Discover project-local rules (recursively) if project directory is provided
   if (projectDir) {
     const projectRulesDir = path.join(projectDir, '.opencode', 'rules');
-    if (existsSync(projectRulesDir)) {
-      try {
-        const entries = readdirSync(projectRulesDir);
-        for (const entry of entries) {
-          // Skip hidden files and non-markdown files
-          if (
-            entry.startsWith('.') ||
-            (!entry.endsWith('.md') && !entry.endsWith('.mdc'))
-          ) {
-            continue;
-          }
-          const filePath = path.join(projectRulesDir, entry);
-          console.debug(
-            `[opencode-rules] Discovered project rule: ${entry} (${filePath})`
-          );
-          files.push(filePath);
-        }
-      } catch (error) {
-        // Silently ignore directory read errors
-      }
+    const projectRules = scanDirectoryRecursively(
+      projectRulesDir,
+      projectRulesDir
+    );
+    for (const { filePath, relativePath } of projectRules) {
+      console.debug(
+        `[opencode-rules] Discovered project rule: ${relativePath} (${filePath})`
+      );
+      files.push(filePath);
     }
   }
 

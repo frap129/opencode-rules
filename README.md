@@ -60,10 +60,12 @@ That's it! The rule will now be automatically injected into all AI agent prompts
 
 ### Rule Discovery Locations
 
-Rules are automatically discovered from these directories:
+Rules are automatically discovered from these directories (including all subdirectories):
 
 1. **Global rules**: `$XDG_CONFIG_HOME/opencode/rules/` (typically `~/.config/opencode/rules/`)
 2. **Project rules**: `.opencode/rules/` (in your project root)
+
+Both directories are scanned recursively, allowing you to organize rules into subdirectories.
 
 ### Supported File Formats
 
@@ -106,6 +108,24 @@ globs:
 ```
 
 This rule only applies when processing TypeScript files.
+
+### Organized Rules with Subdirectories
+
+You can organize rules into subdirectories for better management. Rules are discovered recursively from all subdirectories:
+
+```
+~/.config/opencode/rules/
+├── coding-standards.md        # Always applied
+├── typescript/
+│   ├── general.md             # TypeScript general rules
+│   └── react.mdc              # React-specific rules (conditional)
+├── testing/
+│   └── vitest.md              # Testing guidelines
+└── security/
+    └── api-keys.md            # Security rules
+```
+
+Hidden directories (starting with `.`) are automatically excluded from discovery.
 
 ### Project-Specific Rules
 
