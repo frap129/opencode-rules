@@ -14,35 +14,67 @@ import {
 
 /**
  * Per-session storage for context between hook calls.
- * Uses a Map keyed by the output object reference to avoid race conditions.
- * The messages.transform hook populates this, system.transform reads it,
- * then cleanup removes the entry to prevent memory leaks.
+ * Uses a Map keyed by sessionID to share context between messages.transform and system.transform.
+ * The messages.transform hook populates this, system.transform reads it.
  */
 interface SessionContext {
   filePaths: string[];
   userPrompt: string | undefined;
 }
 
-const sessionContextMap = new WeakMap<object, SessionContext>();
+const sessionContextMap = new Map<string, SessionContext>();
+
+/**
+ * Extract sessionID from messages array.
+ * Messages contain sessionID in their parts or info.
+ */
+function extractSessionID(messages: any[]): string | undefined {
+  for (const message of messages) {
+    // Check message.info for sessionID
+    if (message.info?.sessionID) {
+      return message.info.sessionID;
+    }
+    // Check parts for sessionID
+    if (message.parts) {
+      for (const part of message.parts) {
+        if (part.sessionID) {
+          return part.sessionID;
+        }
+      }
+    }
+  }
+  return undefined;
+}
 
 /**
  * Extract the latest user message text from messages array.
+ * Handles multiple message formats from OpenCode.
  * @param messages - Array of conversation messages
- * @returns The text content of the last user message, or undefined
+ * @returns The text content of the last message with text, or undefined
  */
 function extractLatestUserPrompt(messages: any[]): string | undefined {
-  // Find the last user message
+  // Find the last message with text content
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i];
-    if (message.role === 'user') {
-      // Extract text from parts
-      const textParts = message.parts
-        ?.filter((part: any) => part.type === 'text')
-        .map((part: any) => part.text);
+    const parts = message.parts || [];
 
-      if (textParts && textParts.length > 0) {
-        return textParts.join(' ');
+    // Extract text from parts - handle multiple formats:
+    // 1. { type: 'text', text: '...' } - standard format
+    // 2. { text: '...' } - alternative format without type field
+    const textParts: string[] = [];
+    for (const part of parts) {
+      // Skip synthetic/system-injected parts
+      if (part.synthetic) continue;
+
+      if (part.type === 'text' && part.text) {
+        textParts.push(part.text);
+      } else if (typeof part.text === 'string' && !part.type) {
+        textParts.push(part.text);
       }
+    }
+
+    if (textParts.length > 0) {
+      return textParts.join(' ');
     }
   }
   return undefined;
@@ -63,20 +95,26 @@ const openCodeRulesPlugin = async (input: PluginInput) => {
     /**
      * Extract file paths from messages for conditional rule filtering.
      * This hook fires before system.transform.
-     * Stores context in a WeakMap keyed by output object to avoid race conditions.
+     * Stores context in a Map keyed by sessionID extracted from messages.
      */
-    'experimental.chat.messages.transform': async ({
-      output,
-    }: {
-      output: any;
-    }) => {
+    'experimental.chat.messages.transform': async (
+      _input: Record<string, never>,
+      output: any
+    ) => {
+      // Extract sessionID from messages to use as storage key
+      const sessionID = extractSessionID(output.messages);
+      if (!sessionID) {
+        console.debug('[opencode-rules] No sessionID found in messages');
+        return output;
+      }
+
       // Extract paths from all messages
       const contextPaths = extractFilePathsFromMessages(output.messages);
       // Extract latest user prompt for keyword matching
       const userPrompt = extractLatestUserPrompt(output.messages);
 
-      // Store both in session context
-      sessionContextMap.set(output, {
+      // Store both in session context keyed by sessionID
+      sessionContextMap.set(sessionID, {
         filePaths: contextPaths,
         userPrompt,
       });
@@ -85,8 +123,6 @@ const openCodeRulesPlugin = async (input: PluginInput) => {
         console.debug(
           `[opencode-rules] Extracted ${contextPaths.length} context path(s): ${contextPaths.slice(0, 5).join(', ')}${contextPaths.length > 5 ? '...' : ''}`
         );
-      } else {
-        console.debug('[opencode-rules] No file paths found in messages');
       }
 
       if (userPrompt) {
@@ -101,15 +137,17 @@ const openCodeRulesPlugin = async (input: PluginInput) => {
 
     /**
      * Inject rules into the system prompt.
-     * Uses context paths from the messages.transform hook, retrieved from per-session storage.
+     * Uses context from the messages.transform hook, retrieved via sessionID.
      */
-    'experimental.chat.system.transform': async ({
-      output,
-    }: {
-      output: any;
-    }) => {
-      // Retrieve context specific to this session
-      const sessionContext = sessionContextMap.get(output);
+    'experimental.chat.system.transform': async (
+      input: { sessionID?: string },
+      output: any
+    ) => {
+      // Retrieve context using sessionID from input
+      const sessionID = input?.sessionID;
+      const sessionContext = sessionID
+        ? sessionContextMap.get(sessionID)
+        : undefined;
       const contextPaths = sessionContext?.filePaths || [];
       const userPrompt = sessionContext?.userPrompt;
 
@@ -124,25 +162,23 @@ const openCodeRulesPlugin = async (input: PluginInput) => {
         console.debug(
           '[opencode-rules] No applicable rules for current context'
         );
-        // Clean up after use
-        sessionContextMap.delete(output);
         return output;
       }
 
       console.debug('[opencode-rules] Injecting rules into system prompt');
 
-      // Append rules to system prompt
-      const result = {
-        ...output,
-        system: output.system
+      // Handle both array format (runtime) and string format (tests)
+      if (!output) {
+        return { system: formattedRules };
+      } else if (Array.isArray(output.system)) {
+        output.system.push(formattedRules);
+      } else {
+        output.system = output.system
           ? `${output.system}\n\n${formattedRules}`
-          : formattedRules,
-      };
+          : formattedRules;
+      }
 
-      // Clean up after use to prevent memory leaks
-      sessionContextMap.delete(output);
-
-      return result;
+      return output;
     },
   };
 };

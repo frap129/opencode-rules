@@ -1654,9 +1654,10 @@ describe('OpenCodeRulesPlugin', () => {
       const systemTransform = hooks[
         'experimental.chat.system.transform'
       ] as any;
-      const result = await systemTransform({
-        output: { system: 'You are a helpful assistant.' },
-      });
+      const result = await systemTransform(
+        {},
+        { system: 'You are a helpful assistant.' }
+      );
 
       // Assert
       expect(result.system).toContain('You are a helpful assistant.');
@@ -1689,9 +1690,10 @@ describe('OpenCodeRulesPlugin', () => {
       const systemTransform = hooks[
         'experimental.chat.system.transform'
       ] as any;
-      const result = await systemTransform({
-        output: { system: 'Original system prompt.' },
-      });
+      const result = await systemTransform(
+        {},
+        { system: 'Original system prompt.' }
+      );
 
       // Assert - original comes first, rules appended
       expect(result.system).toMatch(/^Original system prompt\./);
@@ -1723,9 +1725,7 @@ describe('OpenCodeRulesPlugin', () => {
       const systemTransform = hooks[
         'experimental.chat.system.transform'
       ] as any;
-      const result = await systemTransform({
-        output: { system: '' },
-      });
+      const result = await systemTransform({}, { system: '' });
 
       // Assert
       expect(result.system).toContain('OpenCode Rules');
@@ -1752,7 +1752,10 @@ describe('OpenCodeRulesPlugin', () => {
     };
 
     const originalMessages = [
-      { role: 'user', parts: [{ type: 'text', text: 'Hello' }] },
+      {
+        role: 'user',
+        parts: [{ sessionID: 'test-123', type: 'text', text: 'Hello' }],
+      },
     ];
 
     try {
@@ -1761,9 +1764,10 @@ describe('OpenCodeRulesPlugin', () => {
       const messagesTransform = hooks[
         'experimental.chat.messages.transform'
       ] as any;
-      const result = await messagesTransform({
-        output: { messages: originalMessages },
-      });
+      const result = await messagesTransform(
+        {},
+        { messages: originalMessages }
+      );
 
       // Assert - messages unchanged
       expect(result.messages).toEqual(originalMessages);
@@ -1801,13 +1805,15 @@ Use React best practices for components.`
         // Act
         const hooks = await plugin(mockInput);
 
-        // Create a shared output object for both transforms
-        const sharedOutput: any = {
+        // Create messages with sessionID in parts (as OpenCode does)
+        const testSessionID = 'test-session-123';
+        const messagesOutput: any = {
           messages: [
             {
               role: 'assistant',
               parts: [
                 {
+                  sessionID: testSessionID,
                   type: 'tool-invocation',
                   toolInvocation: {
                     toolName: 'read',
@@ -1817,6 +1823,9 @@ Use React best practices for components.`
               ],
             },
           ],
+        };
+
+        const systemOutput: any = {
           system: 'Base prompt.',
         };
 
@@ -1824,17 +1833,16 @@ Use React best practices for components.`
         const messagesTransform = hooks[
           'experimental.chat.messages.transform'
         ] as any;
-        await messagesTransform({
-          output: sharedOutput,
-        });
+        await messagesTransform({}, messagesOutput);
 
-        // Then, get the system prompt using the same output object
+        // Then, get the system prompt with sessionID in input
         const systemTransform = hooks[
           'experimental.chat.system.transform'
         ] as any;
-        const result = await systemTransform({
-          output: sharedOutput,
-        });
+        const result = await systemTransform(
+          { sessionID: testSessionID },
+          systemOutput
+        );
 
         // Assert - conditional rule should be included
         expect(result.system).toContain('React best practices');
@@ -1871,13 +1879,15 @@ Use React best practices for components.`
         // Act
         const hooks = await plugin(mockInput);
 
-        // Reuse the same output object that will be shared
-        const sharedOutput: any = {
+        // Create messages with sessionID in parts (as OpenCode does)
+        const testSessionID = 'test-session-456';
+        const messagesOutput: any = {
           messages: [
             {
               role: 'assistant',
               parts: [
                 {
+                  sessionID: testSessionID,
                   type: 'tool-invocation',
                   toolInvocation: {
                     toolName: 'read',
@@ -1887,6 +1897,9 @@ Use React best practices for components.`
               ],
             },
           ],
+        };
+
+        const systemOutput: any = {
           system: 'Base prompt.',
         };
 
@@ -1894,17 +1907,16 @@ Use React best practices for components.`
         const messagesTransform = hooks[
           'experimental.chat.messages.transform'
         ] as any;
-        await messagesTransform({
-          output: sharedOutput,
-        });
+        await messagesTransform({}, messagesOutput);
 
-        // Get the system prompt using the SAME output object
+        // Get the system prompt with sessionID in input
         const systemTransform = hooks[
           'experimental.chat.system.transform'
         ] as any;
-        const result = await systemTransform({
-          output: sharedOutput,
-        });
+        const result = await systemTransform(
+          { sessionID: testSessionID },
+          systemOutput
+        );
 
         // Assert - conditional rule should NOT be included
         expect(result.system).not.toContain('React best practices');
@@ -1945,14 +1957,24 @@ Special rule content.`
         // Act
         const hooks = await plugin(mockInput);
 
-        // Reuse the same output object for both hooks
-        const sharedOutput: any = {
+        // Create messages with sessionID in parts (as OpenCode does)
+        const testSessionID = 'test-session-789';
+        const messagesOutput: any = {
           messages: [
             {
               role: 'user',
-              parts: [{ type: 'text', text: 'Check src/index.ts' }],
+              parts: [
+                {
+                  sessionID: testSessionID,
+                  type: 'text',
+                  text: 'Check src/index.ts',
+                },
+              ],
             },
           ],
+        };
+
+        const systemOutput: any = {
           system: '',
         };
 
@@ -1960,16 +1982,15 @@ Special rule content.`
         const messagesTransform = hooks[
           'experimental.chat.messages.transform'
         ] as any;
-        await messagesTransform({
-          output: sharedOutput,
-        });
+        await messagesTransform({}, messagesOutput);
 
         const systemTransform = hooks[
           'experimental.chat.system.transform'
         ] as any;
-        const result = await systemTransform({
-          output: sharedOutput,
-        });
+        const result = await systemTransform(
+          { sessionID: testSessionID },
+          systemOutput
+        );
 
         // Assert
         expect(result.system).toContain('Always Apply');
@@ -2008,13 +2029,15 @@ Follow testing best practices.`
         // Act
         const hooks = await plugin(mockInput);
 
-        // Reuse the same output object for both hooks
-        const sharedOutput: any = {
+        // Create messages with sessionID in parts (as OpenCode does)
+        const testSessionID = 'test-session-multi';
+        const messagesOutput: any = {
           messages: [
             {
               role: 'assistant',
               parts: [
                 {
+                  sessionID: testSessionID,
                   type: 'tool-invocation',
                   toolInvocation: {
                     toolName: 'read',
@@ -2031,6 +2054,9 @@ Follow testing best practices.`
               ],
             },
           ],
+        };
+
+        const systemOutput: any = {
           system: '',
         };
 
@@ -2038,16 +2064,15 @@ Follow testing best practices.`
         const messagesTransform = hooks[
           'experimental.chat.messages.transform'
         ] as any;
-        await messagesTransform({
-          output: sharedOutput,
-        });
+        await messagesTransform({}, messagesOutput);
 
         const systemTransform = hooks[
           'experimental.chat.system.transform'
         ] as any;
-        const result = await systemTransform({
-          output: sharedOutput,
-        });
+        const result = await systemTransform(
+          { sessionID: testSessionID },
+          systemOutput
+        );
 
         // Assert - rule should be included because at least one file matches
         expect(result.system).toContain('testing best practices');
