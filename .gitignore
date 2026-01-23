@@ -50,3 +50,6 @@ Thumbs.db
 # Temporary folders
 tmp/
 temp/
+
+# Agent planning
+.opencode/plans

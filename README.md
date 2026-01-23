@@ -381,6 +381,17 @@ We welcome contributions! Please:
 - Update documentation for API changes
 - Use TypeScript for all new code
 
+## Included Skill: crafting-rules
+
+This repository includes a `crafting-rules/` skill that teaches AI agents how to create well-formatted rules. The skill provides:
+
+- **Rule format reference** - Frontmatter fields (`globs`, `keywords`) and markdown body structure
+- **Matching strategy guidance** - When to use globs vs keywords vs both vs neither
+- **Pattern extraction workflow** - How to identify repeated conversation patterns that should become rules
+- **Keyword safety guidelines** - Denylist of overly broad keywords to avoid, allowlist of safe alternatives, and an audit checklist
+
+To use the skill, copy `skills/crafting-rules/` to `~/.config/opencode/skills/` or reference it directly. The skill triggers when users ask to create rules, codify preferences, or persist guidance across sessions.
+
 ## See Also
 
 - [OpenCode Documentation](https://docs.opencode.ai/)
