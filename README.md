@@ -1,5 +1,8 @@
 # opencode-rules
 
+[![npm version](https://img.shields.io/npm/v/opencode-rules)](https://www.npmjs.com/package/opencode-rules)
+[![npm downloads](https://img.shields.io/npm/dm/opencode-rules)](https://www.npmjs.com/package/opencode-rules)
+
 A lightweight OpenCode plugin that discovers and injects markdown rule files into AI agent system prompts, enabling flexible behavior customization without per-project configuration.
 
 ## Overview
@@ -35,7 +38,7 @@ Add the plugin to your opoencode config:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-rules"]
+  "plugin": ["opencode-rules@latest"]
 }
 ```
 
