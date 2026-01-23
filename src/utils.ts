@@ -2,10 +2,92 @@
  * Utility functions for OpenCode Rules Plugin
  */
 
-import { readdirSync, readFileSync, existsSync } from 'fs';
+import { readdirSync, readFileSync, existsSync, statSync } from 'fs';
 import path from 'path';
 import os from 'os';
 import { minimatch } from 'minimatch';
+import { parse as parseYaml } from 'yaml';
+
+/**
+ * Debug logging helper - only logs when OPENCODE_RULES_DEBUG env var is set.
+ * This prevents noisy output during normal operation.
+ */
+function debugLog(message: string): void {
+  if (process.env.OPENCODE_RULES_DEBUG) {
+    console.debug(`[opencode-rules] ${message}`);
+  }
+}
+
+/**
+ * Cached rule data for performance optimization
+ */
+interface CachedRule {
+  /** Raw file content */
+  content: string;
+  /** Parsed metadata from frontmatter */
+  metadata: RuleMetadata | undefined;
+  /** Content with frontmatter stripped */
+  strippedContent: string;
+  /** File modification time for cache invalidation */
+  mtime: number;
+}
+
+/**
+ * Rule cache keyed by absolute file path
+ */
+const ruleCache = new Map<string, CachedRule>();
+
+/**
+ * Clear the rule cache (useful for testing or manual invalidation)
+ */
+export function clearRuleCache(): void {
+  ruleCache.clear();
+}
+
+/**
+ * Get cached rule data, refreshing from disk if file has changed.
+ * Uses mtime-based invalidation to detect file changes.
+ *
+ * @param filePath - Absolute path to the rule file
+ * @returns Cached rule data or undefined if file cannot be read
+ */
+function getCachedRule(filePath: string): CachedRule | undefined {
+  try {
+    const stats = statSync(filePath);
+    const mtime = stats.mtimeMs;
+
+    // Check if we have a valid cached entry
+    const cached = ruleCache.get(filePath);
+    if (cached && cached.mtime === mtime) {
+      debugLog(`Cache hit: ${filePath}`);
+      return cached;
+    }
+
+    // Read and cache the file
+    debugLog(`Cache miss: ${filePath}`);
+    const content = readFileSync(filePath, 'utf-8');
+    const metadata = parseRuleMetadata(content);
+    const strippedContent = stripFrontmatter(content);
+
+    const entry: CachedRule = {
+      content,
+      metadata,
+      strippedContent,
+      mtime,
+    };
+
+    ruleCache.set(filePath, entry);
+    return entry;
+  } catch (error) {
+    // Remove stale cache entry if file no longer exists
+    ruleCache.delete(filePath);
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(
+      `[opencode-rules] Warning: Failed to read rule file ${filePath}: ${message}`
+    );
+    return undefined;
+  }
+}
 
 /**
  * Check if a file path matches any of the given glob patterns
@@ -47,8 +129,16 @@ export interface RuleMetadata {
 }
 
 /**
- * Parse YAML metadata from rule file content
- * Extracts frontmatter (---) and returns metadata object
+ * Raw parsed YAML frontmatter structure
+ */
+interface ParsedFrontmatter {
+  globs?: unknown;
+  keywords?: unknown;
+}
+
+/**
+ * Parse YAML metadata from rule file content using the yaml package.
+ * Extracts frontmatter (---) and returns metadata object.
  */
 export function parseRuleMetadata(content: string): RuleMetadata | undefined {
   // Check if content starts with frontmatter
@@ -64,60 +154,51 @@ export function parseRuleMetadata(content: string): RuleMetadata | undefined {
 
   // Extract the YAML frontmatter
   const frontmatter = content.substring(3, endIndex).trim();
-
-  // Parse globs from YAML
-  const metadata: RuleMetadata = {};
-  const globsMatch = frontmatter.match(/globs:\s*\n([\s\S]*?)(?=\n[a-z]|\n*$)/);
-
-  if (globsMatch) {
-    // Extract array items (lines starting with "- ")
-    const globs: string[] = [];
-    const globLines = globsMatch[1].split('\n');
-    for (const line of globLines) {
-      const trimmed = line.trim();
-      if (trimmed.startsWith('- ')) {
-        const glob = trimmed
-          .substring(2)
-          .replace(/^["']|["']$/g, '')
-          .trim();
-        if (glob) {
-          globs.push(glob);
-        }
-      }
-    }
-    if (globs.length > 0) {
-      metadata.globs = globs;
-    }
+  if (!frontmatter) {
+    return undefined;
   }
 
-  // Parse keywords from YAML
-  const keywordsMatch = frontmatter.match(
-    /keywords:\s*\n([\s\S]*?)(?=\n[a-z]|\n*$)/
-  );
+  try {
+    // Parse YAML using the yaml package
+    const parsed = parseYaml(frontmatter) as ParsedFrontmatter | null;
+    if (!parsed || typeof parsed !== 'object') {
+      return undefined;
+    }
 
-  if (keywordsMatch) {
-    // Extract array items (lines starting with "- ")
-    const keywords: string[] = [];
-    const keywordLines = keywordsMatch[1].split('\n');
-    for (const line of keywordLines) {
-      const trimmed = line.trim();
-      if (trimmed.startsWith('- ')) {
-        const keyword = trimmed
-          .substring(2)
-          .replace(/^["']|["']$/g, '')
-          .trim();
-        if (keyword) {
-          keywords.push(keyword);
-        }
+    const metadata: RuleMetadata = {};
+
+    // Extract globs array
+    if (Array.isArray(parsed.globs)) {
+      const globs = parsed.globs
+        .filter((g): g is string => typeof g === 'string')
+        .map(g => g.trim())
+        .filter(g => g.length > 0);
+      if (globs.length > 0) {
+        metadata.globs = globs;
       }
     }
-    if (keywords.length > 0) {
-      metadata.keywords = keywords;
-    }
-  }
 
-  // Return metadata only if it has content
-  return Object.keys(metadata).length > 0 ? metadata : undefined;
+    // Extract keywords array
+    if (Array.isArray(parsed.keywords)) {
+      const keywords = parsed.keywords
+        .filter((k): k is string => typeof k === 'string')
+        .map(k => k.trim())
+        .filter(k => k.length > 0);
+      if (keywords.length > 0) {
+        metadata.keywords = keywords;
+      }
+    }
+
+    // Return metadata only if it has content
+    return Object.keys(metadata).length > 0 ? metadata : undefined;
+  } catch (error) {
+    // Log warning for YAML parsing errors
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(
+      `[opencode-rules] Warning: Failed to parse YAML frontmatter: ${message}`
+    );
+    return undefined;
+  }
 }
 
 /**
@@ -169,11 +250,25 @@ function scanDirectoryRecursively(
         results.push({ filePath: fullPath, relativePath });
       }
     }
-  } catch {
-    // Silently ignore directory read errors
+  } catch (error) {
+    // Log directory read errors instead of silently ignoring
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(
+      `[opencode-rules] Warning: Failed to read directory ${dir}: ${message}`
+    );
   }
 
   return results;
+}
+
+/**
+ * Discovered rule file with both absolute and relative paths
+ */
+export interface DiscoveredRule {
+  /** Absolute path to the rule file */
+  filePath: string;
+  /** Relative path from the rules directory root (for unique headings) */
+  relativePath: string;
 }
 
 /**
@@ -185,8 +280,8 @@ function scanDirectoryRecursively(
  */
 export async function discoverRuleFiles(
   projectDir?: string
-): Promise<string[]> {
-  const files: string[] = [];
+): Promise<DiscoveredRule[]> {
+  const files: DiscoveredRule[] = [];
 
   // Discover global rules (recursively)
   const globalRulesDir = getGlobalRulesDir();
@@ -196,10 +291,8 @@ export async function discoverRuleFiles(
       globalRulesDir
     );
     for (const { filePath, relativePath } of globalRules) {
-      console.debug(
-        `[opencode-rules] Discovered global rule: ${relativePath} (${filePath})`
-      );
-      files.push(filePath);
+      debugLog(`Discovered global rule: ${relativePath} (${filePath})`);
+      files.push({ filePath, relativePath });
     }
   }
 
@@ -211,10 +304,8 @@ export async function discoverRuleFiles(
       projectRulesDir
     );
     for (const { filePath, relativePath } of projectRules) {
-      console.debug(
-        `[opencode-rules] Discovered project rule: ${relativePath} (${filePath})`
-      );
-      files.push(filePath);
+      debugLog(`Discovered project rule: ${relativePath} (${filePath})`);
+      files.push({ filePath, relativePath });
     }
   }
 
@@ -242,12 +333,12 @@ function stripFrontmatter(content: string): string {
 
 /**
  * Read and format rule files for system prompt injection
- * @param files - Array of rule file paths
+ * @param files - Array of discovered rule files with paths
  * @param contextFilePaths - Optional array of file paths from conversation context (used to filter conditional rules)
  * @param userPrompt - Optional user prompt text (used for keyword matching)
  */
 export async function readAndFormatRules(
-  files: string[],
+  files: DiscoveredRule[],
   contextFilePaths?: string[],
   userPrompt?: string
 ): Promise<string> {
@@ -257,52 +348,49 @@ export async function readAndFormatRules(
 
   const ruleContents: string[] = [];
 
-  for (const file of files) {
-    try {
-      const content = readFileSync(file, 'utf-8');
-      const filename = path.basename(file);
+  for (const { filePath, relativePath } of files) {
+    // Use cached rule data with mtime-based invalidation
+    const cachedRule = getCachedRule(filePath);
+    if (!cachedRule) {
+      continue; // Error already logged by getCachedRule
+    }
 
-      // Parse metadata to check if rule should apply
-      const metadata = parseRuleMetadata(content);
+    const { metadata, strippedContent } = cachedRule;
 
-      // Rules with metadata (globs or keywords) require matching
-      // OR logic: rule applies if keywords match OR globs match
-      if (metadata?.globs || metadata?.keywords) {
-        let globsMatch = false;
-        let keywordsMatch = false;
+    // Rules with metadata (globs or keywords) require matching
+    // OR logic: rule applies if keywords match OR globs match
+    if (metadata?.globs || metadata?.keywords) {
+      let globsMatch = false;
+      let keywordsMatch = false;
 
-        // Check globs against context file paths
-        if (metadata.globs && contextFilePaths && contextFilePaths.length > 0) {
-          globsMatch = contextFilePaths.some(contextPath =>
-            fileMatchesGlobs(contextPath, metadata.globs!)
-          );
-        }
-
-        // Check keywords against user prompt
-        if (metadata.keywords && userPrompt) {
-          keywordsMatch = promptMatchesKeywords(userPrompt, metadata.keywords);
-        }
-
-        // If rule has conditions but none match, skip it
-        if (!globsMatch && !keywordsMatch) {
-          console.debug(
-            `[opencode-rules] Skipping conditional rule: ${filename} (no matching paths or keywords)`
-          );
-          continue;
-        }
-
-        console.debug(
-          `[opencode-rules] Including conditional rule: ${filename} (globs: ${globsMatch}, keywords: ${keywordsMatch})`
+      // Check globs against context file paths
+      if (metadata.globs && contextFilePaths && contextFilePaths.length > 0) {
+        globsMatch = contextFilePaths.some(contextPath =>
+          fileMatchesGlobs(contextPath, metadata.globs!)
         );
       }
 
-      // Strip frontmatter before adding to output
-      const cleanContent = stripFrontmatter(content);
-      ruleContents.push(`## ${filename}\n\n${cleanContent}`);
-    } catch (error) {
-      // Log warning but continue with other files
-      console.warn(`Warning: Failed to read rule file: ${file}`);
+      // Check keywords against user prompt
+      if (metadata.keywords && userPrompt) {
+        keywordsMatch = promptMatchesKeywords(userPrompt, metadata.keywords);
+      }
+
+      // If rule has conditions but none match, skip it
+      if (!globsMatch && !keywordsMatch) {
+        debugLog(
+          `Skipping conditional rule: ${relativePath} (no matching paths or keywords)`
+        );
+        continue;
+      }
+
+      debugLog(
+        `Including conditional rule: ${relativePath} (globs: ${globsMatch}, keywords: ${keywordsMatch})`
+      );
     }
+
+    // Use cached stripped content for output
+    // Use relativePath for unique headings instead of just filename
+    ruleContents.push(`## ${relativePath}\n\n${strippedContent}`);
   }
 
   if (ruleContents.length === 0) {
@@ -333,7 +421,7 @@ interface TextPart {
 
 type MessagePart = ToolInvocationPart | TextPart | { type: string };
 
-interface Message {
+export interface Message {
   role: string;
   parts: MessagePart[];
 }

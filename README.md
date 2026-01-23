@@ -328,10 +328,25 @@ These APIs may change in future OpenCode versions. Check OpenCode release notes 
 ## Performance
 
 - Rule discovery performed once at plugin initialization
-- Async file operations to prevent blocking
+- Rule content cached with mtime-based invalidation for fast re-reads
+- Efficient synchronous file operations during initialization
 - Optimized glob matching with `minimatch`
-- Minimal memory footprint with efficient file reading
-- Per-call context extraction using WeakMap to prevent memory leaks
+- Session context deleted after use to prevent memory leaks
+- Minimal memory footprint with efficient caching
+
+## Debug Logging
+
+To enable debug logging, set the `OPENCODE_RULES_DEBUG` environment variable:
+
+```bash
+OPENCODE_RULES_DEBUG=1 opencode
+```
+
+This will log information about:
+
+- Rule discovery (files found)
+- Cache hits/misses
+- Rule filtering (which rules are included/skipped)
 
 ## Troubleshooting
 

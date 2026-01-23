@@ -15,7 +15,7 @@ import {
 /**
  * Per-session storage for context between hook calls.
  * Uses a Map keyed by sessionID to share context between messages.transform and system.transform.
- * The messages.transform hook populates this, system.transform reads it.
+ * The messages.transform hook populates this, system.transform reads it and deletes the entry.
  */
 interface SessionContext {
   filePaths: string[];
@@ -25,10 +25,62 @@ interface SessionContext {
 const sessionContextMap = new Map<string, SessionContext>();
 
 /**
+ * Debug logging helper - only logs when OPENCODE_RULES_DEBUG env var is set.
+ * This prevents noisy output during normal operation.
+ */
+function debugLog(message: string): void {
+  if (process.env.OPENCODE_RULES_DEBUG) {
+    console.debug(`[opencode-rules] ${message}`);
+  }
+}
+
+/**
+ * Message part with optional sessionID (for messages.transform hook)
+ */
+interface MessagePartWithSession {
+  type?: string;
+  text?: string;
+  sessionID?: string;
+  synthetic?: boolean;
+}
+
+/**
+ * Message with optional info containing sessionID
+ */
+interface MessageWithInfo {
+  role?: string;
+  parts?: MessagePartWithSession[];
+  info?: {
+    sessionID?: string;
+  };
+}
+
+/**
+ * Output from the messages.transform hook
+ */
+interface MessagesTransformOutput {
+  messages: MessageWithInfo[];
+}
+
+/**
+ * Input for the system.transform hook
+ */
+interface SystemTransformInput {
+  sessionID?: string;
+}
+
+/**
+ * Output from the system.transform hook
+ */
+interface SystemTransformOutput {
+  system?: string | string[];
+}
+
+/**
  * Extract sessionID from messages array.
  * Messages contain sessionID in their parts or info.
  */
-function extractSessionID(messages: any[]): string | undefined {
+function extractSessionID(messages: MessageWithInfo[]): string | undefined {
   for (const message of messages) {
     // Check message.info for sessionID
     if (message.info?.sessionID) {
@@ -52,7 +104,9 @@ function extractSessionID(messages: any[]): string | undefined {
  * @param messages - Array of conversation messages
  * @returns The text content of the last message with text, or undefined
  */
-function extractLatestUserPrompt(messages: any[]): string | undefined {
+function extractLatestUserPrompt(
+  messages: MessageWithInfo[]
+): string | undefined {
   // Find the last message with text content
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i];
@@ -89,7 +143,7 @@ const openCodeRulesPlugin = async (input: PluginInput) => {
   // Discover rule files from global and project directories
   const ruleFiles = await discoverRuleFiles(input.directory);
 
-  console.debug(`[opencode-rules] Discovered ${ruleFiles.length} rule file(s)`);
+  debugLog(`Discovered ${ruleFiles.length} rule file(s)`);
 
   return {
     /**
@@ -99,17 +153,21 @@ const openCodeRulesPlugin = async (input: PluginInput) => {
      */
     'experimental.chat.messages.transform': async (
       _input: Record<string, never>,
-      output: any
-    ) => {
+      output: MessagesTransformOutput
+    ): Promise<MessagesTransformOutput> => {
       // Extract sessionID from messages to use as storage key
       const sessionID = extractSessionID(output.messages);
       if (!sessionID) {
-        console.debug('[opencode-rules] No sessionID found in messages');
+        debugLog('No sessionID found in messages');
         return output;
       }
 
-      // Extract paths from all messages
-      const contextPaths = extractFilePathsFromMessages(output.messages);
+      // Extract paths from all messages (cast to compatible type)
+      const contextPaths = extractFilePathsFromMessages(
+        output.messages as unknown as Parameters<
+          typeof extractFilePathsFromMessages
+        >[0]
+      );
       // Extract latest user prompt for keyword matching
       const userPrompt = extractLatestUserPrompt(output.messages);
 
@@ -120,14 +178,14 @@ const openCodeRulesPlugin = async (input: PluginInput) => {
       });
 
       if (contextPaths.length > 0) {
-        console.debug(
-          `[opencode-rules] Extracted ${contextPaths.length} context path(s): ${contextPaths.slice(0, 5).join(', ')}${contextPaths.length > 5 ? '...' : ''}`
+        debugLog(
+          `Extracted ${contextPaths.length} context path(s): ${contextPaths.slice(0, 5).join(', ')}${contextPaths.length > 5 ? '...' : ''}`
         );
       }
 
       if (userPrompt) {
-        console.debug(
-          `[opencode-rules] User prompt: "${userPrompt.slice(0, 50)}${userPrompt.length > 50 ? '...' : ''}"`
+        debugLog(
+          `User prompt: "${userPrompt.slice(0, 50)}${userPrompt.length > 50 ? '...' : ''}"`
         );
       }
 
@@ -138,11 +196,12 @@ const openCodeRulesPlugin = async (input: PluginInput) => {
     /**
      * Inject rules into the system prompt.
      * Uses context from the messages.transform hook, retrieved via sessionID.
+     * Deletes the session context after reading to prevent memory leaks.
      */
     'experimental.chat.system.transform': async (
-      input: { sessionID?: string },
-      output: any
-    ) => {
+      input: SystemTransformInput,
+      output: SystemTransformOutput | null
+    ): Promise<SystemTransformOutput> => {
       // Retrieve context using sessionID from input
       const sessionID = input?.sessionID;
       const sessionContext = sessionID
@@ -150,6 +209,11 @@ const openCodeRulesPlugin = async (input: PluginInput) => {
         : undefined;
       const contextPaths = sessionContext?.filePaths || [];
       const userPrompt = sessionContext?.userPrompt;
+
+      // Delete the session context after reading to prevent memory leaks
+      if (sessionID) {
+        sessionContextMap.delete(sessionID);
+      }
 
       // Format rules, filtering by context paths and user prompt
       const formattedRules = await readAndFormatRules(
@@ -159,13 +223,11 @@ const openCodeRulesPlugin = async (input: PluginInput) => {
       );
 
       if (!formattedRules) {
-        console.debug(
-          '[opencode-rules] No applicable rules for current context'
-        );
-        return output;
+        debugLog('No applicable rules for current context');
+        return output ?? {};
       }
 
-      console.debug('[opencode-rules] Injecting rules into system prompt');
+      debugLog('Injecting rules into system prompt');
 
       // Handle both array format (runtime) and string format (tests)
       if (!output) {

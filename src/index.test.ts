@@ -1,30 +1,43 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import path from 'path';
-import { mkdirSync, writeFileSync, rmSync } from 'fs';
+import os from 'os';
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'fs';
 import {
   discoverRuleFiles,
   readAndFormatRules,
   parseRuleMetadata,
   extractFilePathsFromMessages,
   promptMatchesKeywords,
+  clearRuleCache,
+  type DiscoveredRule,
 } from './utils.js';
 
-// Create temporary test directories
-const testDir = '/tmp/opencode-rules-test';
-const globalRulesDir = path.join(testDir, '.config', 'opencode', 'rules');
-const projectRulesDir = path.join(testDir, 'project', '.opencode', 'rules');
+// Test directories - initialized in setupTestDirs
+let testDir: string;
+let globalRulesDir: string;
+let projectRulesDir: string;
+
+/**
+ * Helper to convert file paths to DiscoveredRule objects for testing
+ */
+function toRules(paths: string[]): DiscoveredRule[] {
+  return paths.map(filePath => ({
+    filePath,
+    relativePath: path.basename(filePath),
+  }));
+}
 
 function setupTestDirs() {
-  // Clean up if exists
-  if (require('fs').existsSync(testDir)) {
-    rmSync(testDir, { recursive: true, force: true });
-  }
+  // Create a unique temporary directory for each test run
+  testDir = mkdtempSync(path.join(os.tmpdir(), 'opencode-rules-test-'));
+  globalRulesDir = path.join(testDir, '.config', 'opencode', 'rules');
+  projectRulesDir = path.join(testDir, 'project', '.opencode', 'rules');
   mkdirSync(globalRulesDir, { recursive: true });
   mkdirSync(projectRulesDir, { recursive: true });
 }
 
 function teardownTestDirs() {
-  if (require('fs').existsSync(testDir)) {
+  if (testDir) {
     rmSync(testDir, { recursive: true, force: true });
   }
 }
@@ -832,8 +845,12 @@ describe('discoverRuleFiles', () => {
         const files = await discoverRuleFiles();
 
         // Assert
-        expect(files).toContain(path.join(globalRulesDir, 'rule1.md'));
-        expect(files).toContain(path.join(globalRulesDir, 'rule2.md'));
+        expect(
+          files.some(f => f.filePath === path.join(globalRulesDir, 'rule1.md'))
+        ).toBe(true);
+        expect(
+          files.some(f => f.filePath === path.join(globalRulesDir, 'rule2.md'))
+        ).toBe(true);
       } finally {
         process.env.XDG_CONFIG_HOME = originalEnv;
       }
@@ -858,7 +875,9 @@ describe('discoverRuleFiles', () => {
         const files = await discoverRuleFiles();
 
         // Assert
-        expect(files).toContain(path.join(fallbackDir, 'rule.md'));
+        expect(
+          files.some(f => f.filePath === path.join(fallbackDir, 'rule.md'))
+        ).toBe(true);
       } finally {
         process.env.HOME = originalHome;
         process.env.XDG_CONFIG_HOME = originalXDG;
@@ -901,8 +920,8 @@ describe('discoverRuleFiles', () => {
 
         // Assert
         expect(files).toHaveLength(2);
-        expect(files.some(f => f.endsWith('.md'))).toBe(true);
-        expect(files.some(f => f.endsWith('.mdc'))).toBe(true);
+        expect(files.some(f => f.filePath.endsWith('.md'))).toBe(true);
+        expect(files.some(f => f.filePath.endsWith('.mdc'))).toBe(true);
       } finally {
         process.env.XDG_CONFIG_HOME = originalEnv;
       }
@@ -921,7 +940,7 @@ describe('discoverRuleFiles', () => {
         const files = await discoverRuleFiles();
 
         // Assert
-        expect(files).not.toContainEqual(expect.stringContaining('.hidden.md'));
+        expect(files.every(f => !f.filePath.includes('.hidden.md'))).toBe(true);
       } finally {
         process.env.XDG_CONFIG_HOME = originalEnv;
       }
@@ -941,7 +960,9 @@ describe('discoverRuleFiles', () => {
       const files = await discoverRuleFiles(projectDir);
 
       // Assert
-      expect(files).toContain(path.join(projRulesDir, 'local-rule.md'));
+      expect(
+        files.some(f => f.filePath === path.join(projRulesDir, 'local-rule.md'))
+      ).toBe(true);
     });
 
     it('should handle missing .opencode directory gracefully', async () => {
@@ -981,8 +1002,8 @@ describe('discoverRuleFiles', () => {
 
         // Assert
         expect(files).toHaveLength(2);
-        expect(files).toContainEqual(expect.stringContaining('global.md'));
-        expect(files).toContainEqual(expect.stringContaining('local.md'));
+        expect(files.some(f => f.filePath.includes('global.md'))).toBe(true);
+        expect(files.some(f => f.filePath.includes('local.md'))).toBe(true);
       } finally {
         process.env.XDG_CONFIG_HOME = originalEnv;
       }
@@ -1004,7 +1025,9 @@ describe('discoverRuleFiles', () => {
         const files = await discoverRuleFiles();
 
         // Assert
-        expect(files).toContain(path.join(nestedDir, 'react.md'));
+        expect(
+          files.some(f => f.filePath === path.join(nestedDir, 'react.md'))
+        ).toBe(true);
       } finally {
         process.env.XDG_CONFIG_HOME = originalEnv;
       }
@@ -1029,7 +1052,9 @@ describe('discoverRuleFiles', () => {
         const files = await discoverRuleFiles();
 
         // Assert
-        expect(files).toContain(path.join(deepDir, 'nextjs.md'));
+        expect(
+          files.some(f => f.filePath === path.join(deepDir, 'nextjs.md'))
+        ).toBe(true);
       } finally {
         process.env.XDG_CONFIG_HOME = originalEnv;
       }
@@ -1050,9 +1075,13 @@ describe('discoverRuleFiles', () => {
         const files = await discoverRuleFiles();
 
         // Assert
-        expect(files).not.toContainEqual(expect.stringContaining('.hidden'));
-        expect(files).not.toContainEqual(expect.stringContaining('secret.md'));
-        expect(files).toContain(path.join(globalRulesDir, 'visible.md'));
+        expect(files.every(f => !f.filePath.includes('.hidden'))).toBe(true);
+        expect(files.every(f => !f.filePath.includes('secret.md'))).toBe(true);
+        expect(
+          files.some(
+            f => f.filePath === path.join(globalRulesDir, 'visible.md')
+          )
+        ).toBe(true);
       } finally {
         process.env.XDG_CONFIG_HOME = originalEnv;
       }
@@ -1074,8 +1103,12 @@ describe('discoverRuleFiles', () => {
 
         // Assert
         expect(files).toHaveLength(2);
-        expect(files).toContain(path.join(globalRulesDir, 'root.md'));
-        expect(files).toContain(path.join(nestedDir, 'child.md'));
+        expect(
+          files.some(f => f.filePath === path.join(globalRulesDir, 'root.md'))
+        ).toBe(true);
+        expect(
+          files.some(f => f.filePath === path.join(nestedDir, 'child.md'))
+        ).toBe(true);
       } finally {
         process.env.XDG_CONFIG_HOME = originalEnv;
       }
@@ -1097,7 +1130,9 @@ describe('discoverRuleFiles', () => {
         const files = await discoverRuleFiles(projectDir);
 
         // Assert
-        expect(files).toContain(path.join(nestedDir, 'react.md'));
+        expect(
+          files.some(f => f.filePath === path.join(nestedDir, 'react.md'))
+        ).toBe(true);
       } finally {
         process.env.XDG_CONFIG_HOME = originalEnv;
       }
@@ -1121,7 +1156,7 @@ describe('readAndFormatRules', () => {
     writeFileSync(rule1Path, '# Rule 1\nContent of rule 1');
     writeFileSync(rule2Path, '# Rule 2\nContent of rule 2');
 
-    const files = [rule1Path, rule2Path];
+    const files = toRules([rule1Path, rule2Path]);
 
     // Act
     const formatted = await readAndFormatRules(files);
@@ -1149,7 +1184,9 @@ describe('readAndFormatRules', () => {
     writeFileSync(validFile, '# Valid Rule');
 
     // Act & Assert - should not throw
-    const formatted = await readAndFormatRules([nonExistentFile, validFile]);
+    const formatted = await readAndFormatRules(
+      toRules([nonExistentFile, validFile])
+    );
 
     // Should still include the valid file
     expect(formatted).toContain('valid.md');
@@ -1161,7 +1198,7 @@ describe('readAndFormatRules', () => {
     writeFileSync(rulePath, 'Rule content');
 
     // Act
-    const formatted = await readAndFormatRules([rulePath]);
+    const formatted = await readAndFormatRules(toRules([rulePath]));
 
     // Assert
     expect(formatted).toMatch(/##\s+my-rules\.md/);
@@ -1173,7 +1210,7 @@ describe('readAndFormatRules', () => {
     writeFileSync(rulePath, 'Rule content');
 
     // Act
-    const formatted = await readAndFormatRules([rulePath]);
+    const formatted = await readAndFormatRules(toRules([rulePath]));
 
     // Assert - check for language indicating rules should be followed
     expect(formatted.toLowerCase()).toMatch(
@@ -1187,10 +1224,9 @@ describe('readAndFormatRules', () => {
     writeFileSync(rulePath, 'This rule always applies');
 
     // Act
-    const formatted = await readAndFormatRules(
-      [rulePath],
-      ['src/utils/helpers.js']
-    );
+    const formatted = await readAndFormatRules(toRules([rulePath]), [
+      'src/utils/helpers.js',
+    ]);
 
     // Assert - rule should be included even though file doesn't match any pattern
     expect(formatted).toContain('unconditional.mdc');
@@ -1209,10 +1245,9 @@ This is a rule for TypeScript components.`;
     writeFileSync(rulePath, ruleContent);
 
     // Act - testing with a matching file path
-    const formatted = await readAndFormatRules(
-      [rulePath],
-      ['src/components/button.ts']
-    );
+    const formatted = await readAndFormatRules(toRules([rulePath]), [
+      'src/components/button.ts',
+    ]);
 
     // Assert
     expect(formatted).toContain('typescript.mdc');
@@ -1231,10 +1266,9 @@ This is a rule for TypeScript components.`;
     writeFileSync(rulePath, ruleContent);
 
     // Act - testing with a non-matching file path
-    const formatted = await readAndFormatRules(
-      [rulePath],
-      ['src/utils/helpers.js']
-    );
+    const formatted = await readAndFormatRules(toRules([rulePath]), [
+      'src/utils/helpers.js',
+    ]);
 
     // Assert - should return empty because rule doesn't apply
     expect(formatted).toBe('');
@@ -1253,10 +1287,9 @@ Multi-pattern rule`;
     writeFileSync(rulePath, ruleContent);
 
     // Act - test with file matching second pattern
-    const formatted = await readAndFormatRules(
-      [rulePath],
-      ['lib/utils/helper.js']
-    );
+    const formatted = await readAndFormatRules(toRules([rulePath]), [
+      'lib/utils/helper.js',
+    ]);
 
     // Assert
     expect(formatted).toContain('multi.mdc');
@@ -1281,7 +1314,7 @@ Only for TypeScript`
 
     // Act - test with matching TypeScript file
     const formatted = await readAndFormatRules(
-      [unconditionalPath, conditionalPath],
+      toRules([unconditionalPath, conditionalPath]),
       ['src/app.ts']
     );
 
@@ -1310,7 +1343,7 @@ Only for TypeScript`
 
     // Act - test with non-matching file
     const formatted = await readAndFormatRules(
-      [unconditionalPath, conditionalPath],
+      toRules([unconditionalPath, conditionalPath]),
       ['docs/readme.md']
     );
 
@@ -1334,7 +1367,7 @@ TypeScript only rule`
     );
 
     // Act - no file path provided
-    const formatted = await readAndFormatRules([rulePath]);
+    const formatted = await readAndFormatRules(toRules([rulePath]));
 
     // Assert - rule should NOT be applied (conditions not satisfied)
     expect(formatted).toBe('');
@@ -1356,7 +1389,7 @@ Follow testing best practices.`
 
     // Act - prompt matches keyword
     const formatted = await readAndFormatRules(
-      [rulePath],
+      toRules([rulePath]),
       [],
       'I need help testing this function'
     );
@@ -1382,7 +1415,7 @@ Follow testing best practices.`
 
     // Act - prompt does not match
     const formatted = await readAndFormatRules(
-      [rulePath],
+      toRules([rulePath]),
       [],
       'help me with the database'
     );
@@ -1408,7 +1441,7 @@ Testing standards.`
 
     // Act - keywords match but no test files in context
     const formatted = await readAndFormatRules(
-      [rulePath],
+      toRules([rulePath]),
       ['src/app.ts'],
       'help with testing'
     );
@@ -1435,7 +1468,7 @@ Testing standards.`
 
     // Act - globs match but prompt doesn't mention testing
     const formatted = await readAndFormatRules(
-      [rulePath],
+      toRules([rulePath]),
       ['src/utils.test.ts'],
       'fix the import error'
     );
@@ -1462,7 +1495,7 @@ Testing standards.`
 
     // Act - neither matches
     const formatted = await readAndFormatRules(
-      [rulePath],
+      toRules([rulePath]),
       ['src/app.ts'],
       'update the readme'
     );
@@ -1486,7 +1519,7 @@ Testing rule.`
 
     // Act - lowercase in prompt
     const formatted = await readAndFormatRules(
-      [rulePath],
+      toRules([rulePath]),
       [],
       'testing in lowercase'
     );
@@ -1510,7 +1543,7 @@ Test rule.`
 
     // Act - "test" should match "testing"
     const formatted = await readAndFormatRules(
-      [rulePath],
+      toRules([rulePath]),
       [],
       'I am testing this'
     );
@@ -1534,7 +1567,7 @@ Test rule.`
 
     // Act - "test" should NOT match "contest"
     const formatted = await readAndFormatRules(
-      [rulePath],
+      toRules([rulePath]),
       [],
       'I entered a contest'
     );
@@ -1574,6 +1607,7 @@ describe('OpenCodeRulesPlugin', () => {
       directory: path.join(testDir, 'empty-project'),
       worktree: testDir,
       $: {} as any,
+      serverUrl: new URL('http://localhost:3000'),
     };
 
     try {
@@ -1609,6 +1643,7 @@ describe('OpenCodeRulesPlugin', () => {
       directory: testDir,
       worktree: testDir,
       $: {} as any,
+      serverUrl: new URL('http://localhost:3000'),
     };
 
     try {
@@ -1646,6 +1681,7 @@ describe('OpenCodeRulesPlugin', () => {
       directory: testDir,
       worktree: testDir,
       $: {} as any,
+      serverUrl: new URL('http://localhost:3000'),
     };
 
     try {
@@ -1682,6 +1718,7 @@ describe('OpenCodeRulesPlugin', () => {
       directory: testDir,
       worktree: testDir,
       $: {} as any,
+      serverUrl: new URL('http://localhost:3000'),
     };
 
     try {
@@ -1717,6 +1754,7 @@ describe('OpenCodeRulesPlugin', () => {
       directory: testDir,
       worktree: testDir,
       $: {} as any,
+      serverUrl: new URL('http://localhost:3000'),
     };
 
     try {
@@ -1749,6 +1787,7 @@ describe('OpenCodeRulesPlugin', () => {
       directory: testDir,
       worktree: testDir,
       $: {} as any,
+      serverUrl: new URL('http://localhost:3000'),
     };
 
     const originalMessages = [
@@ -1799,6 +1838,7 @@ Use React best practices for components.`
         directory: testDir,
         worktree: testDir,
         $: {} as any,
+        serverUrl: new URL('http://localhost:3000'),
       };
 
       try {
@@ -1873,6 +1913,7 @@ Use React best practices for components.`
         directory: testDir,
         worktree: testDir,
         $: {} as any,
+        serverUrl: new URL('http://localhost:3000'),
       };
 
       try {
@@ -1951,6 +1992,7 @@ Special rule content.`
         directory: testDir,
         worktree: testDir,
         $: {} as any,
+        serverUrl: new URL('http://localhost:3000'),
       };
 
       try {
@@ -2023,6 +2065,7 @@ Follow testing best practices.`
         directory: testDir,
         worktree: testDir,
         $: {} as any,
+        serverUrl: new URL('http://localhost:3000'),
       };
 
       try {
@@ -2079,6 +2122,144 @@ Follow testing best practices.`
       } finally {
         process.env.XDG_CONFIG_HOME = originalEnv;
       }
+    });
+  });
+
+  describe('YAML Parsing Edge Cases', () => {
+    beforeEach(() => {
+      setupTestDirs();
+      clearRuleCache();
+    });
+
+    afterEach(() => {
+      teardownTestDirs();
+    });
+
+    it('should handle empty frontmatter', () => {
+      const content = '---\n---\nRule content here';
+      const metadata = parseRuleMetadata(content);
+      expect(metadata).toBeUndefined();
+    });
+
+    it('should handle frontmatter with only whitespace', () => {
+      const content = '---\n   \n---\nRule content here';
+      const metadata = parseRuleMetadata(content);
+      expect(metadata).toBeUndefined();
+    });
+
+    it('should handle complex YAML structures', () => {
+      const content = `---
+globs:
+  - "**/*.ts"
+  - "**/*.tsx"
+keywords:
+  - refactoring
+  - cleanup
+  - code review
+---
+Rule content`;
+      const metadata = parseRuleMetadata(content);
+      expect(metadata?.globs).toEqual(['**/*.ts', '**/*.tsx']);
+      expect(metadata?.keywords).toEqual([
+        'refactoring',
+        'cleanup',
+        'code review',
+      ]);
+    });
+
+    it('should handle inline array syntax in YAML', () => {
+      // Note: inline array syntax is valid YAML
+      const content = `---
+globs: ["**/*.js", "**/*.jsx"]
+---
+Rule content`;
+      const metadata = parseRuleMetadata(content);
+      expect(metadata?.globs).toEqual(['**/*.js', '**/*.jsx']);
+    });
+
+    it('should ignore non-string array elements', () => {
+      const content = `---
+globs:
+  - "**/*.ts"
+  - 123
+  - true
+keywords:
+  - test
+---
+Rule content`;
+      const metadata = parseRuleMetadata(content);
+      // Only string elements should be included
+      expect(metadata?.globs).toEqual(['**/*.ts']);
+      expect(metadata?.keywords).toEqual(['test']);
+    });
+  });
+
+  describe('Cache Functionality', () => {
+    beforeEach(() => {
+      setupTestDirs();
+      clearRuleCache();
+    });
+
+    afterEach(() => {
+      teardownTestDirs();
+    });
+
+    it('should use cached content on second read', async () => {
+      // Arrange - create a rule file
+      const rulePath = path.join(globalRulesDir, 'cached-rule.md');
+      writeFileSync(rulePath, '# Cached Rule\n\nThis should be cached.');
+
+      const rules = toRules([rulePath]);
+
+      // Act - read the file twice
+      const result1 = await readAndFormatRules(rules);
+      const result2 = await readAndFormatRules(rules);
+
+      // Assert - both should have the same content
+      expect(result1).toContain('Cached Rule');
+      expect(result2).toContain('Cached Rule');
+      expect(result1).toBe(result2);
+    });
+
+    it('should invalidate cache when file is modified', async () => {
+      // Arrange - create a rule file
+      const rulePath = path.join(globalRulesDir, 'mutable-rule.md');
+      writeFileSync(rulePath, '# Original Content');
+
+      const rules = toRules([rulePath]);
+
+      // Act - read the file
+      const result1 = await readAndFormatRules(rules);
+      expect(result1).toContain('Original Content');
+
+      // Wait a bit to ensure mtime changes
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      // Modify the file
+      writeFileSync(rulePath, '# Modified Content');
+
+      // Read again
+      const result2 = await readAndFormatRules(rules);
+
+      // Assert - should get the new content
+      expect(result2).toContain('Modified Content');
+      expect(result2).not.toContain('Original Content');
+    });
+
+    it('should handle clearRuleCache correctly', async () => {
+      // Arrange - create a rule file
+      const rulePath = path.join(globalRulesDir, 'clear-test.md');
+      writeFileSync(rulePath, '# Test Content');
+
+      const rules = toRules([rulePath]);
+
+      // Act - read, clear cache, read again
+      await readAndFormatRules(rules);
+      clearRuleCache();
+
+      // File should be re-read from disk (we can verify by checking the result is still correct)
+      const result = await readAndFormatRules(rules);
+      expect(result).toContain('Test Content');
     });
   });
 });
