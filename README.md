@@ -1,15 +1,19 @@
-# OpenCode Rules Plugin
+# opencode-rules
 
 A lightweight OpenCode plugin that discovers and injects markdown rule files into AI agent system prompts, enabling flexible behavior customization without per-project configuration.
 
 ## Overview
 
-OpenCode Rules automatically loads rule files from standard directories and integrates them into AI agent prompts, allowing you to:
+opencode-rules automatically loads rule files from standard directories and integrates them into AI agent prompts, allowing you to:
 
 - Define global coding standards that apply across all projects
 - Create project-specific rules for team collaboration
 - Apply conditional rules based on file patterns or prompt keywords
 - Maintain zero-configuration workflow with sensible defaults
+
+This approach allows you to dynamically include rules automatically like style guides for specific languages,
+guidance on specific actions, etc. Unlike skills, which are called on by the agent, rules use a simple matching
+approach.
 
 ## Features
 
