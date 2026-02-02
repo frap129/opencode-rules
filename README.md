@@ -11,7 +11,7 @@ opencode-rules automatically loads rule files from standard directories and inte
 
 - Define global coding standards that apply across all projects
 - Create project-specific rules for team collaboration
-- Apply conditional rules based on file patterns or prompt keywords
+- Apply conditional rules based on file patterns, prompt keywords, or available tools
 - Maintain zero-configuration workflow with sensible defaults
 
 This approach allows you to dynamically include rules automatically like style guides for specific languages,
@@ -21,8 +21,9 @@ approach.
 ## Features
 
 - **Dual-format support**: Load rules from both `.md` and `.mdc` files
-- **Conditional rules**: Apply rules based on file paths using glob patterns or prompt keywords
+- **Conditional rules**: Apply rules based on file paths, prompt keywords, or available tools
 - **Keyword matching**: Apply rules when the user's prompt contains specific keywords
+- **Tool-based rules**: Apply rules only when specific MCP tools are available
 - **Global and project-level rules**: Define rules at both system and project scopes
 - **Context-aware injection**: Rules filtered by extracted file paths and user prompts
 - **Zero-configuration**: Works out of the box with XDG Base Directory specification
@@ -140,6 +141,26 @@ keywords:
 
 This rule applies when the user's prompt mentions testing-related terms.
 
+### Tool-Based Rule
+
+Create `~/.config/opencode/rules/websearch.mdc`:
+
+```markdown
+---
+tools:
+  - 'mcp_websearch'
+  - 'mcp_codesearch'
+---
+
+# Web Search Best Practices
+
+- Always verify search results with multiple sources
+- Prefer official documentation over third-party tutorials
+- Check publication dates for time-sensitive information
+```
+
+This rule only applies when the websearch or codesearch MCP tools are available.
+
 ### Combined Globs and Keywords Rule
 
 Create `~/.config/opencode/rules/test-files.mdc`:
@@ -161,6 +182,29 @@ keywords:
 ```
 
 This rule applies when EITHER a test file is in context OR the user mentions testing (OR logic).
+
+### Combined Tools with Other Conditions
+
+Create `~/.config/opencode/rules/lsp-typescript.mdc`:
+
+```markdown
+---
+tools:
+  - 'mcp_lsp'
+globs:
+  - '**/*.ts'
+keywords:
+  - 'type checking'
+---
+
+# LSP-Enabled TypeScript Development
+
+- Use LSP hover to check inferred types
+- Navigate to definitions using goToDefinition
+- Find all references before refactoring
+```
+
+This rule applies when the LSP tool is available OR TypeScript files are in context OR the user mentions type checking.
 
 ### Organized Rules with Subdirectories
 
@@ -211,6 +255,9 @@ globs:
 keywords:
   - 'refactoring'
   - 'cleanup'
+tools:
+  - 'mcp_websearch'
+  - 'mcp_lsp'
 ---
 ```
 
@@ -222,13 +269,18 @@ keywords:
   - Rule applies when the user's prompt contains any keyword
   - Case-insensitive, word-boundary matching (e.g., "test" matches "testing")
   - Does NOT match mid-word (e.g., "test" does NOT match "contest")
+- `tools` (optional): Array of tool IDs for tool-availability matching
+  - Rule applies when any listed tool is available to the agent
+  - Uses exact string matching against tool IDs (e.g., `mcp_websearch`, `mcp_bash`)
+  - Enable debug logging (`OPENCODE_RULES_DEBUG=1`) to see available tool IDs
 
 ### Matching Behavior
 
 - **No metadata**: Rule applies unconditionally (always included)
 - **Only globs**: Rule applies when any context file matches
 - **Only keywords**: Rule applies when the user's prompt contains any keyword
-- **Both globs and keywords**: Rule applies when EITHER condition matches (OR logic)
+- **Only tools**: Rule applies when any listed tool is available
+- **Multiple conditions**: Rule applies when ANY condition matches (OR logic across all fields)
 
 ## Glob Pattern Reference
 
@@ -246,8 +298,8 @@ The plugin uses `minimatch` for pattern matching:
 
 This repository includes a `crafting-rules/` skill that teaches AI agents how to create well-formatted rules. The skill provides:
 
-- **Rule format reference** - Frontmatter fields (`globs`, `keywords`) and markdown body structure
-- **Matching strategy guidance** - When to use globs vs keywords vs both vs neither
+- **Rule format reference** - Frontmatter fields (`globs`, `keywords`, `tools`) and markdown body structure
+- **Matching strategy guidance** - When to use globs vs keywords vs tools vs combinations
 - **Pattern extraction workflow** - How to identify repeated conversation patterns that should become rules
 - **Keyword safety guidelines** - Denylist of overly broad keywords to avoid, allowlist of safe alternatives, and an audit checklist
 
@@ -365,6 +417,7 @@ This will log information about:
 - Rule discovery (files found)
 - Cache hits/misses
 - Rule filtering (which rules are included/skipped)
+- Available tool IDs (useful for writing `tools` conditions)
 
 ## Troubleshooting
 

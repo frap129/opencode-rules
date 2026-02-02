@@ -8,6 +8,7 @@ import {
   parseRuleMetadata,
   extractFilePathsFromMessages,
   promptMatchesKeywords,
+  toolsMatchAvailable,
   clearRuleCache,
   type DiscoveredRule,
 } from './utils.js';
@@ -699,6 +700,47 @@ describe('promptMatchesKeywords', () => {
   });
 });
 
+describe('toolsMatchAvailable', () => {
+  it('should return true when required tool is available', () => {
+    const available = ['mcp_bash', 'mcp_read', 'mcp_websearch'];
+    expect(toolsMatchAvailable(available, ['mcp_websearch'])).toBe(true);
+  });
+
+  it('should return false when required tool is not available', () => {
+    const available = ['mcp_bash', 'mcp_read'];
+    expect(toolsMatchAvailable(available, ['mcp_websearch'])).toBe(false);
+  });
+
+  it('should return true if any required tool is available (OR logic)', () => {
+    const available = ['mcp_bash', 'mcp_read'];
+    expect(toolsMatchAvailable(available, ['mcp_websearch', 'mcp_bash'])).toBe(
+      true
+    );
+  });
+
+  it('should return false for empty required tools', () => {
+    const available = ['mcp_bash', 'mcp_read'];
+    expect(toolsMatchAvailable(available, [])).toBe(false);
+  });
+
+  it('should return false for empty available tools', () => {
+    expect(toolsMatchAvailable([], ['mcp_websearch'])).toBe(false);
+  });
+
+  it('should use exact string matching', () => {
+    const available = ['mcp_websearch_v2'];
+    // Should not match partial strings
+    expect(toolsMatchAvailable(available, ['mcp_websearch'])).toBe(false);
+    expect(toolsMatchAvailable(available, ['mcp_websearch_v2'])).toBe(true);
+  });
+
+  it('should handle multiple required and available tools efficiently', () => {
+    const available = ['tool_a', 'tool_b', 'tool_c', 'tool_d', 'tool_e'];
+    const required = ['tool_x', 'tool_y', 'tool_c']; // tool_c matches
+    expect(toolsMatchAvailable(available, required)).toBe(true);
+  });
+});
+
 describe('parseRuleMetadata', () => {
   it('should parse YAML metadata from .mdc files', () => {
     // Arrange
@@ -817,6 +859,65 @@ Refactoring rules.`;
     // Assert
     expect(metadata?.keywords).toEqual(['refactor']);
     expect(metadata?.globs).toEqual(['src/**/*.ts']);
+  });
+
+  it('should parse tools from YAML metadata', () => {
+    // Arrange
+    const content = `---
+tools:
+  - "mcp_websearch"
+  - "mcp_codesearch"
+---
+
+Use web search best practices.`;
+
+    // Act
+    const metadata = parseRuleMetadata(content);
+
+    // Assert
+    expect(metadata).toBeDefined();
+    expect(metadata?.tools).toEqual(['mcp_websearch', 'mcp_codesearch']);
+  });
+
+  it('should parse tools alongside globs and keywords', () => {
+    // Arrange
+    const content = `---
+globs:
+  - "**/*.test.ts"
+keywords:
+  - "testing"
+tools:
+  - "mcp_bash"
+---
+
+Testing rule with all conditions.`;
+
+    // Act
+    const metadata = parseRuleMetadata(content);
+
+    // Assert
+    expect(metadata?.globs).toEqual(['**/*.test.ts']);
+    expect(metadata?.keywords).toEqual(['testing']);
+    expect(metadata?.tools).toEqual(['mcp_bash']);
+  });
+
+  it('should handle tools-only metadata', () => {
+    // Arrange
+    const content = `---
+tools:
+  - "mcp_lsp"
+---
+
+LSP-specific guidelines.`;
+
+    // Act
+    const metadata = parseRuleMetadata(content);
+
+    // Assert
+    expect(metadata).toBeDefined();
+    expect(metadata?.tools).toEqual(['mcp_lsp']);
+    expect(metadata?.globs).toBeUndefined();
+    expect(metadata?.keywords).toBeUndefined();
   });
 });
 
@@ -1574,6 +1675,216 @@ Test rule.`
 
     // Assert
     expect(formatted).toBe('');
+  });
+
+  it('should include rule when tool is available', async () => {
+    // Arrange
+    const rulePath = path.join(globalRulesDir, 'websearch-rule.mdc');
+    writeFileSync(
+      rulePath,
+      `---
+tools:
+  - "mcp_websearch"
+---
+
+Use web search best practices.`
+    );
+
+    // Act - tool is available
+    const formatted = await readAndFormatRules(
+      toRules([rulePath]),
+      [],
+      undefined,
+      ['mcp_bash', 'mcp_websearch', 'mcp_read']
+    );
+
+    // Assert
+    expect(formatted).toContain('websearch-rule.mdc');
+    expect(formatted).toContain('Use web search best practices');
+  });
+
+  it('should exclude rule when tool is not available', async () => {
+    // Arrange
+    const rulePath = path.join(globalRulesDir, 'websearch-rule.mdc');
+    writeFileSync(
+      rulePath,
+      `---
+tools:
+  - "mcp_websearch"
+---
+
+Use web search best practices.`
+    );
+
+    // Act - tool is NOT available
+    const formatted = await readAndFormatRules(
+      toRules([rulePath]),
+      [],
+      undefined,
+      ['mcp_bash', 'mcp_read']
+    );
+
+    // Assert
+    expect(formatted).toBe('');
+  });
+
+  it('should include rule when any of multiple tools is available (OR logic)', async () => {
+    // Arrange
+    const rulePath = path.join(globalRulesDir, 'search-rule.mdc');
+    writeFileSync(
+      rulePath,
+      `---
+tools:
+  - "mcp_websearch"
+  - "mcp_codesearch"
+---
+
+Search best practices.`
+    );
+
+    // Act - only codesearch is available
+    const formatted = await readAndFormatRules(
+      toRules([rulePath]),
+      [],
+      undefined,
+      ['mcp_bash', 'mcp_codesearch']
+    );
+
+    // Assert
+    expect(formatted).toContain('search-rule.mdc');
+  });
+
+  it('should include rule when tools match OR globs match', async () => {
+    // Arrange
+    const rulePath = path.join(globalRulesDir, 'multi-condition.mdc');
+    writeFileSync(
+      rulePath,
+      `---
+tools:
+  - "mcp_lsp"
+globs:
+  - "**/*.ts"
+---
+
+TypeScript or LSP rule.`
+    );
+
+    // Act - globs match but tools don't
+    const formatted = await readAndFormatRules(
+      toRules([rulePath]),
+      ['src/index.ts'],
+      undefined,
+      ['mcp_bash']
+    );
+
+    // Assert - should be included (globs matched)
+    expect(formatted).toContain('multi-condition.mdc');
+  });
+
+  it('should include rule when tools match OR keywords match', async () => {
+    // Arrange
+    const rulePath = path.join(globalRulesDir, 'tools-keywords.mdc');
+    writeFileSync(
+      rulePath,
+      `---
+tools:
+  - "mcp_websearch"
+keywords:
+  - "search"
+---
+
+Search guidelines.`
+    );
+
+    // Act - tools match but keywords don't
+    const formatted = await readAndFormatRules(
+      toRules([rulePath]),
+      [],
+      'help with database',
+      ['mcp_websearch']
+    );
+
+    // Assert - should be included (tools matched)
+    expect(formatted).toContain('tools-keywords.mdc');
+  });
+
+  it('should exclude rule when neither tools nor globs nor keywords match', async () => {
+    // Arrange
+    const rulePath = path.join(globalRulesDir, 'all-conditions.mdc');
+    writeFileSync(
+      rulePath,
+      `---
+tools:
+  - "mcp_lsp"
+globs:
+  - "**/*.ts"
+keywords:
+  - "typescript"
+---
+
+TypeScript with LSP rule.`
+    );
+
+    // Act - nothing matches
+    const formatted = await readAndFormatRules(
+      toRules([rulePath]),
+      ['src/index.js'],
+      'help with python',
+      ['mcp_bash']
+    );
+
+    // Assert
+    expect(formatted).toBe('');
+  });
+
+  it('should skip tool-conditional rule when no tools are provided', async () => {
+    // Arrange
+    const rulePath = path.join(globalRulesDir, 'tool-only.mdc');
+    writeFileSync(
+      rulePath,
+      `---
+tools:
+  - "mcp_websearch"
+---
+
+Web search only.`
+    );
+
+    // Act - no tools provided (simulates tool discovery failure)
+    const formatted = await readAndFormatRules(toRules([rulePath]));
+
+    // Assert
+    expect(formatted).toBe('');
+  });
+
+  it('should include unconditional rules even when tool-conditional rules are skipped', async () => {
+    // Arrange
+    const unconditionalPath = path.join(globalRulesDir, 'always.md');
+    const conditionalPath = path.join(globalRulesDir, 'tool-specific.mdc');
+
+    writeFileSync(unconditionalPath, 'Always apply this');
+    writeFileSync(
+      conditionalPath,
+      `---
+tools:
+  - "mcp_websearch"
+---
+
+Only with websearch.`
+    );
+
+    // Act - websearch not available
+    const formatted = await readAndFormatRules(
+      toRules([unconditionalPath, conditionalPath]),
+      [],
+      undefined,
+      ['mcp_bash']
+    );
+
+    // Assert - only unconditional rule included
+    expect(formatted).toContain('always.md');
+    expect(formatted).toContain('Always apply this');
+    expect(formatted).not.toContain('Only with websearch');
   });
 });
 

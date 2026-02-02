@@ -121,11 +121,32 @@ export function promptMatchesKeywords(
 }
 
 /**
+ * Check if any of the required tools are available.
+ * Uses exact string matching (OR logic: any match returns true).
+ *
+ * @param availableToolIDs - Array of tool IDs currently available
+ * @param requiredTools - Array of tool IDs from rule metadata
+ * @returns true if any required tool is available
+ */
+export function toolsMatchAvailable(
+  availableToolIDs: string[],
+  requiredTools: string[]
+): boolean {
+  if (requiredTools.length === 0) {
+    return false;
+  }
+  // Create a Set for O(1) lookups
+  const availableSet = new Set(availableToolIDs);
+  return requiredTools.some(tool => availableSet.has(tool));
+}
+
+/**
  * Metadata extracted from .mdc file frontmatter
  */
 export interface RuleMetadata {
   globs?: string[];
   keywords?: string[];
+  tools?: string[];
 }
 
 /**
@@ -134,6 +155,7 @@ export interface RuleMetadata {
 interface ParsedFrontmatter {
   globs?: unknown;
   keywords?: unknown;
+  tools?: unknown;
 }
 
 /**
@@ -186,6 +208,17 @@ export function parseRuleMetadata(content: string): RuleMetadata | undefined {
         .filter(k => k.length > 0);
       if (keywords.length > 0) {
         metadata.keywords = keywords;
+      }
+    }
+
+    // Extract tools array
+    if (Array.isArray(parsed.tools)) {
+      const tools = parsed.tools
+        .filter((t): t is string => typeof t === 'string')
+        .map(t => t.trim())
+        .filter(t => t.length > 0);
+      if (tools.length > 0) {
+        metadata.tools = tools;
       }
     }
 
@@ -336,11 +369,13 @@ function stripFrontmatter(content: string): string {
  * @param files - Array of discovered rule files with paths
  * @param contextFilePaths - Optional array of file paths from conversation context (used to filter conditional rules)
  * @param userPrompt - Optional user prompt text (used for keyword matching)
+ * @param availableToolIDs - Optional array of available tool IDs (used for tool-based filtering)
  */
 export async function readAndFormatRules(
   files: DiscoveredRule[],
   contextFilePaths?: string[],
-  userPrompt?: string
+  userPrompt?: string,
+  availableToolIDs?: string[]
 ): Promise<string> {
   if (files.length === 0) {
     return '';
@@ -357,11 +392,12 @@ export async function readAndFormatRules(
 
     const { metadata, strippedContent } = cachedRule;
 
-    // Rules with metadata (globs or keywords) require matching
-    // OR logic: rule applies if keywords match OR globs match
-    if (metadata?.globs || metadata?.keywords) {
+    // Rules with metadata (globs, keywords, or tools) require matching
+    // OR logic: rule applies if keywords match OR globs match OR tools match
+    if (metadata?.globs || metadata?.keywords || metadata?.tools) {
       let globsMatch = false;
       let keywordsMatch = false;
+      let toolsMatch = false;
 
       // Check globs against context file paths
       if (metadata.globs && contextFilePaths && contextFilePaths.length > 0) {
@@ -375,16 +411,21 @@ export async function readAndFormatRules(
         keywordsMatch = promptMatchesKeywords(userPrompt, metadata.keywords);
       }
 
+      // Check tools against available tool IDs
+      if (metadata.tools && availableToolIDs && availableToolIDs.length > 0) {
+        toolsMatch = toolsMatchAvailable(availableToolIDs, metadata.tools);
+      }
+
       // If rule has conditions but none match, skip it
-      if (!globsMatch && !keywordsMatch) {
+      if (!globsMatch && !keywordsMatch && !toolsMatch) {
         debugLog(
-          `Skipping conditional rule: ${relativePath} (no matching paths or keywords)`
+          `Skipping conditional rule: ${relativePath} (no matching paths, keywords, or tools)`
         );
         continue;
       }
 
       debugLog(
-        `Including conditional rule: ${relativePath} (globs: ${globsMatch}, keywords: ${keywordsMatch})`
+        `Including conditional rule: ${relativePath} (globs: ${globsMatch}, keywords: ${keywordsMatch}, tools: ${toolsMatch})`
       );
     }
 

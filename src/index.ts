@@ -139,9 +139,12 @@ function extractLatestUserPrompt(
  * Discovers markdown rule files and injects them into the system prompt
  * using experimental transform hooks.
  */
-const openCodeRulesPlugin = async (input: PluginInput) => {
+const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
+  // Store client reference for use in hooks
+  const client = pluginInput.client;
+
   // Discover rule files from global and project directories
-  const ruleFiles = await discoverRuleFiles(input.directory);
+  const ruleFiles = await discoverRuleFiles(pluginInput.directory);
 
   debugLog(`Discovered ${ruleFiles.length} rule file(s)`);
 
@@ -199,11 +202,11 @@ const openCodeRulesPlugin = async (input: PluginInput) => {
      * Deletes the session context after reading to prevent memory leaks.
      */
     'experimental.chat.system.transform': async (
-      input: SystemTransformInput,
+      hookInput: SystemTransformInput,
       output: SystemTransformOutput | null
     ): Promise<SystemTransformOutput> => {
       // Retrieve context using sessionID from input
-      const sessionID = input?.sessionID;
+      const sessionID = hookInput?.sessionID;
       const sessionContext = sessionID
         ? sessionContextMap.get(sessionID)
         : undefined;
@@ -215,11 +218,32 @@ const openCodeRulesPlugin = async (input: PluginInput) => {
         sessionContextMap.delete(sessionID);
       }
 
-      // Format rules, filtering by context paths and user prompt
+      // Query available tool IDs for tool-based rule filtering
+      let availableToolIDs: string[] = [];
+      try {
+        const toolIdsResponse = await client.tool.ids({
+          query: { directory: pluginInput.directory },
+        });
+        // The response contains data field with tool IDs array
+        if (toolIdsResponse.data) {
+          availableToolIDs = toolIdsResponse.data;
+          debugLog(
+            `Available tools: ${availableToolIDs.slice(0, 10).join(', ')}${availableToolIDs.length > 10 ? '...' : ''} (${availableToolIDs.length} total)`
+          );
+        }
+      } catch (error) {
+        // If tool discovery fails, proceed with empty tools list
+        // This ensures unconditional rules still work
+        const message = error instanceof Error ? error.message : String(error);
+        debugLog(`Warning: Failed to query tool IDs: ${message}`);
+      }
+
+      // Format rules, filtering by context paths, user prompt, and available tools
       const formattedRules = await readAndFormatRules(
         ruleFiles,
         contextPaths,
-        userPrompt
+        userPrompt,
+        availableToolIDs
       );
 
       if (!formattedRules) {
