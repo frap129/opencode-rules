@@ -14,20 +14,6 @@ import {
 } from './utils.js';
 
 /**
- * Per-session storage for context between hook calls (legacy fallback).
- * Uses a Map keyed by sessionID to share context between messages.transform and system.transform.
- * The messages.transform hook populates this, system.transform reads it and deletes the entry.
- * Note: sessionState is now the primary source; sessionContextMap is a legacy fallback.
- * Entries are deleted after use to prevent memory leaks.
- */
-interface SessionContext {
-  filePaths: string[];
-  userPrompt: string | undefined;
-}
-
-const sessionContextMap = new Map<string, SessionContext>();
-
-/**
  * Per-session state that persists across turns for incremental updates.
  * Replaces re-scanning message history each LLM turn with incremental state.
  */
@@ -355,12 +341,6 @@ const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
         state.seedCount = (state.seedCount ?? 0) + 1;
       });
 
-      // Store in sessionContextMap for legacy fallback
-      sessionContextMap.set(sessionID, {
-        filePaths: contextPaths,
-        userPrompt,
-      });
-
       if (contextPaths.length > 0) {
         debugLog(
           `Seeded ${contextPaths.length} context path(s) for session ${sessionID}: ${contextPaths.slice(0, 5).join(', ')}${contextPaths.length > 5 ? '...' : ''}`
@@ -434,9 +414,10 @@ const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
 
     /**
      * Inject rules into the system prompt.
-     * Uses context from sessionState (primary, persists across turns) and sessionContextMap (legacy fallback, deleted after use).
-     * sessionState is populated by tool.execute.before and chat.message hooks and persists across turns.
-     * sessionContextMap is populated by messages.transform hook and deleted after reading to prevent memory leaks.
+     * Uses context from sessionState which is populated by:
+     * - tool.execute.before hook (for file paths from tool executions)
+     * - chat.message hook (for user prompts)
+     * - messages.transform hook (for initial seeding from message history)
      */
     'experimental.chat.system.transform': async (
       hookInput: SystemTransformInput,
@@ -472,27 +453,13 @@ const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
         }
       }
 
-      const sessionContext = sessionID
-        ? sessionContextMap.get(sessionID)
-        : undefined;
+      // Get context paths from sessionState
+      const contextPaths = sessionState
+        ? Array.from(sessionState.contextPaths).sort()
+        : [];
 
-      // Prefer sessionState as primary source, merge with sessionContextMap for compatibility
-      const contextPaths = Array.from(
-        new Set([
-          ...(sessionState ? Array.from(sessionState.contextPaths) : []),
-          ...(sessionContext?.filePaths ?? []),
-        ])
-      ).sort();
-
-      // Get user prompt (prefer sessionState if available, fallback to sessionContext)
-      const userPrompt =
-        sessionState?.lastUserPrompt || sessionContext?.userPrompt;
-
-      // Delete the session context after reading to prevent memory leaks
-      // Note: sessionState is NOT deleted to allow it to persist across turns
-      if (sessionID) {
-        sessionContextMap.delete(sessionID);
-      }
+      // Get user prompt from sessionState
+      const userPrompt = sessionState?.lastUserPrompt;
 
       // Query available tool IDs for tool-based rule filtering
       let availableToolIDs: string[] = [];
