@@ -2161,7 +2161,6 @@ describe('OpenCodeRulesPlugin', () => {
     };
 
     const { __testOnly } = await import('./index.js');
-    __testOnly.resetSeedCounters();
 
     // Act - call transform twice with same messages
     await transform({}, messages);

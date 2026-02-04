@@ -37,18 +37,13 @@ interface SessionState {
   lastUpdated: number;
   isCompacting?: boolean;
   compactingSince?: number;
-  seeded?: boolean;
+  seededFromHistory: boolean;
+  seedCount?: number;
 }
 
 const sessionStateMap = new Map<string, SessionState>();
 let sessionStateMax = 100;
 let sessionStateTick = 0;
-
-/**
- * Track seed counts per session for testing purposes.
- * Maps sessionID to count of times seeding has occurred.
- */
-const seedCounterMap = new Map<string, number>();
 
 /**
  * Store the project directory from plugin init for use in path normalization.
@@ -74,6 +69,8 @@ function createDefaultSessionState(): SessionState {
   return {
     contextPaths: new Set<string>(),
     lastUpdated: ++sessionStateTick,
+    seededFromHistory: false,
+    seedCount: 0,
   };
 }
 
@@ -319,7 +316,7 @@ const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
 
       // Check if this session is already seeded
       const existingState = sessionStateMap.get(sessionID);
-      if (existingState && existingState.seeded) {
+      if (existingState && existingState.seededFromHistory) {
         debugLog(`Session ${sessionID} already seeded, skipping rescan`);
         return output;
       }
@@ -339,17 +336,15 @@ const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
         for (const path of contextPaths) {
           state.contextPaths.add(path);
         }
-        // Update lastUserPrompt if found
-        if (userPrompt) {
+        // Update lastUserPrompt only if we don't already have one
+        if (userPrompt && !state.lastUserPrompt) {
           state.lastUserPrompt = userPrompt;
         }
         // Mark as seeded
-        state.seeded = true;
+        state.seededFromHistory = true;
+        // Increment seed count
+        state.seedCount = (state.seedCount ?? 0) + 1;
       });
-
-      // Track seed count for testing
-      const currentCount = seedCounterMap.get(sessionID) ?? 0;
-      seedCounterMap.set(sessionID, currentCount + 1);
 
       // Store in sessionContextMap for legacy fallback
       sessionContextMap.set(sessionID, {
@@ -541,11 +536,8 @@ const __testOnly = Object.freeze({
     sessionStateMax = 100;
     sessionStateTick = 0;
   },
-  resetSeedCounters: (): void => {
-    seedCounterMap.clear();
-  },
   getSeedCount: (sessionID: string): number => {
-    return seedCounterMap.get(sessionID) ?? 0;
+    return sessionStateMap.get(sessionID)?.seedCount ?? 0;
   },
 });
 
