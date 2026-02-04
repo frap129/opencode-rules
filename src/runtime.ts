@@ -10,6 +10,7 @@ import {
   sanitizePathForContext,
   type MessageWithInfo,
 } from './message-context.js';
+import { extractConnectedMcpCapabilityIDs } from './mcp-tools.js';
 import type { SessionStore } from './session-store.js';
 
 type DebugLog = (message: string) => void;
@@ -271,25 +272,20 @@ export class OpenCodeRulesRuntime {
   }
 
   private async queryAvailableToolIDs(): Promise<string[]> {
-    let availableToolIDs: string[] = [];
+    const ids = new Set<string>();
 
+    // Get built-in tool IDs
     try {
-      const toolIdsResponse = await (
-        this.client as {
-          tool: {
-            ids: (opts: {
-              query: { directory: string };
-            }) => Promise<{ data: string[] }>;
-          };
-        }
-      ).tool.ids({
+      const toolIdsResponse = await (this.client as any).tool.ids({
         query: { directory: this.directory },
       });
 
-      if (toolIdsResponse.data) {
-        availableToolIDs = toolIdsResponse.data;
+      if (toolIdsResponse.data && Array.isArray(toolIdsResponse.data)) {
+        for (const id of toolIdsResponse.data) {
+          ids.add(id);
+        }
         this.debugLog(
-          `Available tools: ${availableToolIDs.slice(0, 10).join(', ')}${availableToolIDs.length > 10 ? '...' : ''} (${availableToolIDs.length} total)`
+          `Built-in tools: ${toolIdsResponse.data.slice(0, 10).join(', ')}${toolIdsResponse.data.length > 10 ? '...' : ''} (${toolIdsResponse.data.length} total)`
         );
       }
     } catch (error) {
@@ -297,7 +293,27 @@ export class OpenCodeRulesRuntime {
       this.debugLog(`Warning: Failed to query tool IDs: ${message}`);
     }
 
-    return availableToolIDs;
+    // Get connected MCP server capability IDs
+    try {
+      const mcpStatusResponse = await (this.client as any).mcp?.status?.({
+        query: { directory: this.directory },
+      });
+
+      if (mcpStatusResponse?.data) {
+        const mcpIds = extractConnectedMcpCapabilityIDs(mcpStatusResponse.data);
+        for (const id of mcpIds) {
+          ids.add(id);
+        }
+        if (mcpIds.length > 0) {
+          this.debugLog(`MCP capability IDs: ${mcpIds.join(', ')}`);
+        }
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.debugLog(`Warning: Failed to query MCP status: ${message}`);
+    }
+
+    return Array.from(ids);
   }
 
   private async onSessionCompacting(
