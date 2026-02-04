@@ -194,7 +194,12 @@ function extractLatestUserPrompt(
     }
 
     if (textParts.length > 0) {
-      return textParts.join(' ');
+      const userPrompt = textParts
+        .map(t => t.trim())
+        .filter(Boolean)
+        .join(' ')
+        .trim();
+      return userPrompt || undefined;
     }
   }
   return undefined;
@@ -253,9 +258,7 @@ const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
       }
 
       if (userPrompt) {
-        debugLog(
-          `User prompt: "${userPrompt.slice(0, 50)}${userPrompt.length > 50 ? '...' : ''}"`
-        );
+        debugLog(`Extracted user prompt (len=${userPrompt.length})`);
       }
 
       // Don't modify messages - just extract context
@@ -300,13 +303,20 @@ const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
       }
 
       if (textParts.length > 0) {
-        const userPrompt = textParts.join(' ');
-        upsertSessionState(sessionID, state => {
-          state.lastUserPrompt = userPrompt;
-        });
-        debugLog(
-          `Updated lastUserPrompt for session ${sessionID}: "${userPrompt.slice(0, 50)}${userPrompt.length > 50 ? '...' : ''}"`
-        );
+        const userPrompt = textParts
+          .map(t => t.trim())
+          .filter(Boolean)
+          .join(' ')
+          .trim();
+
+        if (userPrompt) {
+          upsertSessionState(sessionID, state => {
+            state.lastUserPrompt = userPrompt;
+          });
+          debugLog(
+            `Updated lastUserPrompt for session ${sessionID} (len=${userPrompt.length}, parts=${textParts.length})`
+          );
+        }
       }
     },
 
@@ -396,6 +406,14 @@ const __testOnly = Object.freeze({
   },
   getSessionState: (sessionID: string): SessionState | undefined => {
     return sessionStateMap.get(sessionID);
+  },
+  getSessionStateSnapshot: (sessionID: string): SessionState | undefined => {
+    const s = sessionStateMap.get(sessionID);
+    if (!s) return undefined;
+    return {
+      ...s,
+      contextPaths: new Set(s.contextPaths),
+    };
   },
   upsertSessionState,
   resetSessionState: (): void => {

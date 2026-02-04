@@ -2578,6 +2578,11 @@ Rule content`;
 });
 
 describe('SessionState', () => {
+  afterEach(async () => {
+    const { __testOnly } = await import('./index.js');
+    __testOnly.resetSessionState();
+  });
+
   it('prunes session state when over limit', async () => {
     const { __testOnly } = await import('./index.js');
 
@@ -2615,8 +2620,7 @@ describe('SessionState', () => {
     );
 
     const { __testOnly } = await import('./index.js');
-    expect(__testOnly.getSessionState('ses_test')?.lastUserPrompt).toBe(
-      'please add tests'
-    );
+    const snapshot = __testOnly.getSessionStateSnapshot('ses_test');
+    expect(snapshot?.lastUserPrompt).toBe('please add tests');
   });
 });
