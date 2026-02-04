@@ -38,29 +38,33 @@ const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
  * Test-only exports for accessing internal state and functions.
  * @internal - Test utilities only. Not part of public API.
  */
-const __testOnly = Object.freeze({
-  setSessionStateLimit: (limit: number): void => {
-    sessionStore.setMax(limit);
-  },
-  getSessionStateIDs: (): string[] => {
-    return sessionStore.ids();
-  },
-  getSessionStateSnapshot: (sessionID: string): SessionState | undefined => {
-    return sessionStore.snapshot(sessionID);
-  },
-  upsertSessionState: (
-    sessionID: string,
-    mutator: (state: SessionState) => void
-  ): void => {
-    sessionStore.upsert(sessionID, mutator);
-  },
-  resetSessionState: (): void => {
-    sessionStore.reset();
-  },
-  getSeedCount: (sessionID: string): number => {
-    return sessionStore.get(sessionID)?.seedCount ?? 0;
-  },
-});
+// NOTE: OpenCode's plugin loader calls every named export as a plugin initializer.
+// To avoid runtime crashes, __testOnly must be callable.
+const __testOnly = Object.freeze(
+  Object.assign(async () => ({}), {
+    setSessionStateLimit: (limit: number): void => {
+      sessionStore.setMax(limit);
+    },
+    getSessionStateIDs: (): string[] => {
+      return sessionStore.ids();
+    },
+    getSessionStateSnapshot: (sessionID: string): SessionState | undefined => {
+      return sessionStore.snapshot(sessionID);
+    },
+    upsertSessionState: (
+      sessionID: string,
+      mutator: (state: SessionState) => void
+    ): void => {
+      sessionStore.upsert(sessionID, mutator);
+    },
+    resetSessionState: (): void => {
+      sessionStore.reset();
+    },
+    getSeedCount: (sessionID: string): number => {
+      return sessionStore.get(sessionID)?.seedCount ?? 0;
+    },
+  })
+);
 
 export default openCodeRulesPlugin;
 export { __testOnly };
