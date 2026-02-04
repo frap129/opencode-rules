@@ -37,7 +37,8 @@ interface SessionState {
 }
 
 const sessionStateMap = new Map<string, SessionState>();
-let SESSION_STATE_MAX = 100;
+let sessionStateMax = 100;
+let sessionStateTick = 0;
 
 /**
  * Create a default SessionState object.
@@ -45,7 +46,7 @@ let SESSION_STATE_MAX = 100;
 function createDefaultSessionState(): SessionState {
   return {
     contextPaths: new Set<string>(),
-    lastUpdated: Date.now(),
+    lastUpdated: ++sessionStateTick,
   };
 }
 
@@ -68,10 +69,10 @@ function upsertSessionState(
   mutator(state);
 
   // Update timestamp
-  state.lastUpdated = Date.now();
+  state.lastUpdated = ++sessionStateTick;
 
   // Prune oldest entries if over limit
-  if (sessionStateMap.size > SESSION_STATE_MAX) {
+  while (sessionStateMap.size > sessionStateMax) {
     // Find entry with smallest lastUpdated
     let oldestID: string | null = null;
     let oldestTime = Infinity;
@@ -336,16 +337,22 @@ const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
 
 /**
  * Test-only exports for accessing internal state and functions.
+ * @internal - Test utilities only. Not part of public API.
  */
-const __testOnly = {
+const __testOnly = Object.freeze({
   setSessionStateLimit: (limit: number): void => {
-    SESSION_STATE_MAX = limit;
+    sessionStateMax = limit;
   },
   getSessionStateIDs: (): string[] => {
     return Array.from(sessionStateMap.keys());
   },
   upsertSessionState,
-};
+  resetSessionState: (): void => {
+    sessionStateMap.clear();
+    sessionStateMax = 100;
+    sessionStateTick = 0;
+  },
+});
 
 export default openCodeRulesPlugin;
 export { __testOnly };

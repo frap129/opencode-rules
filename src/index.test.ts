@@ -12,6 +12,7 @@ import {
   clearRuleCache,
   type DiscoveredRule,
 } from './utils.js';
+import { __testOnly } from './index.js';
 
 // Test directories - initialized in setupTestDirs
 let testDir: string;
@@ -1896,6 +1897,7 @@ describe('OpenCodeRulesPlugin', () => {
   afterEach(() => {
     teardownTestDirs();
     vi.resetAllMocks();
+    __testOnly.resetSessionState();
   });
 
   it('should export a default plugin function', async () => {
