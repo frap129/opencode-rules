@@ -448,15 +448,28 @@ const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
         ? sessionStateMap.get(sessionID)
         : undefined;
 
-      // Skip rule injection during compaction to avoid polluting the summary
-      // After this transform call, clear the flag so subsequent calls work normally
+      // Skip system prompt augmentation during compaction to avoid polluting the summary
       if (sessionState?.isCompacting) {
-        debugLog(`Skipping rule injection for compacting session ${sessionID}`);
-        // Clear the compacting flag after one system-transform run
-        upsertSessionState(sessionID!, state => {
-          state.isCompacting = false;
-        });
-        return output ?? {};
+        // Check if still in compaction window (within 30 seconds of compacting start)
+        const compactionExpiry = 30000; // 30 seconds
+        const expired =
+          sessionState.compactingSince &&
+          Date.now() - sessionState.compactingSince > compactionExpiry;
+
+        if (!expired) {
+          // Still compacting - skip injection but don't clear flag
+          debugLog(
+            `Session ${sessionID} is compacting - skipping rule injection`
+          );
+          return output ?? {};
+        }
+
+        // Compaction TTL expired - clear flag and continue normally
+        if (sessionID) {
+          upsertSessionState(sessionID, state => {
+            state.isCompacting = false;
+          });
+        }
       }
 
       const sessionContext = sessionID
