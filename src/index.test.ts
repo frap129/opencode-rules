@@ -2760,4 +2760,44 @@ describe('SessionState', () => {
       process.env.XDG_CONFIG_HOME = originalEnv;
     }
   });
+
+  it('adds minimal working-set context during compaction', async () => {
+    // Arrange
+    const originalEnv = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    try {
+      const { default: plugin, __testOnly } = await import('./index.js');
+      const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
+      const hooks = await plugin({
+        client: mockClient as any,
+        project: {} as any,
+        directory: testDir,
+        worktree: testDir,
+        $: {} as any,
+        serverUrl: new URL('http://localhost'),
+      });
+
+      // Seed session state with context paths
+      __testOnly.upsertSessionState('ses_c', s => {
+        s.contextPaths.add('src/components/Button.tsx');
+        s.contextPaths.add('src/utils/helpers.ts');
+      });
+
+      // Act: call the compacting hook
+      const compacting = hooks['experimental.session.compacting'] as any;
+      expect(compacting).toBeDefined();
+
+      const output = { context: [] as string[] };
+      await compacting({ sessionID: 'ses_c' }, output);
+
+      // Assert
+      const contextText = output.context.join('\n');
+      expect(contextText).toContain('OpenCode Rules');
+      expect(contextText).toContain('src/components/Button.tsx');
+      expect(contextText).toContain('src/utils/helpers.ts');
+    } finally {
+      process.env.XDG_CONFIG_HOME = originalEnv;
+    }
+  });
 });

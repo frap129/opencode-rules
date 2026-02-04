@@ -508,6 +508,60 @@ const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
 
       return output;
     },
+
+    /**
+     * Persist working-set context into session compaction.
+     * When a session is compacted (summarized), inject the current context paths
+     * so the compaction LLM includes them in the summary.
+     * This prevents rules from being lost during compaction.
+     */
+    'experimental.session.compacting': async (
+      input: { sessionID?: string },
+      output: { context?: string[] }
+    ): Promise<void> => {
+      const sessionID = input?.sessionID;
+      if (!sessionID) {
+        debugLog('No sessionID in compacting hook input');
+        return;
+      }
+
+      const sessionState = sessionStateMap.get(sessionID);
+      if (!sessionState || sessionState.contextPaths.size === 0) {
+        debugLog(`No context paths for session ${sessionID} during compaction`);
+        return;
+      }
+
+      // Set compaction flags for Task 7
+      upsertSessionState(sessionID, state => {
+        state.isCompacting = true;
+        state.compactingSince = sessionStateTick;
+      });
+
+      // Sort paths for determinism and take up to N paths
+      const sortedPaths = Array.from(sessionState.contextPaths).sort();
+      const maxPaths = 20;
+      const pathsToInclude = sortedPaths.slice(0, maxPaths);
+
+      // Build a minimal context string
+      const contextString = [
+        'OpenCode Rules: Working context',
+        'Current file paths in context:',
+        ...pathsToInclude.map(p => `  - ${p}`),
+        ...(sortedPaths.length > maxPaths
+          ? [`  ... and ${sortedPaths.length - maxPaths} more paths`]
+          : []),
+      ].join('\n');
+
+      // Add to output context array
+      if (!output.context) {
+        output.context = [];
+      }
+      output.context.push(contextString);
+
+      debugLog(
+        `Added ${pathsToInclude.length} context path(s) to compaction for session ${sessionID}`
+      );
+    },
   };
 };
 
