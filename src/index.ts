@@ -263,6 +263,54 @@ const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
     },
 
     /**
+     * Capture user prompts incrementally as messages arrive.
+     * Updates session state with the latest user message text.
+     */
+    'chat.message': async (
+      input: { sessionID?: string },
+      output: {
+        message?: { role?: string };
+        parts?: Array<{ type?: string; text?: string; synthetic?: boolean }>;
+      }
+    ): Promise<void> => {
+      const sessionID = input?.sessionID;
+      if (!sessionID) {
+        debugLog('No sessionID in chat.message hook input');
+        return;
+      }
+
+      // Only process user messages
+      if (output?.message?.role !== 'user') {
+        return;
+      }
+
+      // Extract text from non-synthetic parts
+      const textParts: string[] = [];
+      if (output.parts) {
+        for (const part of output.parts) {
+          // Skip synthetic parts
+          if (part.synthetic) continue;
+
+          if (part.type === 'text' && part.text) {
+            textParts.push(part.text);
+          } else if (typeof part.text === 'string' && !part.type) {
+            textParts.push(part.text);
+          }
+        }
+      }
+
+      if (textParts.length > 0) {
+        const userPrompt = textParts.join(' ');
+        upsertSessionState(sessionID, state => {
+          state.lastUserPrompt = userPrompt;
+        });
+        debugLog(
+          `Updated lastUserPrompt for session ${sessionID}: "${userPrompt.slice(0, 50)}${userPrompt.length > 50 ? '...' : ''}"`
+        );
+      }
+    },
+
+    /**
      * Inject rules into the system prompt.
      * Uses context from the messages.transform hook, retrieved via sessionID.
      * Deletes the session context after reading to prevent memory leaks.
@@ -345,6 +393,9 @@ const __testOnly = Object.freeze({
   },
   getSessionStateIDs: (): string[] => {
     return Array.from(sessionStateMap.keys());
+  },
+  getSessionState: (sessionID: string): SessionState | undefined => {
+    return sessionStateMap.get(sessionID);
   },
   upsertSessionState,
   resetSessionState: (): void => {

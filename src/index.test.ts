@@ -2591,4 +2591,32 @@ describe('SessionState', () => {
     expect(ids).toContain('ses_2');
     expect(ids).toContain('ses_3');
   });
+
+  it('updates lastUserPrompt from chat.message', async () => {
+    const { default: plugin } = await import('./index.js');
+    const hooks = await plugin({
+      client: {} as any,
+      project: {} as any,
+      directory: testDir,
+      worktree: testDir,
+      $: {} as any,
+      serverUrl: new URL('http://localhost'),
+    });
+
+    const hook = hooks['chat.message'] as any;
+    expect(hook).toBeTypeOf('function');
+
+    await hook(
+      { sessionID: 'ses_test' },
+      {
+        message: { role: 'user' },
+        parts: [{ type: 'text', text: 'please add tests' }],
+      }
+    );
+
+    const { __testOnly } = await import('./index.js');
+    expect(__testOnly.getSessionState('ses_test')?.lastUserPrompt).toBe(
+      'please add tests'
+    );
+  });
 });
