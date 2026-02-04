@@ -14,9 +14,11 @@ import {
 } from './utils.js';
 
 /**
- * Per-session storage for context between hook calls.
+ * Per-session storage for context between hook calls (legacy fallback).
  * Uses a Map keyed by sessionID to share context between messages.transform and system.transform.
  * The messages.transform hook populates this, system.transform reads it and deletes the entry.
+ * Note: sessionState is now the primary source; sessionContextMap is a legacy fallback.
+ * Entries are deleted after use to prevent memory leaks.
  */
 interface SessionContext {
   filePaths: string[];
@@ -393,8 +395,9 @@ const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
 
     /**
      * Inject rules into the system prompt.
-     * Uses context from both messages.transform hook (sessionContextMap) and tool.execute.before hook (sessionState).
-     * Deletes the session context after reading to prevent memory leaks.
+     * Uses context from sessionState (primary, persists across turns) and sessionContextMap (legacy fallback, deleted after use).
+     * sessionState is populated by tool.execute.before and chat.message hooks and persists across turns.
+     * sessionContextMap is populated by messages.transform hook and deleted after reading to prevent memory leaks.
      */
     'experimental.chat.system.transform': async (
       hookInput: SystemTransformInput,
@@ -409,10 +412,13 @@ const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
         ? sessionContextMap.get(sessionID)
         : undefined;
 
-      // Prefer sessionState as primary source, fallback to sessionContextMap for compatibility
-      const contextPaths: string[] = sessionState?.contextPaths
-        ? Array.from(sessionState.contextPaths)
-        : (sessionContext?.filePaths ?? []);
+      // Prefer sessionState as primary source, merge with sessionContextMap for compatibility
+      const contextPaths = Array.from(
+        new Set([
+          ...(sessionState ? Array.from(sessionState.contextPaths) : []),
+          ...(sessionContext?.filePaths ?? []),
+        ])
+      ).sort();
 
       // Get user prompt (prefer sessionState if available, fallback to sessionContext)
       const userPrompt =

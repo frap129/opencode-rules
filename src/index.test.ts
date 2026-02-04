@@ -2683,7 +2683,7 @@ describe('SessionState', () => {
     try {
       writeFileSync(
         path.join(globalRulesDir, 'conditional.mdc'),
-        `---\n globs:\n  - "src/special/**/*"\n---\n\nSpecial rule content.`
+        `---\nglobs:\n  - "src/special/**/*"\n---\n\nSpecial rule content.`
       );
 
       const { default: plugin } = await import('./index.js');
