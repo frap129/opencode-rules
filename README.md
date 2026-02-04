@@ -356,53 +356,78 @@ bun run lint
 
 ## Architecture
 
-This plugin uses OpenCode's experimental transform hooks to inject rules into the LLM context:
+This plugin uses OpenCode's hook system for incremental, stateful rule injection:
 
-### Two-Hook Approach
+### Hook-Based Approach
 
-1. **`experimental.chat.messages.transform`** - Fires before each LLM call
-   - Extracts file paths from conversation messages (tool calls, text content)
-   - Stores paths for conditional rule filtering
-   - Does NOT modify messages
+1. **`tool.execute.before`** - Authoritative path capture from tool execution
+   - Fires before each tool runs (read, edit, write, glob, grep, etc.)
+   - Captures `filePath` or `path` arguments authoritative from the tool definition
+   - Updates session state with normalized, verified context paths
+   - Provides real-time context as tools are executed
 
-2. **`experimental.chat.system.transform`** - Fires after messages.transform
-   - Reads discovered rule files
-   - Filters conditional rules (`.mdc` with `globs`) against extracted file paths
+2. **`chat.message`** - Incremental user prompt capture
+   - Fires as each user message arrives
+   - Extracts and stores the latest user prompt text
+   - Enables keyword-based rule matching across the conversation flow
+
+3. **`experimental.chat.messages.transform`** - One-time seeding fallback
+   - Fires before the first LLM call only (skipped on subsequent turns)
+   - Seeds session state from full message history if needed
+   - Provides fallback context extraction from all visible messages
+   - Ensures rules apply even if initial context wasn't captured by tool hooks
+
+4. **`experimental.chat.system.transform`** - Rule injection and filtering
+   - Fires before each LLM system prompt is constructed
+   - Reads discovered rule files and filters based on:
+     - Extracted file paths from session state
+     - Latest user prompt (keyword matching)
+     - Available tool IDs
    - Appends formatted rules to the system prompt
+
+5. **`experimental.session.compacting`** - Compaction context preservation
+   - Fires when a session is compacted (summarized)
+   - Injects current context paths into the compaction context
+   - Prevents rules from being lost during session compression
 
 ### Benefits Over Previous Approach
 
-- **No session tracking** - Rules are injected fresh on every LLM call
-- **No compaction handling** - System prompt is rebuilt automatically
-- **Cleaner injection** - Rules in system prompt instead of conversation messages
-- **Context-aware filtering** - Conditional rules only apply when relevant files are referenced
+- **Incremental state tracking** - Builds context incrementally rather than rescanning messages each turn
+- **Authoritative path capture** - Tool hooks provide verified file paths directly from the tool definition
+- **Real-time responsiveness** - Context updates as tools execute and messages arrive
+- **Compaction-aware** - Context persists through session compression
+- **Efficient caching** - Rule discovery happens once at startup, not on every LLM call
 
 ### Experimental API Notice
 
 This plugin depends on experimental OpenCode APIs:
 
-- `experimental.chat.messages.transform`
-- `experimental.chat.system.transform`
+- `experimental.chat.messages.transform` (fallback seeding)
+- `experimental.chat.system.transform` (rule injection)
+- `experimental.session.compacting` (compaction context)
 
 These APIs may change in future OpenCode versions. Check OpenCode release notes when upgrading.
 
 ## How It Works
 
-1. **Discovery**: Scan global and project directories for `.md` and `.mdc` files
+1. **Discovery**: Scan global and project directories for `.md` and `.mdc` files (at plugin init)
 2. **Parsing**: Extract metadata from files with YAML front matter
-3. **Messages Transform**: Extract file paths from message content for context awareness
-4. **Filtering**: Apply conditional rules based on extracted file paths
-5. **System Transform**: Append filtered rules to the system prompt
-6. **Fresh Injection**: Rules are re-evaluated on every LLM call, ensuring always-current context
+3. **Tool Execution**: `tool.execute.before` hook captures file paths before tools run
+4. **Message Flow**: `chat.message` hook updates user prompt as messages arrive
+5. **Initial Seeding**: `experimental.chat.messages.transform` extracts context from message history once
+6. **Rule Filtering**: `experimental.chat.system.transform` evaluates rules based on context and injects into system prompt
+7. **Compaction Persistence**: `experimental.session.compacting` preserves context during session compression
 
 ## Performance
 
 - Rule discovery performed once at plugin initialization
 - Rule content cached with mtime-based invalidation for fast re-reads
-- Efficient synchronous file operations during initialization
-- Optimized glob matching with `minimatch`
-- Session context deleted after use to prevent memory leaks
-- Minimal memory footprint with efficient caching
+- Incremental session state tracking (set of paths, not message rescanning)
+- Per-session state pruned after 100 concurrent sessions to prevent memory growth
+- Efficient glob matching with `minimatch`
+- Tool-based path capture is non-blocking with minimal overhead
+- Session context cleaned up when exceeded (LRU eviction)
+- Minimal memory footprint with efficient state management
 
 ## Debug Logging
 
