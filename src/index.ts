@@ -6,6 +6,7 @@
  */
 
 import type { PluginInput } from '@opencode-ai/plugin';
+import path from 'path';
 import {
   discoverRuleFiles,
   readAndFormatRules,
@@ -39,6 +40,23 @@ interface SessionState {
 const sessionStateMap = new Map<string, SessionState>();
 let sessionStateMax = 100;
 let sessionStateTick = 0;
+
+/**
+ * Store the project directory from plugin init for use in path normalization.
+ */
+let projectDirectory = '';
+
+/**
+ * Normalize paths to repo-relative POSIX format.
+ * If path is absolute and under baseDir, convert to relative POSIX path.
+ * Otherwise return path as-is.
+ */
+function normalizeContextPath(p: string, baseDir: string): string {
+  if (!path.isAbsolute(p)) return p;
+  const rel = path.relative(baseDir, p);
+  // Convert Windows separators to POSIX
+  return rel.split(path.sep).join('/');
+}
 
 /**
  * Create a default SessionState object.
@@ -214,6 +232,9 @@ const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
   // Store client reference for use in hooks
   const client = pluginInput.client;
 
+  // Store project directory for path normalization
+  projectDirectory = pluginInput.directory;
+
   // Discover rule files from global and project directories
   const ruleFiles = await discoverRuleFiles(pluginInput.directory);
 
@@ -259,13 +280,14 @@ const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
         }
       }
 
-      // Add path to session state if we found one
+      // Normalize and add path to session state if we found one
       if (filePath) {
+        const normalized = normalizeContextPath(filePath, projectDirectory);
         upsertSessionState(sessionID, state => {
-          state.contextPaths.add(filePath!);
+          state.contextPaths.add(normalized);
         });
 
-        debugLog(`Recorded context path from tool ${toolName}: ${filePath}`);
+        debugLog(`Recorded context path from tool ${toolName}: ${normalized}`);
       }
     },
 
@@ -387,18 +409,15 @@ const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
         ? sessionStateMap.get(sessionID)
         : undefined;
 
-      // Merge paths from both sources
-      const contextPaths: string[] = [];
-
-      // Add paths from messages.transform (sessionContextMap)
-      if (sessionContext?.filePaths) {
-        contextPaths.push(...sessionContext.filePaths);
-      }
-
-      // Add paths from tool.execute.before (sessionState)
-      if (sessionState?.contextPaths) {
-        contextPaths.push(...Array.from(sessionState.contextPaths));
-      }
+      // Merge paths from both sources, with deduplication
+      const contextPaths: string[] = Array.from(
+        new Set([
+          ...(sessionContext?.filePaths ?? []),
+          ...(sessionState?.contextPaths
+            ? Array.from(sessionState.contextPaths)
+            : []),
+        ])
+      );
 
       // Get user prompt (prefer sessionState if available, fallback to sessionContext)
       const userPrompt =
