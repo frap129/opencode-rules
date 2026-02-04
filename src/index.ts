@@ -221,6 +221,55 @@ const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
 
   return {
     /**
+     * Capture file paths from tool executions before they run.
+     * This hook observes the args passed to tools to record context paths.
+     * For tools like read|edit|write, captures filePath.
+     * For tools like glob|grep, captures path argument.
+     */
+    'tool.execute.before': async (
+      input: {
+        tool?: string;
+        sessionID?: string;
+        callID?: string;
+      },
+      output: {
+        args?: Record<string, unknown>;
+      }
+    ): Promise<void> => {
+      const sessionID = input?.sessionID;
+      const toolName = input?.tool;
+      const args = output?.args;
+
+      if (!sessionID || !toolName || !args) {
+        return;
+      }
+
+      // Determine which argument to extract based on tool name
+      let filePath: string | undefined;
+
+      if (['read', 'edit', 'write'].includes(toolName)) {
+        const arg = args.filePath;
+        if (typeof arg === 'string' && arg.length > 0) {
+          filePath = arg;
+        }
+      } else if (['glob', 'grep'].includes(toolName)) {
+        const arg = args.path;
+        if (typeof arg === 'string' && arg.length > 0) {
+          filePath = arg;
+        }
+      }
+
+      // Add path to session state if we found one
+      if (filePath) {
+        upsertSessionState(sessionID, state => {
+          state.contextPaths.add(filePath!);
+        });
+
+        debugLog(`Recorded context path from tool ${toolName}: ${filePath}`);
+      }
+    },
+
+    /**
      * Extract file paths from messages for conditional rule filtering.
      * This hook fires before system.transform.
      * Stores context in a Map keyed by sessionID extracted from messages.
@@ -322,7 +371,7 @@ const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
 
     /**
      * Inject rules into the system prompt.
-     * Uses context from the messages.transform hook, retrieved via sessionID.
+     * Uses context from both messages.transform hook (sessionContextMap) and tool.execute.before hook (sessionState).
      * Deletes the session context after reading to prevent memory leaks.
      */
     'experimental.chat.system.transform': async (
@@ -334,8 +383,26 @@ const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
       const sessionContext = sessionID
         ? sessionContextMap.get(sessionID)
         : undefined;
-      const contextPaths = sessionContext?.filePaths || [];
-      const userPrompt = sessionContext?.userPrompt;
+      const sessionState = sessionID
+        ? sessionStateMap.get(sessionID)
+        : undefined;
+
+      // Merge paths from both sources
+      const contextPaths: string[] = [];
+
+      // Add paths from messages.transform (sessionContextMap)
+      if (sessionContext?.filePaths) {
+        contextPaths.push(...sessionContext.filePaths);
+      }
+
+      // Add paths from tool.execute.before (sessionState)
+      if (sessionState?.contextPaths) {
+        contextPaths.push(...Array.from(sessionState.contextPaths));
+      }
+
+      // Get user prompt (prefer sessionState if available, fallback to sessionContext)
+      const userPrompt =
+        sessionState?.lastUserPrompt || sessionContext?.userPrompt;
 
       // Delete the session context after reading to prevent memory leaks
       if (sessionID) {
@@ -403,9 +470,6 @@ const __testOnly = Object.freeze({
   },
   getSessionStateIDs: (): string[] => {
     return Array.from(sessionStateMap.keys());
-  },
-  getSessionState: (sessionID: string): SessionState | undefined => {
-    return sessionStateMap.get(sessionID);
   },
   getSessionStateSnapshot: (sessionID: string): SessionState | undefined => {
     const s = sessionStateMap.get(sessionID);

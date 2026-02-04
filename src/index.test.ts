@@ -2578,7 +2578,12 @@ Rule content`;
 });
 
 describe('SessionState', () => {
+  beforeEach(() => {
+    setupTestDirs();
+  });
+
   afterEach(async () => {
+    teardownTestDirs();
     const { __testOnly } = await import('./index.js');
     __testOnly.resetSessionState();
   });
@@ -2622,5 +2627,51 @@ describe('SessionState', () => {
     const { __testOnly } = await import('./index.js');
     const snapshot = __testOnly.getSessionStateSnapshot('ses_test');
     expect(snapshot?.lastUserPrompt).toBe('please add tests');
+  });
+
+  it('includes glob-conditional rule when tool hook records matching file path', async () => {
+    // Arrange rules
+    const originalEnv = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    try {
+      writeFileSync(
+        path.join(globalRulesDir, 'typescript.mdc'),
+        `---\nglobs:\n  - "src/components/**/*.tsx"\n---\n\nUse React best practices.`
+      );
+
+      const { default: plugin } = await import('./index.js');
+      const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
+      const hooks = await plugin({
+        client: mockClient as any,
+        project: {} as any,
+        directory: testDir,
+        worktree: testDir,
+        $: {} as any,
+        serverUrl: new URL('http://localhost'),
+      });
+
+      // Act: record file path via tool hook
+      const before = hooks['tool.execute.before'] as any;
+      expect(before).toBeDefined();
+
+      await before(
+        { tool: 'read', sessionID: 'ses_1', callID: 'call_1' },
+        { args: { filePath: 'src/components/Button.tsx' } }
+      );
+
+      const systemTransform = hooks[
+        'experimental.chat.system.transform'
+      ] as any;
+      const result = await systemTransform(
+        { sessionID: 'ses_1' },
+        { system: 'Base prompt.' }
+      );
+
+      // Assert
+      expect(result.system).toContain('React best practices');
+    } finally {
+      process.env.XDG_CONFIG_HOME = originalEnv;
+    }
   });
 });
