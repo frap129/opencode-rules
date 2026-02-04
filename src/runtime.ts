@@ -274,7 +274,15 @@ export class OpenCodeRulesRuntime {
     let availableToolIDs: string[] = [];
 
     try {
-      const toolIdsResponse = await (this.client as any).tool.ids({
+      const toolIdsResponse = await (
+        this.client as {
+          tool: {
+            ids: (opts: {
+              query: { directory: string };
+            }) => Promise<{ data: string[] }>;
+          };
+        }
+      ).tool.ids({
         query: { directory: this.directory },
       });
 

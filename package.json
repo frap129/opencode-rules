@@ -10,7 +10,7 @@
     "dev": "tsc --watch",
     "test": "vitest",
     "test:run": "vitest run",
-    "lint": "eslint src --ext .ts",
+    "lint": "eslint src",
     "format": "prettier --write src/**/*.ts",
     "format:check": "prettier --check src/**/*.ts",
     "clean": "rm -rf dist",
