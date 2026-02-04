@@ -3,11 +3,22 @@ export interface McpStatusMap {
 }
 
 export function sanitizeMcpClientName(name: string): string {
-  throw new Error('Not implemented');
+  return name.replace(/[^a-zA-Z0-9_-]/g, '_');
 }
 
 export function extractConnectedMcpCapabilityIDs(
-  _status: McpStatusMap | null | undefined
+  status: McpStatusMap | null | undefined
 ): string[] {
-  throw new Error('Not implemented');
+  if (!status || typeof status !== 'object' || Array.isArray(status)) return [];
+
+  const out: string[] = [];
+  for (const [clientName, clientStatus] of Object.entries(status)) {
+    if (clientStatus?.status === 'connected') {
+      const sanitized = sanitizeMcpClientName(clientName);
+      if (sanitized) {
+        out.push(`mcp_${sanitized}`);
+      }
+    }
+  }
+  return out;
 }
