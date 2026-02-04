@@ -402,28 +402,24 @@ const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
     ): Promise<SystemTransformOutput> => {
       // Retrieve context using sessionID from input
       const sessionID = hookInput?.sessionID;
-      const sessionContext = sessionID
-        ? sessionContextMap.get(sessionID)
-        : undefined;
       const sessionState = sessionID
         ? sessionStateMap.get(sessionID)
         : undefined;
+      const sessionContext = sessionID
+        ? sessionContextMap.get(sessionID)
+        : undefined;
 
-      // Merge paths from both sources, with deduplication
-      const contextPaths: string[] = Array.from(
-        new Set([
-          ...(sessionContext?.filePaths ?? []),
-          ...(sessionState?.contextPaths
-            ? Array.from(sessionState.contextPaths)
-            : []),
-        ])
-      );
+      // Prefer sessionState as primary source, fallback to sessionContextMap for compatibility
+      const contextPaths: string[] = sessionState?.contextPaths
+        ? Array.from(sessionState.contextPaths)
+        : (sessionContext?.filePaths ?? []);
 
       // Get user prompt (prefer sessionState if available, fallback to sessionContext)
       const userPrompt =
         sessionState?.lastUserPrompt || sessionContext?.userPrompt;
 
       // Delete the session context after reading to prevent memory leaks
+      // Note: sessionState is NOT deleted to allow it to persist across turns
       if (sessionID) {
         sessionContextMap.delete(sessionID);
       }
