@@ -2128,6 +2128,49 @@ describe('OpenCodeRulesPlugin', () => {
     }
   });
 
+  it('seeds session state once from messages.transform and does not rescan', async () => {
+    // Arrange
+    const { default: plugin } = await import('./index.js');
+    const hooks = await plugin({
+      client: {} as any,
+      project: {} as any,
+      directory: testDir,
+      worktree: testDir,
+      $: {} as any,
+      serverUrl: new URL('http://localhost'),
+    });
+
+    const transform = hooks['experimental.chat.messages.transform'] as any;
+
+    const messages = {
+      messages: [
+        {
+          info: { role: 'assistant' },
+          parts: [
+            {
+              sessionID: 'ses_seed',
+              type: 'tool-invocation',
+              toolInvocation: {
+                toolName: 'read',
+                args: { filePath: 'src/a.ts' },
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const { __testOnly } = await import('./index.js');
+    __testOnly.resetSeedCounters();
+
+    // Act - call transform twice with same messages
+    await transform({}, messages);
+    await transform({}, messages);
+
+    // Assert - should only seed once
+    expect(__testOnly.getSeedCount('ses_seed')).toBe(1);
+  });
+
   describe('conditional rules integration', () => {
     it('should include conditional rule when message context matches glob', async () => {
       // Arrange

@@ -37,11 +37,18 @@ interface SessionState {
   lastUpdated: number;
   isCompacting?: boolean;
   compactingSince?: number;
+  seeded?: boolean;
 }
 
 const sessionStateMap = new Map<string, SessionState>();
 let sessionStateMax = 100;
 let sessionStateTick = 0;
+
+/**
+ * Track seed counts per session for testing purposes.
+ * Maps sessionID to count of times seeding has occurred.
+ */
+const seedCounterMap = new Map<string, number>();
 
 /**
  * Store the project directory from plugin init for use in path normalization.
@@ -296,6 +303,7 @@ const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
     /**
      * Extract file paths from messages for conditional rule filtering.
      * This hook fires before system.transform.
+     * Seeds session state once on first call, then skips rescanning on subsequent calls.
      * Stores context in a Map keyed by sessionID extracted from messages.
      */
     'experimental.chat.messages.transform': async (
@@ -309,6 +317,13 @@ const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
         return output;
       }
 
+      // Check if this session is already seeded
+      const existingState = sessionStateMap.get(sessionID);
+      if (existingState && existingState.seeded) {
+        debugLog(`Session ${sessionID} already seeded, skipping rescan`);
+        return output;
+      }
+
       // Extract paths from all messages (cast to compatible type)
       const contextPaths = extractFilePathsFromMessages(
         output.messages as unknown as Parameters<
@@ -318,7 +333,25 @@ const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
       // Extract latest user prompt for keyword matching
       const userPrompt = extractLatestUserPrompt(output.messages);
 
-      // Store both in session context keyed by sessionID
+      // Seed session state once
+      upsertSessionState(sessionID, state => {
+        // Add extracted paths to contextPaths
+        for (const path of contextPaths) {
+          state.contextPaths.add(path);
+        }
+        // Update lastUserPrompt if found
+        if (userPrompt) {
+          state.lastUserPrompt = userPrompt;
+        }
+        // Mark as seeded
+        state.seeded = true;
+      });
+
+      // Track seed count for testing
+      const currentCount = seedCounterMap.get(sessionID) ?? 0;
+      seedCounterMap.set(sessionID, currentCount + 1);
+
+      // Store in sessionContextMap for legacy fallback
       sessionContextMap.set(sessionID, {
         filePaths: contextPaths,
         userPrompt,
@@ -326,12 +359,14 @@ const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
 
       if (contextPaths.length > 0) {
         debugLog(
-          `Extracted ${contextPaths.length} context path(s): ${contextPaths.slice(0, 5).join(', ')}${contextPaths.length > 5 ? '...' : ''}`
+          `Seeded ${contextPaths.length} context path(s) for session ${sessionID}: ${contextPaths.slice(0, 5).join(', ')}${contextPaths.length > 5 ? '...' : ''}`
         );
       }
 
       if (userPrompt) {
-        debugLog(`Extracted user prompt (len=${userPrompt.length})`);
+        debugLog(
+          `Seeded user prompt for session ${sessionID} (len=${userPrompt.length})`
+        );
       }
 
       // Don't modify messages - just extract context
@@ -505,6 +540,12 @@ const __testOnly = Object.freeze({
     sessionStateMap.clear();
     sessionStateMax = 100;
     sessionStateTick = 0;
+  },
+  resetSeedCounters: (): void => {
+    seedCounterMap.clear();
+  },
+  getSeedCount: (sessionID: string): number => {
+    return seedCounterMap.get(sessionID) ?? 0;
   },
 });
 
