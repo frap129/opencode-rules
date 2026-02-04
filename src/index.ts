@@ -25,6 +25,71 @@ interface SessionContext {
 const sessionContextMap = new Map<string, SessionContext>();
 
 /**
+ * Per-session state that persists across turns for incremental updates.
+ * Replaces re-scanning message history each LLM turn with incremental state.
+ */
+interface SessionState {
+  contextPaths: Set<string>;
+  lastUserPrompt?: string;
+  lastUpdated: number;
+  isCompacting?: boolean;
+  compactingSince?: number;
+}
+
+const sessionStateMap = new Map<string, SessionState>();
+let SESSION_STATE_MAX = 100;
+
+/**
+ * Create a default SessionState object.
+ */
+function createDefaultSessionState(): SessionState {
+  return {
+    contextPaths: new Set<string>(),
+    lastUpdated: Date.now(),
+  };
+}
+
+/**
+ * Upsert a session state with a mutator function.
+ * Creates default state if missing, updates lastUpdated, and prunes old entries.
+ */
+function upsertSessionState(
+  sessionID: string,
+  mutator: (state: SessionState) => void
+): void {
+  // Create or get existing state
+  let state = sessionStateMap.get(sessionID);
+  if (!state) {
+    state = createDefaultSessionState();
+    sessionStateMap.set(sessionID, state);
+  }
+
+  // Apply mutations
+  mutator(state);
+
+  // Update timestamp
+  state.lastUpdated = Date.now();
+
+  // Prune oldest entries if over limit
+  if (sessionStateMap.size > SESSION_STATE_MAX) {
+    // Find entry with smallest lastUpdated
+    let oldestID: string | null = null;
+    let oldestTime = Infinity;
+
+    for (const [id, st] of sessionStateMap.entries()) {
+      if (st.lastUpdated < oldestTime) {
+        oldestTime = st.lastUpdated;
+        oldestID = id;
+      }
+    }
+
+    if (oldestID) {
+      sessionStateMap.delete(oldestID);
+    }
+  }
+}
+
+/**
  * Debug logging helper - only logs when OPENCODE_RULES_DEBUG env var is set.
  * This prevents noisy output during normal operation.
  */
@@ -269,4 +334,18 @@ const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
   };
 };
 
+/**
+ * Test-only exports for accessing internal state and functions.
+ */
+const __testOnly = {
+  setSessionStateLimit: (limit: number): void => {
+    SESSION_STATE_MAX = limit;
+  },
+  getSessionStateIDs: (): string[] => {
+    return Array.from(sessionStateMap.keys());
+  },
+  upsertSessionState,
+};
+
 export default openCodeRulesPlugin;
+export { __testOnly };

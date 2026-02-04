@@ -2574,3 +2574,19 @@ Rule content`;
     });
   });
 });
+
+describe('SessionState', () => {
+  it('prunes session state when over limit', async () => {
+    const { __testOnly } = await import('./index.js');
+
+    __testOnly.setSessionStateLimit(2);
+    __testOnly.upsertSessionState('ses_1', s => void (s.lastUpdated = 1));
+    __testOnly.upsertSessionState('ses_2', s => void (s.lastUpdated = 2));
+    __testOnly.upsertSessionState('ses_3', s => void (s.lastUpdated = 3));
+
+    const ids = __testOnly.getSessionStateIDs();
+    expect(ids).toHaveLength(2);
+    expect(ids).toContain('ses_2');
+    expect(ids).toContain('ses_3');
+  });
+});
