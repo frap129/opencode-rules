@@ -2895,4 +2895,48 @@ describe('SessionState', () => {
       process.env.XDG_CONFIG_HOME = originalEnv;
     }
   });
+
+  it('skips full rule injection when session is compacting', async () => {
+    // Arrange
+    writeFileSync(
+      path.join(globalRulesDir, 'always.md'),
+      '# Always\nAlways apply this'
+    );
+
+    const originalEnv = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    try {
+      const { default: plugin, __testOnly } = await import('./index.js');
+      const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
+      const hooks = await plugin({
+        client: mockClient as any,
+        project: {} as any,
+        directory: testDir,
+        worktree: testDir,
+        $: {} as any,
+        serverUrl: new URL('http://localhost'),
+      });
+
+      // Set compacting flag
+      __testOnly.upsertSessionState(
+        'ses_compact',
+        s => void (s.isCompacting = true)
+      );
+
+      // Act
+      const systemTransform = hooks[
+        'experimental.chat.system.transform'
+      ] as any;
+      const result = await systemTransform(
+        { sessionID: 'ses_compact' },
+        { system: 'Base prompt.' }
+      );
+
+      // Assert - rules should NOT be injected
+      expect(result.system).toBe('Base prompt.');
+    } finally {
+      process.env.XDG_CONFIG_HOME = originalEnv;
+    }
+  });
 });

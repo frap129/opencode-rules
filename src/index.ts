@@ -447,6 +447,18 @@ const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
       const sessionState = sessionID
         ? sessionStateMap.get(sessionID)
         : undefined;
+
+      // Skip rule injection during compaction to avoid polluting the summary
+      // After this transform call, clear the flag so subsequent calls work normally
+      if (sessionState?.isCompacting) {
+        debugLog(`Skipping rule injection for compacting session ${sessionID}`);
+        // Clear the compacting flag after one system-transform run
+        upsertSessionState(sessionID!, state => {
+          state.isCompacting = false;
+        });
+        return output ?? {};
+      }
+
       const sessionContext = sessionID
         ? sessionContextMap.get(sessionID)
         : undefined;
