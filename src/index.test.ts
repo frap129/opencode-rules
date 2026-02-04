@@ -2939,4 +2939,49 @@ describe('SessionState', () => {
       process.env.XDG_CONFIG_HOME = originalEnv;
     }
   });
+
+  it('includes rules gated by connected mcp server capability', async () => {
+    // Arrange
+    const ruleContent = `---
+tools:
+  - "mcp_context7"
+---
+MCP Context7 rule content`;
+    writeFileSync(path.join(globalRulesDir, 'context7.md'), ruleContent);
+
+    const originalEnv = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    try {
+      const { default: plugin } = await import('./index.js');
+      const mockClient = {
+        tool: { ids: vi.fn(async () => ({ data: [] })) },
+        mcp: {
+          status: vi.fn(async () => ({
+            data: { context7: { status: 'connected' } },
+          })),
+        },
+      };
+
+      const hooks = await plugin({
+        client: mockClient as any,
+        project: {} as any,
+        directory: testDir,
+        worktree: testDir,
+        $: {} as any,
+        serverUrl: new URL('http://localhost:3000'),
+      });
+
+      // Act
+      const systemTransform = hooks[
+        'experimental.chat.system.transform'
+      ] as any;
+      const result = await systemTransform({}, { system: 'Base prompt.' });
+
+      // Assert - rule content should be included when MCP is connected
+      expect(result.system).toContain('MCP Context7 rule content');
+    } finally {
+      process.env.XDG_CONFIG_HOME = originalEnv;
+    }
+  });
 });

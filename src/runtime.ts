@@ -276,6 +276,7 @@ export class OpenCodeRulesRuntime {
 
     // Get built-in tool IDs
     try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const toolIdsResponse = await (this.client as any).tool.ids({
         query: { directory: this.directory },
       });
@@ -295,6 +296,7 @@ export class OpenCodeRulesRuntime {
 
     // Get connected MCP server capability IDs
     try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const mcpStatusResponse = await (this.client as any).mcp?.status?.({
         query: { directory: this.directory },
       });
