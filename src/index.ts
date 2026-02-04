@@ -63,6 +63,15 @@ function normalizeContextPath(p: string, baseDir: string): string {
 }
 
 /**
+ * Sanitize a file path for safe inclusion in context strings.
+ * Prevents prompt injection by removing control characters and limiting length.
+ */
+function sanitizePathForContext(p: string): string {
+  // Remove newlines, carriage returns, tabs - prevent injection attacks
+  return p.replace(/[\r\n\t]/g, ' ').slice(0, 300);
+}
+
+/**
  * Create a default SessionState object.
  */
 function createDefaultSessionState(): SessionState {
@@ -534,7 +543,7 @@ const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
       // Set compaction flags for Task 7
       upsertSessionState(sessionID, state => {
         state.isCompacting = true;
-        state.compactingSince = sessionStateTick;
+        state.compactingSince = Date.now();
       });
 
       // Sort paths for determinism and take up to N paths
@@ -546,7 +555,7 @@ const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
       const contextString = [
         'OpenCode Rules: Working context',
         'Current file paths in context:',
-        ...pathsToInclude.map(p => `  - ${p}`),
+        ...pathsToInclude.map(p => `  - ${sanitizePathForContext(p)}`),
         ...(sortedPaths.length > maxPaths
           ? [`  ... and ${sortedPaths.length - maxPaths} more paths`]
           : []),
