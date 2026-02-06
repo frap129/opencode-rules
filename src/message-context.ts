@@ -63,6 +63,7 @@ export function extractLatestUserPrompt(
 ): string | undefined {
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i];
+    if (message.role && message.role !== 'user') continue;
     const parts = message.parts || [];
 
     const textParts: string[] = [];

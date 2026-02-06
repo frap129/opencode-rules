@@ -382,6 +382,10 @@ export async function readAndFormatRules(
   }
 
   const ruleContents: string[] = [];
+  const availableToolSet =
+    availableToolIDs && availableToolIDs.length > 0
+      ? new Set(availableToolIDs)
+      : undefined;
 
   for (const { filePath, relativePath } of files) {
     // Use cached rule data with mtime-based invalidation
@@ -412,8 +416,8 @@ export async function readAndFormatRules(
       }
 
       // Check tools against available tool IDs
-      if (metadata.tools && availableToolIDs && availableToolIDs.length > 0) {
-        toolsMatch = toolsMatchAvailable(availableToolIDs, metadata.tools);
+      if (metadata.tools && availableToolSet) {
+        toolsMatch = metadata.tools.some(tool => availableToolSet.has(tool));
       }
 
       // If rule has conditions but none match, skip it

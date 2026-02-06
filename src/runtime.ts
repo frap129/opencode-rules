@@ -97,6 +97,11 @@ export class OpenCodeRulesRuntime {
       if (typeof arg === 'string' && arg.length > 0) {
         filePath = arg;
       }
+    } else if (toolName === 'bash') {
+      const arg = args.workdir;
+      if (typeof arg === 'string' && arg.length > 0) {
+        filePath = arg;
+      }
     }
 
     if (filePath) {
@@ -136,7 +141,7 @@ export class OpenCodeRulesRuntime {
 
     this.sessionStore.upsert(sessionID, state => {
       for (const p of contextPaths) {
-        state.contextPaths.add(p);
+        state.contextPaths.add(normalizeContextPath(p, this.projectDirectory));
       }
       if (userPrompt && !state.lastUserPrompt) {
         state.lastUserPrompt = userPrompt;
@@ -273,45 +278,46 @@ export class OpenCodeRulesRuntime {
 
   private async queryAvailableToolIDs(): Promise<string[]> {
     const ids = new Set<string>();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const client = this.client as any;
+    const query = { directory: this.directory };
 
-    // Get built-in tool IDs
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const toolIdsResponse = await (this.client as any).tool.ids({
-        query: { directory: this.directory },
-      });
+    const [toolResult, mcpResult] = await Promise.allSettled([
+      client.tool?.ids?.({ query }),
+      client.mcp?.status?.({ query }),
+    ]);
 
-      if (toolIdsResponse.data && Array.isArray(toolIdsResponse.data)) {
-        for (const id of toolIdsResponse.data) {
-          ids.add(id);
-        }
-        this.debugLog(
-          `Built-in tools: ${toolIdsResponse.data.slice(0, 10).join(', ')}${toolIdsResponse.data.length > 10 ? '...' : ''} (${toolIdsResponse.data.length} total)`
-        );
+    if (
+      toolResult.status === 'fulfilled' &&
+      Array.isArray(toolResult.value?.data)
+    ) {
+      for (const id of toolResult.value.data) {
+        ids.add(id);
       }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      this.debugLog(
+        `Built-in tools: ${toolResult.value.data.slice(0, 10).join(', ')}${toolResult.value.data.length > 10 ? '...' : ''} (${toolResult.value.data.length} total)`
+      );
+    } else if (toolResult.status === 'rejected') {
+      const message =
+        toolResult.reason instanceof Error
+          ? toolResult.reason.message
+          : String(toolResult.reason);
       this.debugLog(`Warning: Failed to query tool IDs: ${message}`);
     }
 
-    // Get connected MCP server capability IDs
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const mcpStatusResponse = await (this.client as any).mcp?.status?.({
-        query: { directory: this.directory },
-      });
-
-      if (mcpStatusResponse?.data) {
-        const mcpIds = extractConnectedMcpCapabilityIDs(mcpStatusResponse.data);
-        for (const id of mcpIds) {
-          ids.add(id);
-        }
-        if (mcpIds.length > 0) {
-          this.debugLog(`MCP capability IDs: ${mcpIds.join(', ')}`);
-        }
+    if (mcpResult.status === 'fulfilled' && mcpResult.value?.data) {
+      const mcpIds = extractConnectedMcpCapabilityIDs(mcpResult.value.data);
+      for (const id of mcpIds) {
+        ids.add(id);
       }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      if (mcpIds.length > 0) {
+        this.debugLog(`MCP capability IDs: ${mcpIds.join(', ')}`);
+      }
+    } else if (mcpResult.status === 'rejected') {
+      const message =
+        mcpResult.reason instanceof Error
+          ? mcpResult.reason.message
+          : String(mcpResult.reason);
       this.debugLog(`Warning: Failed to query MCP status: ${message}`);
     }
 
