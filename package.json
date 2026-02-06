@@ -1,6 +1,6 @@
 {
   "name": "opencode-rules",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "OpenCode plugin that discovers and injects markdown rules into system prompts",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
