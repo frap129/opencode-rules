@@ -161,6 +161,10 @@ tools:
 
 This rule only applies when the websearch or codesearch MCP tools are available.
 
+NOTE: Due to limitations on how opencode provides tools via the SDK, individual
+MCP tools cannot be matched. Only built-in tools, plugin tools, and whole MCPs
+can be matched.
+
 ### Combined Globs and Keywords Rule
 
 Create `~/.config/opencode/rules/test-files.mdc`:
