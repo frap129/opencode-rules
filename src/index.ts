@@ -7,16 +7,12 @@
 import type { PluginInput } from '@opencode-ai/plugin';
 import { discoverRuleFiles } from './utils.js';
 import { OpenCodeRulesRuntime } from './runtime.js';
-import { sessionStore, type SessionState } from './session-store.js';
+import { createSessionStore, type SessionState } from './session-store.js';
 
-/**
- * Debug logging helper - only logs when OPENCODE_RULES_DEBUG env var is set.
- */
-function debugLog(message: string): void {
-  if (process.env.OPENCODE_RULES_DEBUG) {
-    console.debug(`[opencode-rules] ${message}`);
-  }
-}
+const sessionStore = createSessionStore();
+import { createDebugLog } from './debug.js';
+
+const debugLog = createDebugLog();
 
 const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
   const ruleFiles = await discoverRuleFiles(pluginInput.directory);

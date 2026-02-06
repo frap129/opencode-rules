@@ -1,4 +1,5 @@
 import path from 'path';
+import type { Message, MessagePart } from './utils.js';
 
 export interface MessagePartWithSession {
   type?: string;
@@ -88,4 +89,25 @@ export function extractLatestUserPrompt(
   }
 
   return undefined;
+}
+
+/**
+ * Convert MessageWithInfo[] to Message[] by filtering out messages
+ * that lack required fields (role, non-empty parts array).
+ */
+export function toExtractableMessages(messages: MessageWithInfo[]): Message[] {
+  const result: Message[] = [];
+  for (const msg of messages) {
+    if (
+      typeof msg.role === 'string' &&
+      Array.isArray(msg.parts) &&
+      msg.parts.length > 0
+    ) {
+      result.push({
+        role: msg.role,
+        parts: msg.parts as MessagePart[],
+      });
+    }
+  }
+  return result;
 }

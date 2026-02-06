@@ -8,18 +8,12 @@ import {
   extractSessionID,
   normalizeContextPath,
   sanitizePathForContext,
+  toExtractableMessages,
   type MessageWithInfo,
 } from './message-context.js';
 import { extractConnectedMcpCapabilityIDs } from './mcp-tools.js';
+import { createDebugLog, type DebugLog } from './debug.js';
 import type { SessionStore } from './session-store.js';
-
-type DebugLog = (message: string) => void;
-
-function defaultDebugLog(message: string): void {
-  if (process.env.OPENCODE_RULES_DEBUG) {
-    console.debug(`[opencode-rules] ${message}`);
-  }
-}
 
 interface MessagesTransformOutput {
   messages: MessageWithInfo[];
@@ -58,7 +52,7 @@ export class OpenCodeRulesRuntime {
     this.projectDirectory = opts.projectDirectory;
     this.ruleFiles = opts.ruleFiles;
     this.sessionStore = opts.sessionStore;
-    this.debugLog = opts.debugLog ?? defaultDebugLog;
+    this.debugLog = opts.debugLog ?? createDebugLog();
     this.now = opts.now ?? (() => Date.now());
   }
 
@@ -133,9 +127,7 @@ export class OpenCodeRulesRuntime {
     }
 
     const contextPaths = extractFilePathsFromMessages(
-      output.messages as unknown as Parameters<
-        typeof extractFilePathsFromMessages
-      >[0]
+      toExtractableMessages(output.messages)
     );
     const userPrompt = extractLatestUserPrompt(output.messages);
 

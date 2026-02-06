@@ -2,21 +2,14 @@
  * Utility functions for OpenCode Rules Plugin
  */
 
-import { readdirSync, readFileSync, existsSync, statSync } from 'fs';
+import { stat, readFile, readdir } from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import { minimatch } from 'minimatch';
 import { parse as parseYaml } from 'yaml';
+import { createDebugLog } from './debug.js';
 
-/**
- * Debug logging helper - only logs when OPENCODE_RULES_DEBUG env var is set.
- * This prevents noisy output during normal operation.
- */
-function debugLog(message: string): void {
-  if (process.env.OPENCODE_RULES_DEBUG) {
-    console.debug(`[opencode-rules] ${message}`);
-  }
-}
+const debugLog = createDebugLog();
 
 /**
  * Cached rule data for performance optimization
@@ -51,9 +44,11 @@ export function clearRuleCache(): void {
  * @param filePath - Absolute path to the rule file
  * @returns Cached rule data or undefined if file cannot be read
  */
-function getCachedRule(filePath: string): CachedRule | undefined {
+async function getCachedRule(
+  filePath: string
+): Promise<CachedRule | undefined> {
   try {
-    const stats = statSync(filePath);
+    const stats = await stat(filePath);
     const mtime = stats.mtimeMs;
 
     // Check if we have a valid cached entry
@@ -65,7 +60,7 @@ function getCachedRule(filePath: string): CachedRule | undefined {
 
     // Read and cache the file
     debugLog(`Cache miss: ${filePath}`);
-    const content = readFileSync(filePath, 'utf-8');
+    const content = await readFile(filePath, 'utf-8');
     const metadata = parseRuleMetadata(content);
     const strippedContent = stripFrontmatter(content);
 
@@ -254,18 +249,20 @@ function getGlobalRulesDir(): string | null {
  * @param baseDir - Base directory for relative path calculation
  * @returns Array of discovered file paths with their relative paths from baseDir
  */
-function scanDirectoryRecursively(
+async function scanDirectoryRecursively(
   dir: string,
   baseDir: string
-): Array<{ filePath: string; relativePath: string }> {
+): Promise<Array<{ filePath: string; relativePath: string }>> {
   const results: Array<{ filePath: string; relativePath: string }> = [];
 
-  if (!existsSync(dir)) {
+  try {
+    await stat(dir);
+  } catch {
     return results;
   }
 
   try {
-    const entries = readdirSync(dir, { withFileTypes: true });
+    const entries = await readdir(dir, { withFileTypes: true });
     for (const entry of entries) {
       // Skip hidden files and directories
       if (entry.name.startsWith('.')) {
@@ -276,7 +273,7 @@ function scanDirectoryRecursively(
 
       if (entry.isDirectory()) {
         // Recurse into subdirectory
-        results.push(...scanDirectoryRecursively(fullPath, baseDir));
+        results.push(...(await scanDirectoryRecursively(fullPath, baseDir)));
       } else if (entry.name.endsWith('.md') || entry.name.endsWith('.mdc')) {
         // Add markdown file
         const relativePath = path.relative(baseDir, fullPath);
@@ -319,7 +316,7 @@ export async function discoverRuleFiles(
   // Discover global rules (recursively)
   const globalRulesDir = getGlobalRulesDir();
   if (globalRulesDir) {
-    const globalRules = scanDirectoryRecursively(
+    const globalRules = await scanDirectoryRecursively(
       globalRulesDir,
       globalRulesDir
     );
@@ -332,7 +329,7 @@ export async function discoverRuleFiles(
   // Discover project-local rules (recursively) if project directory is provided
   if (projectDir) {
     const projectRulesDir = path.join(projectDir, '.opencode', 'rules');
-    const projectRules = scanDirectoryRecursively(
+    const projectRules = await scanDirectoryRecursively(
       projectRulesDir,
       projectRulesDir
     );
@@ -389,7 +386,7 @@ export async function readAndFormatRules(
 
   for (const { filePath, relativePath } of files) {
     // Use cached rule data with mtime-based invalidation
-    const cachedRule = getCachedRule(filePath);
+    const cachedRule = await getCachedRule(filePath);
     if (!cachedRule) {
       continue; // Error already logged by getCachedRule
     }
@@ -464,7 +461,7 @@ interface TextPart {
   text: string;
 }
 
-type MessagePart = ToolInvocationPart | TextPart | { type: string };
+export type MessagePart = ToolInvocationPart | TextPart | { type: string };
 
 export interface Message {
   role: string;

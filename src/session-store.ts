@@ -120,4 +120,6 @@ export class SessionStore {
   }
 }
 
-export const sessionStore = new SessionStore({ max: 100 });
+export function createSessionStore(opts?: SessionStoreOptions): SessionStore {
+  return new SessionStore(opts ?? { max: 100 });
+}
