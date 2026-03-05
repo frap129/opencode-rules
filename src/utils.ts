@@ -142,6 +142,14 @@ export interface RuleMetadata {
   globs?: string[];
   keywords?: string[];
   tools?: string[];
+  model?: string[];
+  agent?: string[];
+  command?: string[];
+  project?: string[];
+  branch?: string[];
+  os?: string[];
+  ci?: boolean;
+  match?: 'any' | 'all';
 }
 
 /**
@@ -151,6 +159,14 @@ interface ParsedFrontmatter {
   globs?: unknown;
   keywords?: unknown;
   tools?: unknown;
+  model?: unknown;
+  agent?: unknown;
+  command?: unknown;
+  project?: unknown;
+  branch?: unknown;
+  os?: unknown;
+  ci?: unknown;
+  match?: unknown;
 }
 
 /**
@@ -215,6 +231,82 @@ export function parseRuleMetadata(content: string): RuleMetadata | undefined {
       if (tools.length > 0) {
         metadata.tools = tools;
       }
+    }
+
+    // Extract model array
+    if (Array.isArray(parsed.model)) {
+      const model = parsed.model
+        .filter((m): m is string => typeof m === 'string')
+        .map(m => m.trim())
+        .filter(m => m.length > 0);
+      if (model.length > 0) {
+        metadata.model = model;
+      }
+    }
+
+    // Extract agent array
+    if (Array.isArray(parsed.agent)) {
+      const agent = parsed.agent
+        .filter((a): a is string => typeof a === 'string')
+        .map(a => a.trim())
+        .filter(a => a.length > 0);
+      if (agent.length > 0) {
+        metadata.agent = agent;
+      }
+    }
+
+    // Extract command array
+    if (Array.isArray(parsed.command)) {
+      const command = parsed.command
+        .filter((c): c is string => typeof c === 'string')
+        .map(c => c.trim())
+        .filter(c => c.length > 0);
+      if (command.length > 0) {
+        metadata.command = command;
+      }
+    }
+
+    // Extract project array
+    if (Array.isArray(parsed.project)) {
+      const project = parsed.project
+        .filter((p): p is string => typeof p === 'string')
+        .map(p => p.trim())
+        .filter(p => p.length > 0);
+      if (project.length > 0) {
+        metadata.project = project;
+      }
+    }
+
+    // Extract branch array
+    if (Array.isArray(parsed.branch)) {
+      const branch = parsed.branch
+        .filter((b): b is string => typeof b === 'string')
+        .map(b => b.trim())
+        .filter(b => b.length > 0);
+      if (branch.length > 0) {
+        metadata.branch = branch;
+      }
+    }
+
+    // Extract os array
+    if (Array.isArray(parsed.os)) {
+      const osArr = parsed.os
+        .filter((o): o is string => typeof o === 'string')
+        .map(o => o.trim())
+        .filter(o => o.length > 0);
+      if (osArr.length > 0) {
+        metadata.os = osArr;
+      }
+    }
+
+    // Extract ci boolean (only if strictly boolean)
+    if (typeof parsed.ci === 'boolean') {
+      metadata.ci = parsed.ci;
+    }
+
+    // Extract match (normalize to 'any' | 'all' only)
+    if (parsed.match === 'any' || parsed.match === 'all') {
+      metadata.match = parsed.match;
     }
 
     // Return metadata only if it has content

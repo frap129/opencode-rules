@@ -920,6 +920,145 @@ LSP-specific guidelines.`;
     expect(metadata?.globs).toBeUndefined();
     expect(metadata?.keywords).toBeUndefined();
   });
+
+  it('should parse block list model and agent filters', () => {
+    const content = `---
+model:
+  - gpt-5.3-codex
+agent:
+  - programmer
+---
+rule`;
+
+    expect(parseRuleMetadata(content)).toEqual({
+      model: ['gpt-5.3-codex'],
+      agent: ['programmer'],
+    });
+  });
+
+  it('should parse command, project, branch, os arrays', () => {
+    const content = `---
+command:
+  - /plan
+  - /review
+project:
+  - node
+  - monorepo
+branch:
+  - feature/*
+  - main
+os:
+  - linux
+  - darwin
+---
+rule`;
+
+    const metadata = parseRuleMetadata(content);
+    expect(metadata?.command).toEqual(['/plan', '/review']);
+    expect(metadata?.project).toEqual(['node', 'monorepo']);
+    expect(metadata?.branch).toEqual(['feature/*', 'main']);
+    expect(metadata?.os).toEqual(['linux', 'darwin']);
+  });
+
+  it('should parse ci boolean as true', () => {
+    const content = `---
+ci: true
+---
+rule`;
+
+    const metadata = parseRuleMetadata(content);
+    expect(metadata?.ci).toBe(true);
+  });
+
+  it('should parse ci boolean as false', () => {
+    const content = `---
+ci: false
+---
+rule`;
+
+    const metadata = parseRuleMetadata(content);
+    expect(metadata?.ci).toBe(false);
+  });
+
+  it('should ignore non-boolean ci values', () => {
+    const content = `---
+ci: "yes"
+---
+rule`;
+
+    const metadata = parseRuleMetadata(content);
+    expect(metadata?.ci).toBeUndefined();
+  });
+
+  it('should parse match as any', () => {
+    const content = `---
+model:
+  - gpt-5
+match: any
+---
+rule`;
+
+    const metadata = parseRuleMetadata(content);
+    expect(metadata?.match).toBe('any');
+  });
+
+  it('should parse match as all', () => {
+    const content = `---
+model:
+  - gpt-5
+match: all
+---
+rule`;
+
+    const metadata = parseRuleMetadata(content);
+    expect(metadata?.match).toBe('all');
+  });
+
+  it('should ignore invalid match values', () => {
+    const content = `---
+model:
+  - gpt-5
+match: invalid
+---
+rule`;
+
+    const metadata = parseRuleMetadata(content);
+    expect(metadata?.match).toBeUndefined();
+    expect(metadata?.model).toEqual(['gpt-5']);
+  });
+
+  it('should handle all new filters combined', () => {
+    const content = `---
+globs:
+  - "**/*.ts"
+model:
+  - claude-opus
+agent:
+  - coder
+command:
+  - /plan
+project:
+  - node
+branch:
+  - main
+os:
+  - linux
+ci: true
+match: all
+---
+Combined rule`;
+
+    const metadata = parseRuleMetadata(content);
+    expect(metadata?.globs).toEqual(['**/*.ts']);
+    expect(metadata?.model).toEqual(['claude-opus']);
+    expect(metadata?.agent).toEqual(['coder']);
+    expect(metadata?.command).toEqual(['/plan']);
+    expect(metadata?.project).toEqual(['node']);
+    expect(metadata?.branch).toEqual(['main']);
+    expect(metadata?.os).toEqual(['linux']);
+    expect(metadata?.ci).toBe(true);
+    expect(metadata?.match).toBe('all');
+  });
 });
 
 describe('discoverRuleFiles', () => {
@@ -3153,3 +3292,56 @@ MCP Context7 rule content`;
     }
   });
 });
+
+    it('should parse new filter arrays with inline YAML syntax', () => {
+      const content = `---
+model: ["gpt-5", "claude-opus"]
+agent: ["programmer"]
+command: ["/plan", "/review"]
+project: ["node", "python"]
+branch: ["main", "develop"]
+os: ["linux"]
+---
+Rule content`;
+      const metadata = parseRuleMetadata(content);
+      expect(metadata?.model).toEqual(['gpt-5', 'claude-opus']);
+      expect(metadata?.agent).toEqual(['programmer']);
+      expect(metadata?.command).toEqual(['/plan', '/review']);
+      expect(metadata?.project).toEqual(['node', 'python']);
+      expect(metadata?.branch).toEqual(['main', 'develop']);
+      expect(metadata?.os).toEqual(['linux']);
+    });
+
+    it('should parse ci boolean in complex frontmatter', () => {
+      const content = `---
+globs:
+  - "**/*.ts"
+ci: true
+---
+Rule content`;
+      const metadata = parseRuleMetadata(content);
+      expect(metadata?.ci).toBe(true);
+      expect(metadata?.globs).toEqual(['**/*.ts']);
+    });
+
+    it('should normalize match to any or all only', () => {
+      const validAny = `---
+model: ["gpt-5"]
+match: any
+---
+content`;
+      const validAll = `---
+model: ["gpt-5"]
+match: all
+---
+content`;
+      const invalid = `---
+model: ["gpt-5"]
+match: some
+---
+content`;
+
+      expect(parseRuleMetadata(validAny)?.match).toBe('any');
+      expect(parseRuleMetadata(validAll)?.match).toBe('all');
+      expect(parseRuleMetadata(invalid)?.match).toBeUndefined();
+    });
