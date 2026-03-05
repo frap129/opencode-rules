@@ -126,7 +126,8 @@ describe('detectProjectTags', () => {
 
     const tags = await detectProjectTags('/project');
     expect(tags).toEqual(['node', 'python', 'rust']);
-    expect(tags).toEqual([...tags].sort());
+    // Verify explicit lexicographic sort comparator is used
+    expect(tags).toEqual([...tags].sort((a, b) => a.localeCompare(b)));
   });
 
   it('returns empty array when no markers exist', async () => {

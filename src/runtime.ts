@@ -243,7 +243,7 @@ export class OpenCodeRulesRuntime {
     }
 
     const contextPaths = sessionState
-      ? Array.from(sessionState.contextPaths).sort()
+      ? Array.from(sessionState.contextPaths).sort((a, b) => a.localeCompare(b))
       : [];
     const userPrompt = sessionState?.lastUserPrompt;
 
@@ -429,7 +429,9 @@ export class OpenCodeRulesRuntime {
 
     this.sessionStore.markCompacting(sessionID, this.now());
 
-    const sortedPaths = Array.from(sessionState.contextPaths).sort();
+    const sortedPaths = Array.from(sessionState.contextPaths).sort((a, b) =>
+      a.localeCompare(b)
+    );
     const maxPaths = 20;
     const pathsToInclude = sortedPaths.slice(0, maxPaths);
 

@@ -58,5 +58,33 @@
     "@opencode-ai/sdk": "^1.1.34",
     "minimatch": "^9.0.5",
     "yaml": "^2.8.2"
+  },
+  "vitest": {
+    "test": {
+      "globals": true,
+      "environment": "node",
+      "include": [
+        "src/**/*.{test,spec}.{ts,tsx}"
+      ],
+      "exclude": [
+        "node_modules",
+        "dist"
+      ],
+      "coverage": {
+        "provider": "v8",
+        "reporter": [
+          "text",
+          "json",
+          "html"
+        ],
+        "exclude": [
+          "node_modules/",
+          "dist/",
+          "**/*.d.ts",
+          "**/*.test.ts",
+          "**/*.spec.ts"
+        ]
+      }
+    }
   }
 }

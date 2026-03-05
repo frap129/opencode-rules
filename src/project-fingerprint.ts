@@ -68,5 +68,5 @@ export async function detectProjectTags(projectDir: string): Promise<string[]> {
 
   await Promise.all(checks);
 
-  return [...tags].sort();
+  return [...tags].sort((a, b) => a.localeCompare(b));
 }
