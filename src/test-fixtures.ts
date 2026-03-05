@@ -269,25 +269,31 @@ export function writeRuleFile(
 // Environment Snapshot Helpers
 // ============================================================================
 
-export interface EnvSnapshot {
-  XDG_CONFIG_HOME?: string;
-  HOME?: string;
-}
+/**
+ * Snapshot of environment variables. Uses a symbol marker to distinguish
+ * between "key was undefined" vs "key not tracked".
+ */
+export type EnvSnapshot = Map<string, string | undefined>;
 
-export function saveEnv(...keys: (keyof EnvSnapshot)[]): EnvSnapshot {
-  const saved: EnvSnapshot = {};
+/**
+ * Saves the current value of specified environment keys (including undefined).
+ * Returns a snapshot that can be passed to restoreEnv() to restore original state.
+ */
+export function saveEnv(...keys: string[]): EnvSnapshot {
+  const saved: EnvSnapshot = new Map();
   for (const key of keys) {
-    const value = process.env[key];
-    if (value !== undefined) {
-      saved[key] = value;
-    }
+    // Store the value even if undefined - this is crucial for proper restore
+    saved.set(key, process.env[key]);
   }
   return saved;
 }
 
+/**
+ * Restores environment variables to their snapshotted state.
+ * Keys that were undefined in the snapshot are deleted from process.env.
+ */
 export function restoreEnv(saved: EnvSnapshot): void {
-  for (const key of Object.keys(saved) as (keyof EnvSnapshot)[]) {
-    const value = saved[key];
+  for (const [key, value] of saved) {
     if (value === undefined) {
       delete process.env[key];
     } else {

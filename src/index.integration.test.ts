@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import path from 'path';
-import { writeFileSync } from 'fs';
+import { writeFileSync, utimesSync } from 'fs';
 import { readAndFormatRules, clearRuleCache } from './utils.js';
 import {
   setupTestDirs,
@@ -377,9 +377,11 @@ All dimensions must match.`
       const result1 = await readAndFormatRules(rules);
       expect(result1).toContain('Original Content');
 
-      await new Promise(resolve => setTimeout(resolve, 10));
-
+      // Write new content and explicitly set mtime to future to ensure cache invalidation
+      // This avoids flaky timing issues on CI/different filesystems
       writeFileSync(rulePath, '# Modified Content');
+      const futureTime = new Date(Date.now() + 2000);
+      utimesSync(rulePath, futureTime, futureTime);
 
       const result2 = await readAndFormatRules(rules);
 
