@@ -454,15 +454,41 @@ function stripFrontmatter(content: string): string {
 }
 
 /**
+ * Runtime filter context for conditional rule matching
+ */
+export interface RuleFilterContext {
+  /** File paths from conversation context (for glob matching) */
+  contextFilePaths?: string[];
+  /** User's prompt text (for keyword matching) */
+  userPrompt?: string;
+  /** Available tool IDs (for tool-based filtering) */
+  availableToolIDs?: string[];
+  /** Current model ID */
+  modelID?: string;
+  /** Current agent type */
+  agentType?: string;
+  /** Current slash command (e.g., /plan, /review) */
+  command?: string;
+  /** Detected project tags (e.g., node, python, monorepo) */
+  projectTags?: string[];
+  /** Current git branch name */
+  gitBranch?: string;
+  /** Current operating system (e.g., linux, darwin, win32) */
+  os?: string;
+  /** Whether running in CI environment */
+  ci?: boolean;
+}
+
+/**
  * Read and format rule files for system prompt injection
  * @param files - Array of discovered rule files with paths
- * @param contextFilePaths - Optional array of file paths from conversation context (used to filter conditional rules)
- * @param userPrompt - Optional user prompt text (used for keyword matching)
- * @param availableToolIDs - Optional array of available tool IDs (used for tool-based filtering)
+ * @param contextOrFilePaths - Either RuleFilterContext object or legacy array of file paths
+ * @param userPrompt - (Legacy) Optional user prompt text
+ * @param availableToolIDs - (Legacy) Optional array of available tool IDs
  */
 export async function readAndFormatRules(
   files: DiscoveredRule[],
-  contextFilePaths?: string[],
+  contextOrFilePaths?: RuleFilterContext | string[],
   userPrompt?: string,
   availableToolIDs?: string[]
 ): Promise<string> {
@@ -470,10 +496,37 @@ export async function readAndFormatRules(
     return '';
   }
 
+  // Normalize arguments to RuleFilterContext
+  let context: RuleFilterContext;
+  if (Array.isArray(contextOrFilePaths)) {
+    // Legacy call: readAndFormatRules(files, filePaths, prompt, tools)
+    context = {
+      contextFilePaths: contextOrFilePaths,
+    };
+    if (userPrompt !== undefined) {
+      context.userPrompt = userPrompt;
+    }
+    if (availableToolIDs !== undefined) {
+      context.availableToolIDs = availableToolIDs;
+    }
+  } else if (contextOrFilePaths === undefined) {
+    // Legacy call with undefined second arg: readAndFormatRules(files, undefined, prompt, tools)
+    context = {};
+    if (userPrompt !== undefined) {
+      context.userPrompt = userPrompt;
+    }
+    if (availableToolIDs !== undefined) {
+      context.availableToolIDs = availableToolIDs;
+    }
+  } else {
+    // New call: readAndFormatRules(files, context)
+    context = contextOrFilePaths;
+  }
+
   const ruleContents: string[] = [];
   const availableToolSet =
-    availableToolIDs && availableToolIDs.length > 0
-      ? new Set(availableToolIDs)
+    context.availableToolIDs && context.availableToolIDs.length > 0
+      ? new Set(context.availableToolIDs)
       : undefined;
 
   for (const { filePath, relativePath } of files) {
@@ -485,12 +538,19 @@ export async function readAndFormatRules(
 
     const { metadata, strippedContent } = cachedRule;
 
-    // Rules with metadata (globs, keywords, or tools) require matching
-    // OR logic: rule applies if keywords match OR globs match OR tools match
-    if (metadata?.globs || metadata?.keywords || metadata?.tools) {
-      let globsMatch = false;
-      let keywordsMatch = false;
-      let toolsMatch = false;
+    // Check if rule has any conditional filters
+    const hasConditions = Boolean(
+      metadata?.globs ||
+      metadata?.keywords ||
+      metadata?.tools ||
+      metadata?.model ||
+      metadata?.agent ||
+      metadata?.command ||
+      metadata?.project ||
+      metadata?.branch ||
+      metadata?.os ||
+      metadata?.ci !== undefined
+    );
 
       // Check globs against context file paths
       if (metadata.globs && contextFilePaths && contextFilePaths.length > 0) {

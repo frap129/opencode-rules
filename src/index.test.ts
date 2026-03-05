@@ -2026,6 +2026,640 @@ Only with websearch.`
     expect(formatted).toContain('Always apply this');
     expect(formatted).not.toContain('Only with websearch');
   });
+
+  describe('legacy compatibility', () => {
+    it('should preserve prompt and tools when second arg is undefined', async () => {
+      // Arrange: rule with tools condition
+      const rulePath = path.join(globalRulesDir, 'legacy-tools.mdc');
+      writeFileSync(
+        rulePath,
+        `---
+tools:
+  - mcp_websearch
+---
+
+Legacy tools rule.`
+      );
+
+      // Act: call with (files, undefined, prompt, tools) - legacy pattern
+      const formatted = await readAndFormatRules(
+        toRules([rulePath]),
+        undefined,
+        'some prompt',
+        ['mcp_websearch', 'mcp_bash']
+      );
+
+      // Assert: tool-conditional rule should be included
+      expect(formatted).toContain('legacy-tools.mdc');
+      expect(formatted).toContain('Legacy tools rule');
+    });
+
+    it('should preserve prompt when second arg is undefined (keywords match)', async () => {
+      // Arrange: rule with keywords condition
+      const rulePath = path.join(globalRulesDir, 'legacy-keywords.mdc');
+      writeFileSync(
+        rulePath,
+        `---
+keywords:
+  - testing
+---
+
+Legacy keywords rule.`
+      );
+
+      // Act: call with (files, undefined, prompt, tools)
+      const formatted = await readAndFormatRules(
+        toRules([rulePath]),
+        undefined,
+        'help with testing',
+        []
+      );
+
+      // Assert: keyword-conditional rule should be included
+      expect(formatted).toContain('legacy-keywords.mdc');
+      expect(formatted).toContain('Legacy keywords rule');
+    });
+  });
+
+  describe('new filter dimensions', () => {
+    it('should include rule when model matches', async () => {
+      const rulePath = path.join(globalRulesDir, 'model-rule.mdc');
+      writeFileSync(
+        rulePath,
+        `---
+model:
+  - gpt-5.3-codex
+  - claude-opus
+---
+
+Model-specific rule.`
+      );
+
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        modelID: 'claude-opus',
+      });
+
+      expect(formatted).toContain('model-rule.mdc');
+      expect(formatted).toContain('Model-specific rule');
+    });
+
+    it('should exclude rule when model does not match', async () => {
+      const rulePath = path.join(globalRulesDir, 'model-rule.mdc');
+      writeFileSync(
+        rulePath,
+        `---
+model:
+  - gpt-5.3-codex
+---
+
+Model-specific rule.`
+      );
+
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        modelID: 'claude-opus',
+      });
+
+      expect(formatted).toBe('');
+    });
+
+    it('should include rule when agent matches', async () => {
+      const rulePath = path.join(globalRulesDir, 'agent-rule.mdc');
+      writeFileSync(
+        rulePath,
+        `---
+agent:
+  - programmer
+  - coder
+---
+
+Agent-specific rule.`
+      );
+
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        agentType: 'programmer',
+      });
+
+      expect(formatted).toContain('agent-rule.mdc');
+      expect(formatted).toContain('Agent-specific rule');
+    });
+
+    it('should include rule when command matches', async () => {
+      const rulePath = path.join(globalRulesDir, 'command-rule.mdc');
+      writeFileSync(
+        rulePath,
+        `---
+command:
+  - /plan
+  - /review
+---
+
+Command-specific rule.`
+      );
+
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        command: '/plan',
+      });
+
+      expect(formatted).toContain('command-rule.mdc');
+      expect(formatted).toContain('Command-specific rule');
+    });
+
+    it('should include rule when project tag matches', async () => {
+      const rulePath = path.join(globalRulesDir, 'project-rule.mdc');
+      writeFileSync(
+        rulePath,
+        `---
+project:
+  - node
+  - monorepo
+---
+
+Node project rule.`
+      );
+
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        projectTags: ['node', 'typescript'],
+      });
+
+      expect(formatted).toContain('project-rule.mdc');
+      expect(formatted).toContain('Node project rule');
+    });
+
+    it('should include rule when branch matches exactly', async () => {
+      const rulePath = path.join(globalRulesDir, 'branch-rule.mdc');
+      writeFileSync(
+        rulePath,
+        `---
+branch:
+  - main
+  - develop
+---
+
+Main branch rule.`
+      );
+
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        gitBranch: 'main',
+      });
+
+      expect(formatted).toContain('branch-rule.mdc');
+      expect(formatted).toContain('Main branch rule');
+    });
+
+    it('should include rule when branch matches glob pattern', async () => {
+      const rulePath = path.join(globalRulesDir, 'branch-glob-rule.mdc');
+      writeFileSync(
+        rulePath,
+        `---
+branch:
+  - feature/*
+  - hotfix/*
+---
+
+Feature branch rule.`
+      );
+
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        gitBranch: 'feature/add-login',
+      });
+
+      expect(formatted).toContain('branch-glob-rule.mdc');
+      expect(formatted).toContain('Feature branch rule');
+    });
+
+    it('should NOT match branch exact pattern against nested basename', async () => {
+      const rulePath = path.join(globalRulesDir, 'branch-exact-rule.mdc');
+      writeFileSync(
+        rulePath,
+        `---
+branch:
+  - main
+---
+
+Main branch only rule.`
+      );
+
+      // branch "main" should NOT match "feature/main" (no basename matching)
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        gitBranch: 'feature/main',
+      });
+
+      expect(formatted).toBe('');
+    });
+
+    it('should match branch glob pattern correctly without basename overmatch', async () => {
+      const rulePath = path.join(globalRulesDir, 'branch-glob-exact.mdc');
+      writeFileSync(
+        rulePath,
+        `---
+branch:
+  - "feature/*"
+---
+
+Feature branch pattern rule.`
+      );
+
+      // "feature/*" should NOT match "prefix/feature/main" (no matchBase)
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        gitBranch: 'prefix/feature/main',
+      });
+
+      expect(formatted).toBe('');
+    });
+
+    it('should include rule when os matches', async () => {
+      const rulePath = path.join(globalRulesDir, 'os-rule.mdc');
+      writeFileSync(
+        rulePath,
+        `---
+os:
+  - linux
+  - darwin
+---
+
+Unix-specific rule.`
+      );
+
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        os: 'linux',
+      });
+
+      expect(formatted).toContain('os-rule.mdc');
+      expect(formatted).toContain('Unix-specific rule');
+    });
+
+    it('should include rule when ci is true and rule requires ci', async () => {
+      const rulePath = path.join(globalRulesDir, 'ci-rule.mdc');
+      writeFileSync(
+        rulePath,
+        `---
+ci: true
+---
+
+CI-specific rule.`
+      );
+
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        ci: true,
+      });
+
+      expect(formatted).toContain('ci-rule.mdc');
+      expect(formatted).toContain('CI-specific rule');
+    });
+
+    it('should exclude rule when ci is false but rule requires ci', async () => {
+      const rulePath = path.join(globalRulesDir, 'ci-rule.mdc');
+      writeFileSync(
+        rulePath,
+        `---
+ci: true
+---
+
+CI-specific rule.`
+      );
+
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        ci: false,
+      });
+
+      expect(formatted).toBe('');
+    });
+
+    it('should include rule when ci is false and rule requires non-ci', async () => {
+      const rulePath = path.join(globalRulesDir, 'local-rule.mdc');
+      writeFileSync(
+        rulePath,
+        `---
+ci: false
+---
+
+Local development rule.`
+      );
+
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        ci: false,
+      });
+
+      expect(formatted).toContain('local-rule.mdc');
+      expect(formatted).toContain('Local development rule');
+    });
+  });
+
+  describe('match: any|all behavior', () => {
+    it('should use match: any by default (include when any dimension matches)', async () => {
+      const rulePath = path.join(globalRulesDir, 'any-default.mdc');
+      writeFileSync(
+        rulePath,
+        `---
+model:
+  - gpt-5
+agent:
+  - programmer
+os:
+  - linux
+---
+
+Default any match rule.`
+      );
+
+      // model does NOT match, agent does NOT match, but os DOES match
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        modelID: 'claude-opus',
+        agentType: 'reviewer',
+        os: 'linux',
+      });
+
+      expect(formatted).toContain('any-default.mdc');
+      expect(formatted).toContain('Default any match rule');
+    });
+
+    it('should respect explicit match: any', async () => {
+      const rulePath = path.join(globalRulesDir, 'explicit-any.mdc');
+      writeFileSync(
+        rulePath,
+        `---
+model:
+  - gpt-5
+agent:
+  - programmer
+match: any
+---
+
+Explicit any match rule.`
+      );
+
+      // model matches, agent does not
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        modelID: 'gpt-5',
+        agentType: 'reviewer',
+      });
+
+      expect(formatted).toContain('explicit-any.mdc');
+      expect(formatted).toContain('Explicit any match rule');
+    });
+
+    it('should require all declared dimensions when match is all', async () => {
+      const rulePath = path.join(globalRulesDir, 'all-match.mdc');
+      writeFileSync(
+        rulePath,
+        `---
+model:
+  - claude-opus
+agent:
+  - programmer
+os:
+  - linux
+match: all
+---
+
+All dimensions must match.`
+      );
+
+      // model matches, agent matches, os matches => included
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        modelID: 'claude-opus',
+        agentType: 'programmer',
+        os: 'linux',
+      });
+
+      expect(formatted).toContain('all-match.mdc');
+      expect(formatted).toContain('All dimensions must match');
+    });
+
+    it('should exclude rule when match: all and one dimension fails', async () => {
+      const rulePath = path.join(globalRulesDir, 'all-match-fail.mdc');
+      writeFileSync(
+        rulePath,
+        `---
+model:
+  - claude-opus
+agent:
+  - programmer
+os:
+  - linux
+match: all
+---
+
+All dimensions must match.`
+      );
+
+      // model matches, agent matches, os does NOT match => excluded
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        modelID: 'claude-opus',
+        agentType: 'programmer',
+        os: 'darwin',
+      });
+
+      expect(formatted).toBe('');
+    });
+  });
+
+  describe('mixed legacy and new filter behavior', () => {
+    it('should include rule when legacy globs match even if new filters do not', async () => {
+      const rulePath = path.join(globalRulesDir, 'mixed-legacy.mdc');
+      writeFileSync(
+        rulePath,
+        `---
+globs:
+  - "**/*.ts"
+model:
+  - gpt-5
+---
+
+Mixed legacy rule.`
+      );
+
+      // globs match, model does not => included (match: any default)
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        contextFilePaths: ['src/index.ts'],
+        modelID: 'claude-opus',
+      });
+
+      expect(formatted).toContain('mixed-legacy.mdc');
+      expect(formatted).toContain('Mixed legacy rule');
+    });
+
+    it('should include rule when keywords match even if new filters do not', async () => {
+      const rulePath = path.join(globalRulesDir, 'mixed-keywords.mdc');
+      writeFileSync(
+        rulePath,
+        `---
+keywords:
+  - testing
+agent:
+  - programmer
+---
+
+Testing keyword rule.`
+      );
+
+      // keywords match, agent does not => included (match: any default)
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        userPrompt: 'help with testing',
+        agentType: 'reviewer',
+      });
+
+      expect(formatted).toContain('mixed-keywords.mdc');
+      expect(formatted).toContain('Testing keyword rule');
+    });
+
+    it('should include rule when tools match even if new filters do not', async () => {
+      const rulePath = path.join(globalRulesDir, 'mixed-tools.mdc');
+      writeFileSync(
+        rulePath,
+        `---
+tools:
+  - mcp_websearch
+os:
+  - windows
+---
+
+Websearch tool rule.`
+      );
+
+      // tools match, os does not => included (match: any default)
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        availableToolIDs: ['mcp_websearch', 'mcp_bash'],
+        os: 'linux',
+      });
+
+      expect(formatted).toContain('mixed-tools.mdc');
+      expect(formatted).toContain('Websearch tool rule');
+    });
+
+    it('should require all dimensions with match: all including legacy filters', async () => {
+      const rulePath = path.join(globalRulesDir, 'all-legacy.mdc');
+      writeFileSync(
+        rulePath,
+        `---
+globs:
+  - "**/*.ts"
+keywords:
+  - refactor
+model:
+  - claude-opus
+match: all
+---
+
+All must match including legacy.`
+      );
+
+      // globs match, keywords match, model matches => included
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        contextFilePaths: ['src/utils.ts'],
+        userPrompt: 'help me refactor this code',
+        modelID: 'claude-opus',
+      });
+
+      expect(formatted).toContain('all-legacy.mdc');
+      expect(formatted).toContain('All must match including legacy');
+    });
+
+    it('should exclude with match: all if any legacy filter fails', async () => {
+      const rulePath = path.join(globalRulesDir, 'all-legacy-fail.mdc');
+      writeFileSync(
+        rulePath,
+        `---
+globs:
+  - "**/*.ts"
+keywords:
+  - testing
+model:
+  - claude-opus
+match: all
+---
+
+All must match including legacy.`
+      );
+
+      // globs match, keywords do NOT match, model matches => excluded
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        contextFilePaths: ['src/utils.ts'],
+        userPrompt: 'help me refactor this code',
+        modelID: 'claude-opus',
+      });
+
+      expect(formatted).toBe('');
+    });
+  });
+
+  describe('missing runtime fields', () => {
+    it('should treat missing modelID as non-match for model dimension', async () => {
+      const rulePath = path.join(globalRulesDir, 'model-only.mdc');
+      writeFileSync(
+        rulePath,
+        `---
+model:
+  - gpt-5
+---
+
+Model rule.`
+      );
+
+      // No modelID provided => model dimension is non-match
+      const formatted = await readAndFormatRules(toRules([rulePath]), {});
+
+      expect(formatted).toBe('');
+    });
+
+    it('should not throw when runtime context is missing fields', async () => {
+      const rulePath = path.join(globalRulesDir, 'many-dimensions.mdc');
+      writeFileSync(
+        rulePath,
+        `---
+model:
+  - gpt-5
+agent:
+  - programmer
+os:
+  - linux
+---
+
+Multi-dimension rule.`
+      );
+
+      // Only os provided, model and agent missing => should not throw
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        os: 'linux',
+      });
+
+      // os matches => included with match: any
+      expect(formatted).toContain('many-dimensions.mdc');
+    });
+
+    it('should exclude with match: all if runtime field is missing', async () => {
+      const rulePath = path.join(globalRulesDir, 'all-missing.mdc');
+      writeFileSync(
+        rulePath,
+        `---
+model:
+  - claude-opus
+agent:
+  - programmer
+match: all
+---
+
+All match with missing field.`
+      );
+
+      // model matches, agent not provided => excluded
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        modelID: 'claude-opus',
+      });
+
+      expect(formatted).toBe('');
+    });
+
+    it('should include unconditional rules when context is empty object', async () => {
+      const rulePath = path.join(globalRulesDir, 'unconditional.md');
+      writeFileSync(rulePath, 'Always apply this rule.');
+
+      const formatted = await readAndFormatRules(toRules([rulePath]), {});
+
+      expect(formatted).toContain('unconditional.md');
+      expect(formatted).toContain('Always apply this rule');
+    });
+  });
 });
 
 describe('OpenCodeRulesPlugin', () => {
@@ -3292,6 +3926,45 @@ MCP Context7 rule content`;
     }
   });
 });
+
+describe('Cross-Dimension Regression Coverage', () => {
+  beforeEach(() => {
+    setupTestDirs();
+  });
+
+    it('should parse ci boolean in complex frontmatter', () => {
+      const content = `---
+globs:
+  - "**/*.ts"
+ci: true
+---
+Rule content`;
+      const metadata = parseRuleMetadata(content);
+      expect(metadata?.ci).toBe(true);
+      expect(metadata?.globs).toEqual(['**/*.ts']);
+    });
+
+    it('should normalize match to any or all only', () => {
+      const validAny = `---
+model: ["gpt-5"]
+match: any
+---
+content`;
+      const validAll = `---
+model: ["gpt-5"]
+match: all
+---
+content`;
+      const invalid = `---
+model: ["gpt-5"]
+match: some
+---
+content`;
+
+      expect(parseRuleMetadata(validAny)?.match).toBe('any');
+      expect(parseRuleMetadata(validAll)?.match).toBe('all');
+      expect(parseRuleMetadata(invalid)?.match).toBeUndefined();
+    });
 
     it('should parse new filter arrays with inline YAML syntax', () => {
       const content = `---
