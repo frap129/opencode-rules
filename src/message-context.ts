@@ -111,3 +111,18 @@ export function toExtractableMessages(messages: MessageWithInfo[]): Message[] {
   }
   return result;
 }
+
+/**
+ * Extract the leading slash command from a user prompt.
+ * Returns the first whitespace-delimited token if it starts with '/'
+ * and contains at least one non-slash character after the leading slash.
+ */
+export function extractSlashCommand(prompt?: string): string | undefined {
+  if (!prompt) return undefined;
+  const first = prompt.trim().split(/\s+/, 1)[0];
+  // Must start with '/' and have at least one additional character
+  if (first.length > 1 && first.startsWith('/')) {
+    return first;
+  }
+  return undefined;
+}

@@ -5,6 +5,7 @@ import {
   extractLatestUserPrompt,
   extractSessionID,
   toExtractableMessages,
+  extractSlashCommand,
   MessageWithInfo,
 } from './message-context.js';
 
@@ -74,5 +75,39 @@ describe('toExtractableMessages', () => {
 
   it('returns empty array for empty input', () => {
     expect(toExtractableMessages([])).toEqual([]);
+  });
+});
+
+describe('extractSlashCommand', () => {
+  it('extracts leading slash command from prompt', () => {
+    expect(extractSlashCommand('/fix lint errors')).toBe('/fix');
+    expect(extractSlashCommand('/plan implement filters')).toBe('/plan');
+    expect(extractSlashCommand('/review')).toBe('/review');
+  });
+
+  it('returns undefined for non-slash prompt', () => {
+    expect(extractSlashCommand('hello world')).toBeUndefined();
+    expect(extractSlashCommand('fix the bug')).toBeUndefined();
+  });
+
+  it('returns undefined for blank or whitespace input', () => {
+    expect(extractSlashCommand('')).toBeUndefined();
+    expect(extractSlashCommand('   ')).toBeUndefined();
+    expect(extractSlashCommand(undefined)).toBeUndefined();
+  });
+
+  it('returns undefined for bare slash inputs', () => {
+    expect(extractSlashCommand('/')).toBeUndefined();
+    expect(extractSlashCommand('/   ')).toBeUndefined();
+    expect(extractSlashCommand('/  \t  ')).toBeUndefined();
+  });
+
+  it('handles punctuation and format edge cases', () => {
+    // Trailing punctuation is part of token (not stripped)
+    expect(extractSlashCommand('/plan,')).toBe('/plan,');
+    // Double slash is a valid token (starts with /, length > 1)
+    expect(extractSlashCommand('//plan')).toBe('//plan');
+    // Slash with only punctuation is still valid (length > 1)
+    expect(extractSlashCommand('/!')).toBe('/!');
   });
 });
