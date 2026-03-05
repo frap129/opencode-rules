@@ -400,14 +400,43 @@ To use the skill, copy `skills/crafting-rules/` to `~/.config/opencode/skills/` 
 ```
 opencode-rules/
 ├── src/
-│   ├── index.ts          # Main plugin entry point
-│   ├── utils.ts          # File discovery and processing utilities
-│   └── index.test.ts     # Test suite
+│   ├── index.ts              # Main plugin entry point and exports
+│   ├── runtime.ts            # OpenCodeRulesRuntime class (hook orchestration)
+│   ├── runtime-context.ts    # Context-building helpers (filter context, project detection)
+│   ├── runtime-chat.ts       # Chat message handling and text extraction
+│   ├── rule-discovery.ts     # Rule file scanning and discovery
+│   ├── rule-metadata.ts      # YAML frontmatter parsing
+│   ├── rule-filter.ts        # Rule filtering logic (globs, keywords, tools, runtime)
+│   ├── message-paths.ts      # Path extraction from messages
+│   ├── message-context.ts    # User prompt extraction from message parts
+│   ├── session-store.ts      # Per-session state management
+│   ├── project-fingerprint.ts # Project type detection (node, python, etc.)
+│   ├── mcp-tools.ts          # MCP tool ID extraction
+│   ├── git-branch.ts         # Git branch detection
+│   ├── debug.ts              # Debug logging utilities
+│   ├── utils.ts              # Re-export facade for backwards compatibility
+│   ├── test-fixtures.ts      # Shared test fixtures and builders
+│   ├── index.test.ts         # Core unit tests
+│   ├── index.rules.test.ts   # Rule filtering tests
+│   ├── index.runtime.test.ts # Runtime behavior tests
+│   └── index.integration.test.ts # Integration tests
 ├── docs/
-│   └── rules.md          # Detailed usage documentation
-├── openspec/             # Project specifications and proposals
-└── dist/                 # Compiled JavaScript output
+│   └── rules.md              # Detailed usage documentation
+├── openspec/                 # Project specifications and proposals
+└── dist/                     # Compiled JavaScript output
 ```
+
+#### Module Responsibilities
+
+- **runtime.ts** - Orchestrates hooks (`tool.execute.before`, `chat.message`, `experimental.chat.*`)
+- **runtime-context.ts** - Builds `RuleFilterContext` from session state and environment
+- **runtime-chat.ts** - Extracts text from chat message parts for keyword matching
+- **rule-discovery.ts** - Recursively scans directories for `.md`/`.mdc` rule files
+- **rule-metadata.ts** - Parses YAML frontmatter into typed `RuleMetadata`
+- **rule-filter.ts** - Evaluates rules against context (globs, keywords, tools, runtime filters)
+- **message-paths.ts** - Extracts file paths from message content
+- **session-store.ts** - Manages per-session state with LRU eviction
+- **utils.ts** - Thin facade re-exporting from decomposed modules
 
 ### Build and Test
 
