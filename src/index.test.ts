@@ -4219,6 +4219,105 @@ Feature-only guidelines.`
         getGitBranchSpy.mockRestore();
       }
     });
+
+    it('should build filter context with all session state fields', async () => {
+      writeFileSync(
+        path.join(globalRulesDir, 'model-agent-rule.mdc'),
+        `---
+model:
+  - claude-opus
+agent:
+  - programmer
+match: all
+---
+
+Model and agent filter rule.`
+      );
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+      try {
+        const { default: plugin } = await import('./index.js');
+        const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
+        const hooks = await plugin({
+          client: mockClient as any,
+          project: {} as any,
+          directory: testDir,
+          worktree: testDir,
+          $: {} as any,
+          serverUrl: new URL('http://localhost'),
+        });
+
+        const chatMessage = hooks['chat.message'] as any;
+        await chatMessage(
+          {
+            sessionID: 'ses_ctx',
+            model: { modelID: 'claude-opus' },
+            agent: 'programmer',
+          },
+          {
+            message: { role: 'user' },
+            parts: [{ type: 'text', text: 'test prompt' }],
+          }
+        );
+
+        const systemTransform = hooks[
+          'experimental.chat.system.transform'
+        ] as any;
+        const result = await systemTransform(
+          { sessionID: 'ses_ctx' },
+          { system: 'Base prompt.' }
+        );
+
+        expect(result.system).toContain('Model and agent filter rule');
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+      }
+    });
+
+    it('should log warnings via console.warn for tool query failures', async () => {
+      writeFileSync(
+        path.join(globalRulesDir, 'unconditional.md'),
+        'Always apply.'
+      );
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      try {
+        const { default: plugin } = await import('./index.js');
+        const mockClient = {
+          tool: {
+            ids: vi.fn(async () => {
+              throw new Error('Tool query failed');
+            }),
+          },
+        };
+        const hooks = await plugin({
+          client: mockClient as any,
+          project: {} as any,
+          directory: testDir,
+          worktree: testDir,
+          $: {} as any,
+          serverUrl: new URL('http://localhost'),
+        });
+
+        const systemTransform = hooks[
+          'experimental.chat.system.transform'
+        ] as any;
+        await systemTransform({}, { system: 'Base prompt.' });
+
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining('Warning: Failed to query tool IDs')
+        );
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+        warnSpy.mockRestore();
+      }
+    });
   });
 
   describe('YAML Parsing Edge Cases', () => {

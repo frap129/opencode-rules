@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createDebugLog } from './debug.js';
+import { createDebugLog, createWarnLog } from './debug.js';
 
 describe('createDebugLog', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -32,5 +32,41 @@ describe('createDebugLog', () => {
     const log = createDebugLog('[custom]');
     log('hello');
     expect(debugSpy).toHaveBeenCalledWith('[custom] hello');
+  });
+});
+
+describe('createWarnLog', () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let warnSpy: any;
+
+  beforeEach(() => {
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
+  it('always logs warnings regardless of debug mode', () => {
+    const warn = createWarnLog();
+    warn('warning message');
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[opencode-rules] Warning: warning message'
+    );
+  });
+
+  it('uses custom prefix', () => {
+    const warn = createWarnLog('[custom]');
+    warn('warning message');
+    expect(warnSpy).toHaveBeenCalledWith('[custom] Warning: warning message');
+  });
+
+  it('logs even when OPENCODE_RULES_DEBUG is unset', () => {
+    delete process.env.OPENCODE_RULES_DEBUG;
+    const warn = createWarnLog();
+    warn('should still appear');
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[opencode-rules] Warning: should still appear'
+    );
   });
 });
