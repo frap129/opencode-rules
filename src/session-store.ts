@@ -6,6 +6,8 @@ export interface SessionState {
   compactingSince?: number;
   seededFromHistory: boolean;
   seedCount?: number;
+  lastModelID?: string;
+  lastAgentType?: string;
 }
 
 export interface SessionStoreOptions {

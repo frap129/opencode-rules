@@ -2671,6 +2671,174 @@ describe('SessionState', () => {
     expect(snapshot?.lastUserPrompt).toBe('please add tests');
   });
 
+  it('stores lastModelID from chat.message for user messages', async () => {
+    const { default: plugin, __testOnly } = await import('./index.js');
+    const hooks = await plugin({
+      client: {} as any,
+      project: {} as any,
+      directory: testDir,
+      worktree: testDir,
+      $: {} as any,
+      serverUrl: new URL('http://localhost'),
+    });
+
+    const hook = hooks['chat.message'] as any;
+
+    await hook(
+      { sessionID: 'ses_model', model: { modelID: 'claude-opus' } },
+      {
+        message: { role: 'user' },
+        parts: [{ type: 'text', text: 'hello' }],
+      }
+    );
+
+    const snapshot = __testOnly.getSessionStateSnapshot('ses_model');
+    expect(snapshot?.lastModelID).toBe('claude-opus');
+  });
+
+  it('stores lastAgentType from chat.message for user messages', async () => {
+    const { default: plugin, __testOnly } = await import('./index.js');
+    const hooks = await plugin({
+      client: {} as any,
+      project: {} as any,
+      directory: testDir,
+      worktree: testDir,
+      $: {} as any,
+      serverUrl: new URL('http://localhost'),
+    });
+
+    const hook = hooks['chat.message'] as any;
+
+    await hook(
+      { sessionID: 'ses_agent', agent: 'programmer' },
+      {
+        message: { role: 'user' },
+        parts: [{ type: 'text', text: 'hello' }],
+      }
+    );
+
+    const snapshot = __testOnly.getSessionStateSnapshot('ses_agent');
+    expect(snapshot?.lastAgentType).toBe('programmer');
+  });
+
+  it('stores both model and agent from chat.message', async () => {
+    const { default: plugin, __testOnly } = await import('./index.js');
+    const hooks = await plugin({
+      client: {} as any,
+      project: {} as any,
+      directory: testDir,
+      worktree: testDir,
+      $: {} as any,
+      serverUrl: new URL('http://localhost'),
+    });
+
+    const hook = hooks['chat.message'] as any;
+
+    await hook(
+      {
+        sessionID: 'ses_both',
+        model: { modelID: 'gpt-5' },
+        agent: 'coder',
+      },
+      {
+        message: { role: 'user' },
+        parts: [{ type: 'text', text: 'hello' }],
+      }
+    );
+
+    const snapshot = __testOnly.getSessionStateSnapshot('ses_both');
+    expect(snapshot?.lastModelID).toBe('gpt-5');
+    expect(snapshot?.lastAgentType).toBe('coder');
+  });
+
+  it('does not update model/agent for non-user messages', async () => {
+    const { default: plugin, __testOnly } = await import('./index.js');
+    const hooks = await plugin({
+      client: {} as any,
+      project: {} as any,
+      directory: testDir,
+      worktree: testDir,
+      $: {} as any,
+      serverUrl: new URL('http://localhost'),
+    });
+
+    const hook = hooks['chat.message'] as any;
+
+    // First set values with user message
+    await hook(
+      {
+        sessionID: 'ses_nonuser',
+        model: { modelID: 'initial-model' },
+        agent: 'initial-agent',
+      },
+      {
+        message: { role: 'user' },
+        parts: [{ type: 'text', text: 'hello' }],
+      }
+    );
+
+    // Then try to update with assistant message - should not change
+    await hook(
+      {
+        sessionID: 'ses_nonuser',
+        model: { modelID: 'new-model' },
+        agent: 'new-agent',
+      },
+      {
+        message: { role: 'assistant' },
+        parts: [{ type: 'text', text: 'response' }],
+      }
+    );
+
+    const snapshot = __testOnly.getSessionStateSnapshot('ses_nonuser');
+    expect(snapshot?.lastModelID).toBe('initial-model');
+    expect(snapshot?.lastAgentType).toBe('initial-agent');
+  });
+
+  it('updates model/agent on subsequent user messages', async () => {
+    const { default: plugin, __testOnly } = await import('./index.js');
+    const hooks = await plugin({
+      client: {} as any,
+      project: {} as any,
+      directory: testDir,
+      worktree: testDir,
+      $: {} as any,
+      serverUrl: new URL('http://localhost'),
+    });
+
+    const hook = hooks['chat.message'] as any;
+
+    // First user message
+    await hook(
+      {
+        sessionID: 'ses_update',
+        model: { modelID: 'model-v1' },
+        agent: 'agent-v1',
+      },
+      {
+        message: { role: 'user' },
+        parts: [{ type: 'text', text: 'first message' }],
+      }
+    );
+
+    // Second user message with different model/agent
+    await hook(
+      {
+        sessionID: 'ses_update',
+        model: { modelID: 'model-v2' },
+        agent: 'agent-v2',
+      },
+      {
+        message: { role: 'user' },
+        parts: [{ type: 'text', text: 'second message' }],
+      }
+    );
+
+    const snapshot = __testOnly.getSessionStateSnapshot('ses_update');
+    expect(snapshot?.lastModelID).toBe('model-v2');
+    expect(snapshot?.lastAgentType).toBe('agent-v2');
+  });
+
   it('includes glob-conditional rule when tool hook records matching file path', async () => {
     // Arrange rules
     const originalEnv = process.env.XDG_CONFIG_HOME;
