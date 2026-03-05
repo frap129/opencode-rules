@@ -395,7 +395,9 @@ To use the skill, copy `skills/crafting-rules/` to `~/.config/opencode/skills/` 
 
 ## Development
 
-### Project Structure
+### Project Structure (Abridged)
+
+The following shows the key source modules. Additional test files (`*.test.ts`) and type-checking utilities exist but are omitted for brevity.
 
 ```
 opencode-rules/
@@ -410,23 +412,22 @@ opencode-rules/
 │   ├── message-paths.ts      # Path extraction from messages
 │   ├── message-context.ts    # User prompt extraction from message parts
 │   ├── session-store.ts      # Per-session state management
-│   ├── project-fingerprint.ts # Project type detection (node, python, etc.)
+│   ├── project-fingerprint.ts # Project type detection (Node.js, Python, etc.)
 │   ├── mcp-tools.ts          # MCP tool ID extraction
 │   ├── git-branch.ts         # Git branch detection
 │   ├── debug.ts              # Debug logging utilities
 │   ├── utils.ts              # Re-export facade for backwards compatibility
 │   ├── test-fixtures.ts      # Shared test fixtures and builders
-│   ├── index.test.ts         # Core unit tests
-│   ├── index.rules.test.ts   # Rule filtering tests
-│   ├── index.runtime.test.ts # Runtime behavior tests
-│   └── index.integration.test.ts # Integration tests
+│   └── *.test.ts             # Unit/integration tests (11 test files)
 ├── docs/
 │   └── rules.md              # Detailed usage documentation
 ├── openspec/                 # Project specifications and proposals
 └── dist/                     # Compiled JavaScript output
 ```
 
-#### Module Responsibilities
+#### Key Module Responsibilities
+
+The following highlights the primary runtime modules:
 
 - **runtime.ts** - Orchestrates hooks (`tool.execute.before`, `chat.message`, `experimental.chat.*`)
 - **runtime-context.ts** - Builds `RuleFilterContext` from session state and environment
@@ -436,6 +437,7 @@ opencode-rules/
 - **rule-filter.ts** - Evaluates rules against context (globs, keywords, tools, runtime filters)
 - **message-paths.ts** - Extracts file paths from message content
 - **session-store.ts** - Manages per-session state with LRU eviction
+- **project-fingerprint.ts** - Detects project type from marker files (e.g., `package.json`)
 - **utils.ts** - Thin facade re-exporting from decomposed modules
 
 ### Build and Test
