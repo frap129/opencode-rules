@@ -249,14 +249,13 @@ export class OpenCodeRulesRuntime {
 
     const availableToolIDs = await this.queryAvailableToolIDs();
 
-    // Build full runtime filter context
-    const filterContext = await this.buildFilterContext(
-      contextPaths,
+    const filterContext = await this.buildFilterContext({
+      contextFilePaths: contextPaths,
       userPrompt,
       availableToolIDs,
-      sessionState?.lastModelID,
-      sessionState?.lastAgentType
-    );
+      modelID: sessionState?.lastModelID,
+      agentType: sessionState?.lastAgentType,
+    });
 
     const formattedRules = await readAndFormatRules(
       this.ruleFiles,
@@ -286,17 +285,23 @@ export class OpenCodeRulesRuntime {
     return output;
   }
 
-  private async buildFilterContext(
-    contextFilePaths: string[],
-    userPrompt: string | undefined,
-    availableToolIDs: string[],
-    modelID: string | undefined,
-    agentType: string | undefined
-  ): Promise<RuleFilterContext> {
-    // Extract slash command from user prompt (graceful: undefined if none)
+  private async buildFilterContext(opts: {
+    contextFilePaths: string[];
+    userPrompt: string | undefined;
+    availableToolIDs: string[];
+    modelID: string | undefined;
+    agentType: string | undefined;
+  }): Promise<RuleFilterContext> {
+    const {
+      contextFilePaths,
+      userPrompt,
+      availableToolIDs,
+      modelID,
+      agentType,
+    } = opts;
+
     const command = extractSlashCommand(userPrompt);
 
-    // Detect project tags (graceful: empty array on failure)
     let projectTags: string[] | undefined;
     try {
       projectTags = await detectProjectTags(this.projectDirectory);
@@ -307,7 +312,6 @@ export class OpenCodeRulesRuntime {
       projectTags = undefined;
     }
 
-    // Get git branch (graceful: undefined on failure)
     let gitBranch: string | undefined;
     try {
       gitBranch = await getGitBranch(this.projectDirectory);
@@ -315,13 +319,9 @@ export class OpenCodeRulesRuntime {
       gitBranch = undefined;
     }
 
-    // Detect OS from process.platform
     const os = process.platform;
-
-    // Detect CI from environment variables
     const ci = detectCiEnvironment();
 
-    // Build context object, only including defined properties
     const context: RuleFilterContext = {
       os,
       ci,
@@ -497,13 +497,13 @@ function detectCiEnvironment(): boolean {
   // CI not set - fall back to provider-specific env vars
   return (
     isTruthyEnvValue(env.CONTINUOUS_INTEGRATION) ||
-    Boolean(env.BUILD_NUMBER) ||
+    isTruthyEnvValue(env.BUILD_NUMBER) ||
     isTruthyEnvValue(env.GITHUB_ACTIONS) ||
     isTruthyEnvValue(env.GITLAB_CI) ||
     isTruthyEnvValue(env.CIRCLECI) ||
     isTruthyEnvValue(env.TRAVIS) ||
-    Boolean(env.JENKINS_URL) ||
+    isTruthyEnvValue(env.JENKINS_URL) ||
     isTruthyEnvValue(env.BUILDKITE) ||
-    Boolean(env.TEAMCITY_VERSION)
+    isTruthyEnvValue(env.TEAMCITY_VERSION)
   );
 }

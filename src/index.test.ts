@@ -3754,6 +3754,135 @@ CI-fallback guidelines.`
       }
     });
 
+    it('should NOT detect CI when BUILD_NUMBER is "false"', async () => {
+      // Arrange - regression: BUILD_NUMBER="false" should not be truthy
+      writeFileSync(
+        path.join(globalRulesDir, 'ci-build-number-rule.mdc'),
+        `---
+ci: true
+---
+
+CI-build-number guidelines.`
+      );
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      const savedCiEnv = saveCiEnvVars();
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+      clearCiEnvVars();
+      process.env.BUILD_NUMBER = 'false';
+
+      try {
+        const { default: plugin } = await import('./index.js');
+        const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
+        const hooks = await plugin({
+          client: mockClient as any,
+          project: {} as any,
+          directory: testDir,
+          worktree: testDir,
+          $: {} as any,
+          serverUrl: new URL('http://localhost'),
+        });
+
+        // Act
+        const systemTransform = hooks[
+          'experimental.chat.system.transform'
+        ] as any;
+        const result = await systemTransform({}, { system: 'Base prompt.' });
+
+        // Assert - BUILD_NUMBER='false' should not be treated as truthy
+        expect(result.system).not.toContain('CI-build-number guidelines');
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+        restoreCiEnvVars(savedCiEnv);
+      }
+    });
+
+    it('should NOT detect CI when JENKINS_URL is "false"', async () => {
+      // Arrange - regression: JENKINS_URL="false" should not be truthy
+      writeFileSync(
+        path.join(globalRulesDir, 'ci-jenkins-rule.mdc'),
+        `---
+ci: true
+---
+
+CI-jenkins guidelines.`
+      );
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      const savedCiEnv = saveCiEnvVars();
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+      clearCiEnvVars();
+      process.env.JENKINS_URL = 'false';
+
+      try {
+        const { default: plugin } = await import('./index.js');
+        const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
+        const hooks = await plugin({
+          client: mockClient as any,
+          project: {} as any,
+          directory: testDir,
+          worktree: testDir,
+          $: {} as any,
+          serverUrl: new URL('http://localhost'),
+        });
+
+        // Act
+        const systemTransform = hooks[
+          'experimental.chat.system.transform'
+        ] as any;
+        const result = await systemTransform({}, { system: 'Base prompt.' });
+
+        // Assert - JENKINS_URL='false' should not be treated as truthy
+        expect(result.system).not.toContain('CI-jenkins guidelines');
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+        restoreCiEnvVars(savedCiEnv);
+      }
+    });
+
+    it('should NOT detect CI when TEAMCITY_VERSION is "false"', async () => {
+      // Arrange - regression: TEAMCITY_VERSION="false" should not be truthy
+      writeFileSync(
+        path.join(globalRulesDir, 'ci-teamcity-rule.mdc'),
+        `---
+ci: true
+---
+
+CI-teamcity guidelines.`
+      );
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      const savedCiEnv = saveCiEnvVars();
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+      clearCiEnvVars();
+      process.env.TEAMCITY_VERSION = 'false';
+
+      try {
+        const { default: plugin } = await import('./index.js');
+        const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
+        const hooks = await plugin({
+          client: mockClient as any,
+          project: {} as any,
+          directory: testDir,
+          worktree: testDir,
+          $: {} as any,
+          serverUrl: new URL('http://localhost'),
+        });
+
+        // Act
+        const systemTransform = hooks[
+          'experimental.chat.system.transform'
+        ] as any;
+        const result = await systemTransform({}, { system: 'Base prompt.' });
+
+        // Assert - TEAMCITY_VERSION='false' should not be treated as truthy
+        expect(result.system).not.toContain('CI-teamcity guidelines');
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+        restoreCiEnvVars(savedCiEnv);
+      }
+    });
+
     it('should not throw when project tags detection fails', async () => {
       // Arrange - use a project directory that doesn't exist
       writeFileSync(
