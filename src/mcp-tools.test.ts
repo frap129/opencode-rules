@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { extractConnectedMcpCapabilityIDs } from './mcp-tools.js';
+import * as mcpTools from './mcp-tools.js';
+
+describe('mcp-tools public API surface', () => {
+  it('exports only extractConnectedMcpCapabilityIDs', () => {
+    const exportedKeys = Object.keys(mcpTools).sort();
+    expect(exportedKeys).toEqual(['extractConnectedMcpCapabilityIDs']);
+  });
+});
 
 describe('extractConnectedMcpCapabilityIDs', () => {
   it('returns mcp_<sanitizedName> for connected servers', () => {

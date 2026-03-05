@@ -1,8 +1,8 @@
-export interface McpStatusMap {
+interface McpStatusMap {
   [clientName: string]: { status?: string } | undefined;
 }
 
-export function sanitizeMcpClientName(name: string): string {
+function sanitizeMcpClientName(name: string): string {
   return name.replace(/[^a-zA-Z0-9_-]/g, '_');
 }
 

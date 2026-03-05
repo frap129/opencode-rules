@@ -12,6 +12,8 @@ import {
   clearRuleCache,
   type DiscoveredRule,
 } from './utils.js';
+import * as utilsModule from './utils.js';
+import * as sessionStoreModule from './session-store.js';
 import { __testOnly } from './index.js';
 
 // Test directories - initialized in setupTestDirs
@@ -5283,5 +5285,27 @@ Conditional 2.`
       expect(formatted).not.toContain('Conditional 1');
       expect(formatted).not.toContain('Conditional 2');
     });
+  });
+});
+
+describe('utils public API surface', () => {
+  it('exports only expected symbols (no fileMatchesGlobs or RuleMetadata)', () => {
+    const exportedKeys = Object.keys(utilsModule).sort();
+    expect(exportedKeys).toEqual([
+      'clearRuleCache',
+      'discoverRuleFiles',
+      'extractFilePathsFromMessages',
+      'parseRuleMetadata',
+      'promptMatchesKeywords',
+      'readAndFormatRules',
+      'toolsMatchAvailable',
+    ]);
+  });
+});
+
+describe('session-store public API surface', () => {
+  it('exports only SessionState, SessionStore, and createSessionStore', () => {
+    const exportedKeys = Object.keys(sessionStoreModule).sort();
+    expect(exportedKeys).toEqual(['SessionStore', 'createSessionStore']);
   });
 });

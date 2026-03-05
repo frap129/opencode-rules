@@ -87,7 +87,7 @@ async function getCachedRule(
 /**
  * Check if a file path matches any of the given glob patterns
  */
-export function fileMatchesGlobs(filePath: string, globs: string[]): boolean {
+function fileMatchesGlobs(filePath: string, globs: string[]): boolean {
   return globs.some(glob => minimatch(filePath, glob, { matchBase: true }));
 }
 
@@ -138,7 +138,7 @@ export function toolsMatchAvailable(
 /**
  * Metadata extracted from .mdc file frontmatter
  */
-export interface RuleMetadata {
+interface RuleMetadata {
   globs?: string[];
   keywords?: string[];
   tools?: string[];

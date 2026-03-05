@@ -1,6 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import { OpenCodeRulesRuntime } from './runtime.js';
 import { SessionStore } from './session-store.js';
+import * as runtimeModule from './runtime.js';
+
+describe('runtime public API surface', () => {
+  it('exports only OpenCodeRulesRuntime class', () => {
+    const exportedKeys = Object.keys(runtimeModule).sort();
+    expect(exportedKeys).toEqual(['OpenCodeRulesRuntime']);
+  });
+});
 
 describe('OpenCodeRulesRuntime.queryAvailableToolIDs', () => {
   it('augments tool ids with connected mcp capability ids', async () => {

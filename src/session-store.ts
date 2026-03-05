@@ -10,7 +10,7 @@ export interface SessionState {
   lastAgentType?: string;
 }
 
-export interface SessionStoreOptions {
+interface SessionStoreOptions {
   max?: number;
 }
 

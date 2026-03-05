@@ -31,7 +31,7 @@ interface SystemTransformOutput {
   system?: string | string[];
 }
 
-export interface OpenCodeRulesRuntimeOptions {
+interface OpenCodeRulesRuntimeOptions {
   client: unknown;
   directory: string;
   projectDirectory: string;
