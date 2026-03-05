@@ -482,45 +482,14 @@ export interface RuleFilterContext {
 /**
  * Read and format rule files for system prompt injection
  * @param files - Array of discovered rule files with paths
- * @param contextOrFilePaths - Either RuleFilterContext object or legacy array of file paths
- * @param userPrompt - (Legacy) Optional user prompt text
- * @param availableToolIDs - (Legacy) Optional array of available tool IDs
+ * @param context - Optional RuleFilterContext for conditional rule matching
  */
 export async function readAndFormatRules(
   files: DiscoveredRule[],
-  contextOrFilePaths?: RuleFilterContext | string[],
-  userPrompt?: string,
-  availableToolIDs?: string[]
+  context: RuleFilterContext = {}
 ): Promise<string> {
   if (files.length === 0) {
     return '';
-  }
-
-  // Normalize arguments to RuleFilterContext
-  let context: RuleFilterContext;
-  if (Array.isArray(contextOrFilePaths)) {
-    // Legacy call: readAndFormatRules(files, filePaths, prompt, tools)
-    context = {
-      contextFilePaths: contextOrFilePaths,
-    };
-    if (userPrompt !== undefined) {
-      context.userPrompt = userPrompt;
-    }
-    if (availableToolIDs !== undefined) {
-      context.availableToolIDs = availableToolIDs;
-    }
-  } else if (contextOrFilePaths === undefined) {
-    // Legacy call with undefined second arg: readAndFormatRules(files, undefined, prompt, tools)
-    context = {};
-    if (userPrompt !== undefined) {
-      context.userPrompt = userPrompt;
-    }
-    if (availableToolIDs !== undefined) {
-      context.availableToolIDs = availableToolIDs;
-    }
-  } else {
-    // New call: readAndFormatRules(files, context)
-    context = contextOrFilePaths;
   }
 
   const ruleContents: string[] = [];

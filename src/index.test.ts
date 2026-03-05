@@ -1467,9 +1467,9 @@ describe('readAndFormatRules', () => {
     writeFileSync(rulePath, 'This rule always applies');
 
     // Act
-    const formatted = await readAndFormatRules(toRules([rulePath]), [
-      'src/utils/helpers.js',
-    ]);
+    const formatted = await readAndFormatRules(toRules([rulePath]), {
+      contextFilePaths: ['src/utils/helpers.js'],
+    });
 
     // Assert - rule should be included even though file doesn't match any pattern
     expect(formatted).toContain('unconditional.mdc');
@@ -1488,9 +1488,9 @@ This is a rule for TypeScript components.`;
     writeFileSync(rulePath, ruleContent);
 
     // Act - testing with a matching file path
-    const formatted = await readAndFormatRules(toRules([rulePath]), [
-      'src/components/button.ts',
-    ]);
+    const formatted = await readAndFormatRules(toRules([rulePath]), {
+      contextFilePaths: ['src/components/button.ts'],
+    });
 
     // Assert
     expect(formatted).toContain('typescript.mdc');
@@ -1509,9 +1509,9 @@ This is a rule for TypeScript components.`;
     writeFileSync(rulePath, ruleContent);
 
     // Act - testing with a non-matching file path
-    const formatted = await readAndFormatRules(toRules([rulePath]), [
-      'src/utils/helpers.js',
-    ]);
+    const formatted = await readAndFormatRules(toRules([rulePath]), {
+      contextFilePaths: ['src/utils/helpers.js'],
+    });
 
     // Assert - should return empty because rule doesn't apply
     expect(formatted).toBe('');
@@ -1530,9 +1530,9 @@ Multi-pattern rule`;
     writeFileSync(rulePath, ruleContent);
 
     // Act - test with file matching second pattern
-    const formatted = await readAndFormatRules(toRules([rulePath]), [
-      'lib/utils/helper.js',
-    ]);
+    const formatted = await readAndFormatRules(toRules([rulePath]), {
+      contextFilePaths: ['lib/utils/helper.js'],
+    });
 
     // Assert
     expect(formatted).toContain('multi.mdc');
@@ -1558,7 +1558,7 @@ Only for TypeScript`
     // Act - test with matching TypeScript file
     const formatted = await readAndFormatRules(
       toRules([unconditionalPath, conditionalPath]),
-      ['src/app.ts']
+      { contextFilePaths: ['src/app.ts'] }
     );
 
     // Assert - both should be included
@@ -1587,7 +1587,7 @@ Only for TypeScript`
     // Act - test with non-matching file
     const formatted = await readAndFormatRules(
       toRules([unconditionalPath, conditionalPath]),
-      ['docs/readme.md']
+      { contextFilePaths: ['docs/readme.md'] }
     );
 
     // Assert - only unconditional rule should be included
@@ -1631,11 +1631,9 @@ Follow testing best practices.`
     );
 
     // Act - prompt matches keyword
-    const formatted = await readAndFormatRules(
-      toRules([rulePath]),
-      [],
-      'I need help testing this function'
-    );
+    const formatted = await readAndFormatRules(toRules([rulePath]), {
+      userPrompt: 'I need help testing this function',
+    });
 
     // Assert
     expect(formatted).toContain('testing-rule.mdc');
@@ -1657,11 +1655,9 @@ Follow testing best practices.`
     );
 
     // Act - prompt does not match
-    const formatted = await readAndFormatRules(
-      toRules([rulePath]),
-      [],
-      'help me with the database'
-    );
+    const formatted = await readAndFormatRules(toRules([rulePath]), {
+      userPrompt: 'help me with the database',
+    });
 
     // Assert
     expect(formatted).toBe('');
@@ -1683,11 +1679,10 @@ Testing standards.`
     );
 
     // Act - keywords match but no test files in context
-    const formatted = await readAndFormatRules(
-      toRules([rulePath]),
-      ['src/app.ts'],
-      'help with testing'
-    );
+    const formatted = await readAndFormatRules(toRules([rulePath]), {
+      contextFilePaths: ['src/app.ts'],
+      userPrompt: 'help with testing',
+    });
 
     // Assert - rule should be included (keywords matched)
     expect(formatted).toContain('test-rule.mdc');
@@ -1710,11 +1705,10 @@ Testing standards.`
     );
 
     // Act - globs match but prompt doesn't mention testing
-    const formatted = await readAndFormatRules(
-      toRules([rulePath]),
-      ['src/utils.test.ts'],
-      'fix the import error'
-    );
+    const formatted = await readAndFormatRules(toRules([rulePath]), {
+      contextFilePaths: ['src/utils.test.ts'],
+      userPrompt: 'fix the import error',
+    });
 
     // Assert - rule should be included (globs matched)
     expect(formatted).toContain('test-rule.mdc');
@@ -1737,11 +1731,10 @@ Testing standards.`
     );
 
     // Act - neither matches
-    const formatted = await readAndFormatRules(
-      toRules([rulePath]),
-      ['src/app.ts'],
-      'update the readme'
-    );
+    const formatted = await readAndFormatRules(toRules([rulePath]), {
+      contextFilePaths: ['src/app.ts'],
+      userPrompt: 'update the readme',
+    });
 
     // Assert - rule should NOT be included
     expect(formatted).toBe('');
@@ -1761,11 +1754,9 @@ Testing rule.`
     );
 
     // Act - lowercase in prompt
-    const formatted = await readAndFormatRules(
-      toRules([rulePath]),
-      [],
-      'testing in lowercase'
-    );
+    const formatted = await readAndFormatRules(toRules([rulePath]), {
+      userPrompt: 'testing in lowercase',
+    });
 
     // Assert
     expect(formatted).toContain('case-rule.mdc');
@@ -1785,11 +1776,9 @@ Test rule.`
     );
 
     // Act - "test" should match "testing"
-    const formatted = await readAndFormatRules(
-      toRules([rulePath]),
-      [],
-      'I am testing this'
-    );
+    const formatted = await readAndFormatRules(toRules([rulePath]), {
+      userPrompt: 'I am testing this',
+    });
 
     // Assert
     expect(formatted).toContain('boundary-rule.mdc');
@@ -1809,11 +1798,9 @@ Test rule.`
     );
 
     // Act - "test" should NOT match "contest"
-    const formatted = await readAndFormatRules(
-      toRules([rulePath]),
-      [],
-      'I entered a contest'
-    );
+    const formatted = await readAndFormatRules(toRules([rulePath]), {
+      userPrompt: 'I entered a contest',
+    });
 
     // Assert
     expect(formatted).toBe('');
@@ -1833,12 +1820,9 @@ Use web search best practices.`
     );
 
     // Act - tool is available
-    const formatted = await readAndFormatRules(
-      toRules([rulePath]),
-      [],
-      undefined,
-      ['mcp_bash', 'mcp_websearch', 'mcp_read']
-    );
+    const formatted = await readAndFormatRules(toRules([rulePath]), {
+      availableToolIDs: ['mcp_bash', 'mcp_websearch', 'mcp_read'],
+    });
 
     // Assert
     expect(formatted).toContain('websearch-rule.mdc');
@@ -1859,12 +1843,9 @@ Use web search best practices.`
     );
 
     // Act - tool is NOT available
-    const formatted = await readAndFormatRules(
-      toRules([rulePath]),
-      [],
-      undefined,
-      ['mcp_bash', 'mcp_read']
-    );
+    const formatted = await readAndFormatRules(toRules([rulePath]), {
+      availableToolIDs: ['mcp_bash', 'mcp_read'],
+    });
 
     // Assert
     expect(formatted).toBe('');
@@ -1885,12 +1866,9 @@ Search best practices.`
     );
 
     // Act - only codesearch is available
-    const formatted = await readAndFormatRules(
-      toRules([rulePath]),
-      [],
-      undefined,
-      ['mcp_bash', 'mcp_codesearch']
-    );
+    const formatted = await readAndFormatRules(toRules([rulePath]), {
+      availableToolIDs: ['mcp_bash', 'mcp_codesearch'],
+    });
 
     // Assert
     expect(formatted).toContain('search-rule.mdc');
@@ -1912,12 +1890,10 @@ TypeScript or LSP rule.`
     );
 
     // Act - globs match but tools don't
-    const formatted = await readAndFormatRules(
-      toRules([rulePath]),
-      ['src/index.ts'],
-      undefined,
-      ['mcp_bash']
-    );
+    const formatted = await readAndFormatRules(toRules([rulePath]), {
+      contextFilePaths: ['src/index.ts'],
+      availableToolIDs: ['mcp_bash'],
+    });
 
     // Assert - should be included (globs matched)
     expect(formatted).toContain('multi-condition.mdc');
@@ -1939,12 +1915,10 @@ Search guidelines.`
     );
 
     // Act - tools match but keywords don't
-    const formatted = await readAndFormatRules(
-      toRules([rulePath]),
-      [],
-      'help with database',
-      ['mcp_websearch']
-    );
+    const formatted = await readAndFormatRules(toRules([rulePath]), {
+      userPrompt: 'help with database',
+      availableToolIDs: ['mcp_websearch'],
+    });
 
     // Assert - should be included (tools matched)
     expect(formatted).toContain('tools-keywords.mdc');
@@ -1968,12 +1942,11 @@ TypeScript with LSP rule.`
     );
 
     // Act - nothing matches
-    const formatted = await readAndFormatRules(
-      toRules([rulePath]),
-      ['src/index.js'],
-      'help with python',
-      ['mcp_bash']
-    );
+    const formatted = await readAndFormatRules(toRules([rulePath]), {
+      contextFilePaths: ['src/index.js'],
+      userPrompt: 'help with python',
+      availableToolIDs: ['mcp_bash'],
+    });
 
     // Assert
     expect(formatted).toBe('');
@@ -2018,9 +1991,7 @@ Only with websearch.`
     // Act - websearch not available
     const formatted = await readAndFormatRules(
       toRules([unconditionalPath, conditionalPath]),
-      [],
-      undefined,
-      ['mcp_bash']
+      { availableToolIDs: ['mcp_bash'] }
     );
 
     // Assert - only unconditional rule included
@@ -2029,10 +2000,11 @@ Only with websearch.`
     expect(formatted).not.toContain('Only with websearch');
   });
 
-  describe('legacy compatibility', () => {
-    it('should preserve prompt and tools when second arg is undefined', async () => {
-      // Arrange: rule with tools condition
-      const rulePath = path.join(globalRulesDir, 'legacy-tools.mdc');
+  describe('API contract: only (files, context?) signature', () => {
+    it('should only accept RuleFilterContext object as second argument', async () => {
+      // The readAndFormatRules function now only accepts the (files, context?) signature.
+      // This test documents that legacy positional args pattern is not supported.
+      const rulePath = path.join(globalRulesDir, 'tools-rule.mdc');
       writeFileSync(
         rulePath,
         `---
@@ -2040,25 +2012,21 @@ tools:
   - mcp_websearch
 ---
 
-Legacy tools rule.`
+Tools rule.`
       );
 
-      // Act: call with (files, undefined, prompt, tools) - legacy pattern
-      const formatted = await readAndFormatRules(
-        toRules([rulePath]),
-        undefined,
-        'some prompt',
-        ['mcp_websearch', 'mcp_bash']
-      );
+      // Using the new object-based context
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        userPrompt: 'some prompt',
+        availableToolIDs: ['mcp_websearch', 'mcp_bash'],
+      });
 
-      // Assert: tool-conditional rule should be included
-      expect(formatted).toContain('legacy-tools.mdc');
-      expect(formatted).toContain('Legacy tools rule');
+      expect(formatted).toContain('tools-rule.mdc');
+      expect(formatted).toContain('Tools rule');
     });
 
-    it('should preserve prompt when second arg is undefined (keywords match)', async () => {
-      // Arrange: rule with keywords condition
-      const rulePath = path.join(globalRulesDir, 'legacy-keywords.mdc');
+    it('should match keywords when passed via RuleFilterContext object', async () => {
+      const rulePath = path.join(globalRulesDir, 'keywords-rule.mdc');
       writeFileSync(
         rulePath,
         `---
@@ -2066,20 +2034,35 @@ keywords:
   - testing
 ---
 
-Legacy keywords rule.`
+Keywords rule.`
       );
 
-      // Act: call with (files, undefined, prompt, tools)
-      const formatted = await readAndFormatRules(
-        toRules([rulePath]),
-        undefined,
-        'help with testing',
-        []
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        userPrompt: 'help with testing',
+      });
+
+      expect(formatted).toContain('keywords-rule.mdc');
+      expect(formatted).toContain('Keywords rule');
+    });
+
+    it('should match contextFilePaths via RuleFilterContext object', async () => {
+      const rulePath = path.join(globalRulesDir, 'globs-rule.mdc');
+      writeFileSync(
+        rulePath,
+        `---
+globs:
+  - "src/**/*.ts"
+---
+
+Globs rule.`
       );
 
-      // Assert: keyword-conditional rule should be included
-      expect(formatted).toContain('legacy-keywords.mdc');
-      expect(formatted).toContain('Legacy keywords rule');
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        contextFilePaths: ['src/app.ts'],
+      });
+
+      expect(formatted).toContain('globs-rule.mdc');
+      expect(formatted).toContain('Globs rule');
     });
   });
 
