@@ -126,8 +126,33 @@ describe('detectProjectTags', () => {
 
     const tags = await detectProjectTags('/project');
     expect(tags).toEqual(['node', 'python', 'rust']);
-    // Verify explicit lexicographic sort comparator is used
     expect(tags).toEqual([...tags].sort((a, b) => a.localeCompare(b)));
+  });
+
+  it('uses explicit comparator function for sorting', async () => {
+    const originalSort = Array.prototype.sort;
+    let comparatorWasFunction = false;
+
+    vi.spyOn(Array.prototype, 'sort').mockImplementation(function (
+      this: string[],
+      compareFn?: (a: string, b: string) => number
+    ) {
+      if (typeof compareFn === 'function') {
+        comparatorWasFunction = true;
+      }
+      return originalSort.call(this, compareFn);
+    });
+
+    mockedFs.access.mockImplementation(async filePath => {
+      const p = String(filePath);
+      if (p.endsWith('package.json') || p.endsWith('pyproject.toml')) {
+        return;
+      }
+      throw new Error('ENOENT');
+    });
+
+    await detectProjectTags('/project');
+    expect(comparatorWasFunction).toBe(true);
   });
 
   it('returns empty array when no markers exist', async () => {
