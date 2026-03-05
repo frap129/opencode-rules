@@ -2064,6 +2064,86 @@ Globs rule.`
       expect(formatted).toContain('globs-rule.mdc');
       expect(formatted).toContain('Globs rule');
     });
+
+    it('should ignore array passed as second arg (legacy positional pattern rejected)', async () => {
+      // This test proves legacy positional signature no longer works.
+      // Pre-removal: readAndFormatRules(files, ['src/app.ts']) would match globs.
+      // Post-removal: An array is not a valid RuleFilterContext, so no contextFilePaths are extracted.
+      const rulePath = path.join(globalRulesDir, 'legacy-reject-globs.mdc');
+      writeFileSync(
+        rulePath,
+        `---
+globs:
+  - "src/**/*.ts"
+---
+
+Legacy globs rule.`
+      );
+
+      // Casting to any to bypass TypeScript and simulate legacy call pattern
+      const formatted = await readAndFormatRules(toRules([rulePath]), [
+        'src/app.ts',
+      ] as any);
+
+      // With legacy signature, this would have matched. Now it should NOT match
+      // because the array is not recognized as contextFilePaths.
+      expect(formatted).toBe('');
+    });
+
+    it('should ignore third positional arg (legacy userPrompt rejected)', async () => {
+      // This test proves legacy 3-arg signature no longer works.
+      // Pre-removal: readAndFormatRules(files, [], 'testing') would pass userPrompt.
+      // Post-removal: Only 2 args accepted; extra args are ignored by JS runtime.
+      const rulePath = path.join(globalRulesDir, 'legacy-reject-keywords.mdc');
+      writeFileSync(
+        rulePath,
+        `---
+keywords:
+  - testing
+---
+
+Legacy keywords rule.`
+      );
+
+      // Simulating legacy call: (files, emptyContext, prompt) - third arg ignored
+      const formatted = await (readAndFormatRules as any)(
+        toRules([rulePath]),
+        {},
+        'help with testing'
+      );
+
+      // With legacy signature, keywords would have matched. Now the third arg is ignored,
+      // and the empty context has no userPrompt, so no match.
+      expect(formatted).toBe('');
+    });
+
+    it('should ignore fourth positional arg (legacy availableToolIDs rejected)', async () => {
+      // This test proves legacy 4-arg signature no longer works.
+      // Pre-removal: readAndFormatRules(files, [], undefined, ['mcp_websearch']) would pass tools.
+      // Post-removal: Only 2 args accepted; extra args are ignored.
+      const rulePath = path.join(globalRulesDir, 'legacy-reject-tools.mdc');
+      writeFileSync(
+        rulePath,
+        `---
+tools:
+  - mcp_websearch
+---
+
+Legacy tools rule.`
+      );
+
+      // Simulating legacy call: (files, emptyContext, undefined, tools) - 3rd/4th args ignored
+      const formatted = await (readAndFormatRules as any)(
+        toRules([rulePath]),
+        {},
+        undefined,
+        ['mcp_websearch', 'mcp_bash']
+      );
+
+      // With legacy signature, tools would have matched. Now extra args are ignored,
+      // and the empty context has no availableToolIDs, so no match.
+      expect(formatted).toBe('');
+    });
   });
 
   describe('new filter dimensions', () => {

@@ -231,7 +231,7 @@ export class OpenCodeRulesRuntime {
 
     const availableToolIDs = await this.queryAvailableToolIDs();
 
-    const filterContext = await this.buildFilterContext({
+    const filterContext: RuleFilterContext = await this.buildFilterContext({
       contextFilePaths: contextPaths,
       userPrompt,
       availableToolIDs,
