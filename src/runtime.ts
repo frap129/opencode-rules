@@ -4,8 +4,6 @@ import { type DiscoveredRule } from './rule-discovery.js';
 import {
   extractLatestUserPrompt,
   extractSessionID,
-  extractSlashCommand,
-  extractTextFromParts,
   normalizeContextPath,
   sanitizePathForContext,
   toExtractableMessages,
@@ -14,8 +12,15 @@ import {
 import { extractConnectedMcpCapabilityIDs } from './mcp-tools.js';
 import { createDebugLog, type DebugLog } from './debug.js';
 import type { SessionStore } from './session-store.js';
-import { detectProjectTags } from './project-fingerprint.js';
-import { getGitBranch } from './git-branch.js';
+import {
+  buildFilterContext,
+  type BuildFilterContextOptions,
+} from './runtime-context.js';
+import {
+  handleChatMessage,
+  type ChatMessageInput,
+  type ChatMessageOutput,
+} from './runtime-chat.js';
 
 interface MessagesTransformOutput {
   messages: MessageWithInfo[];
@@ -162,40 +167,10 @@ export class OpenCodeRulesRuntime {
   }
 
   private async onChatMessage(
-    input: { sessionID?: string; model?: { modelID?: string }; agent?: string },
-    output: {
-      message?: { role?: string };
-      parts?: Array<{ type?: string; text?: string; synthetic?: boolean }>;
-    }
+    input: ChatMessageInput,
+    output: ChatMessageOutput
   ): Promise<void> {
-    const sessionID = input?.sessionID;
-    if (!sessionID) {
-      this.debugLog('No sessionID in chat.message hook input');
-      return;
-    }
-
-    if (output?.message?.role !== 'user') {
-      return;
-    }
-
-    const userPrompt = output.parts ? extractTextFromParts(output.parts) : '';
-
-    this.sessionStore.upsert(sessionID, state => {
-      if (userPrompt) {
-        state.lastUserPrompt = userPrompt;
-      }
-
-      if (input.model?.modelID) {
-        state.lastModelID = input.model.modelID;
-      }
-      if (input.agent) {
-        state.lastAgentType = input.agent;
-      }
-    });
-
-    this.debugLog(
-      `Updated session ${sessionID} from chat.message (model=${input.model?.modelID ?? 'none'}, agent=${input.agent ?? 'none'})`
-    );
+    handleChatMessage(input, output, this.sessionStore, this.debugLog);
   }
 
   private async onSystemTransform(
@@ -228,13 +203,19 @@ export class OpenCodeRulesRuntime {
 
     const availableToolIDs = await this.queryAvailableToolIDs();
 
-    const filterContext: RuleFilterContext = await this.buildFilterContext({
+    const filterContextOpts: BuildFilterContextOptions = {
       contextFilePaths: contextPaths,
       userPrompt,
       availableToolIDs,
       modelID: sessionState?.lastModelID,
       agentType: sessionState?.lastAgentType,
-    });
+    };
+
+    const filterContext: RuleFilterContext = await buildFilterContext(
+      filterContextOpts,
+      this.projectDirectory,
+      this.debugLog
+    );
 
     const formattedRules = await readAndFormatRules(
       this.ruleFiles,
@@ -262,82 +243,6 @@ export class OpenCodeRulesRuntime {
       : formattedRules;
 
     return output;
-  }
-
-  private async buildFilterContext(opts: {
-    contextFilePaths: string[];
-    userPrompt: string | undefined;
-    availableToolIDs: string[];
-    modelID: string | undefined;
-    agentType: string | undefined;
-  }): Promise<RuleFilterContext> {
-    const {
-      contextFilePaths,
-      userPrompt,
-      availableToolIDs,
-      modelID,
-      agentType,
-    } = opts;
-
-    const command = extractSlashCommand(userPrompt);
-
-    let projectTags: string[] | undefined;
-    try {
-      projectTags = await detectProjectTags(this.projectDirectory);
-      if (projectTags.length === 0) {
-        projectTags = undefined;
-      }
-    } catch {
-      projectTags = undefined;
-    }
-
-    let gitBranch: string | undefined;
-    try {
-      gitBranch = await getGitBranch(this.projectDirectory);
-    } catch {
-      gitBranch = undefined;
-    }
-
-    const os = process.platform;
-    const ci = detectCiEnvironment();
-
-    const context: RuleFilterContext = {
-      os,
-      ci,
-    };
-
-    if (contextFilePaths.length > 0) {
-      context.contextFilePaths = contextFilePaths;
-    }
-    if (userPrompt !== undefined) {
-      context.userPrompt = userPrompt;
-    }
-    if (availableToolIDs.length > 0) {
-      context.availableToolIDs = availableToolIDs;
-    }
-    if (modelID !== undefined) {
-      context.modelID = modelID;
-    }
-    if (agentType !== undefined) {
-      context.agentType = agentType;
-    }
-    if (command !== undefined) {
-      context.command = command;
-    }
-    if (projectTags !== undefined) {
-      context.projectTags = projectTags;
-    }
-    if (gitBranch !== undefined) {
-      context.gitBranch = gitBranch;
-    }
-
-    this.debugLog(
-      `Filter context: model=${modelID ?? 'none'}, agent=${agentType ?? 'none'}, ` +
-        `command=${command ?? 'none'}, branch=${gitBranch ?? 'none'}, ` +
-        `os=${os}, ci=${ci}, projectTags=${projectTags?.join(',') ?? 'none'}`
-    );
-
-    return context;
   }
 
   private async queryAvailableToolIDs(): Promise<string[]> {
@@ -437,56 +342,4 @@ export class OpenCodeRulesRuntime {
       `Added ${pathsToInclude.length} context path(s) to compaction for session ${sessionID}`
     );
   }
-}
-
-/**
- * Parse an env variable value semantically: 'false', '0', '' => false; other non-empty => true.
- * Returns undefined if the variable is not set.
- */
-function parseEnvBoolean(value: string | undefined): boolean | undefined {
-  if (value === undefined) return undefined;
-  if (value === '') return false;
-  const lower = value.toLowerCase();
-  if (lower === 'false' || lower === '0') return false;
-  return true;
-}
-
-/**
- * Check if a string value represents a truthy CI environment variable.
- * Treats 'false', '0', and empty strings as falsy; other non-empty values as truthy.
- */
-function isTruthyEnvValue(value: string | undefined): boolean {
-  return parseEnvBoolean(value) === true;
-}
-
-/**
- * Detect if running in a CI environment by checking common CI environment variables.
- *
- * If process.env.CI is explicitly set, it is treated as authoritative:
- * - CI='false' or CI='0' or CI='' => return false (no provider var fallback)
- * - CI='true' or CI='1' or any truthy value => return true
- *
- * If process.env.CI is not set (undefined), fall back to provider-specific detection.
- */
-function detectCiEnvironment(): boolean {
-  const env = process.env;
-
-  // If CI is explicitly set, treat it as authoritative (no fallback to provider vars)
-  const ciExplicit = parseEnvBoolean(env.CI);
-  if (ciExplicit !== undefined) {
-    return ciExplicit;
-  }
-
-  // CI not set - fall back to provider-specific env vars
-  return (
-    isTruthyEnvValue(env.CONTINUOUS_INTEGRATION) ||
-    isTruthyEnvValue(env.BUILD_NUMBER) ||
-    isTruthyEnvValue(env.GITHUB_ACTIONS) ||
-    isTruthyEnvValue(env.GITLAB_CI) ||
-    isTruthyEnvValue(env.CIRCLECI) ||
-    isTruthyEnvValue(env.TRAVIS) ||
-    isTruthyEnvValue(env.JENKINS_URL) ||
-    isTruthyEnvValue(env.BUILDKITE) ||
-    isTruthyEnvValue(env.TEAMCITY_VERSION)
-  );
 }

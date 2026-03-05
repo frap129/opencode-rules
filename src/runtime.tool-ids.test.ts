@@ -2,11 +2,37 @@ import { describe, it, expect } from 'vitest';
 import { OpenCodeRulesRuntime } from './runtime.js';
 import { SessionStore } from './session-store.js';
 import * as runtimeModule from './runtime.js';
+import * as runtimeContextModule from './runtime-context.js';
+import * as runtimeChatModule from './runtime-chat.js';
 
 describe('runtime module runtime exports', () => {
   it('exports only OpenCodeRulesRuntime class at runtime', () => {
     const exportedKeys = Object.keys(runtimeModule).sort();
     expect(exportedKeys).toEqual(['OpenCodeRulesRuntime']);
+  });
+});
+
+describe('runtime module boundaries', () => {
+  it('exports buildFilterContext from runtime-context module', () => {
+    expect(runtimeContextModule.buildFilterContext).toBeDefined();
+    expect(typeof runtimeContextModule.buildFilterContext).toBe('function');
+  });
+
+  it('exports detectCiEnvironment from runtime-context module', () => {
+    expect(runtimeContextModule.detectCiEnvironment).toBeDefined();
+    expect(typeof runtimeContextModule.detectCiEnvironment).toBe('function');
+  });
+
+  it('exports handleChatMessage from runtime-chat module', () => {
+    expect(runtimeChatModule.handleChatMessage).toBeDefined();
+    expect(typeof runtimeChatModule.handleChatMessage).toBe('function');
+  });
+
+  it('exports extractUserPromptFromParts from runtime-chat module', () => {
+    expect(runtimeChatModule.extractUserPromptFromParts).toBeDefined();
+    expect(typeof runtimeChatModule.extractUserPromptFromParts).toBe(
+      'function'
+    );
   });
 });
 
