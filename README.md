@@ -11,7 +11,8 @@ opencode-rules automatically loads rule files from standard directories and inte
 
 - Define global coding standards that apply across all projects
 - Create project-specific rules for team collaboration
-- Apply conditional rules based on file patterns, prompt keywords, or available tools
+- Apply conditional rules based on file patterns, prompt keywords, available tools, model, agent, branch, OS, CI, and more
+- Control matching behavior with `match: any` (default) or `match: all`
 - Maintain zero-configuration workflow with sensible defaults
 
 This approach allows you to dynamically include rules automatically like style guides for specific languages,
@@ -22,6 +23,9 @@ approach.
 
 - **Dual-format support**: Load rules from both `.md` and `.mdc` files
 - **Conditional rules**: Apply rules based on file paths, prompt keywords, or available tools
+- **Runtime filtering**: Filter rules by model, agent, command, project type, git branch, OS, and CI
+- **Branch glob patterns**: Match branches using glob patterns (e.g., `feature/*`, `release/**`)
+- **Matching modes**: Use `match: any` (default) for OR logic or `match: all` for AND logic
 - **Keyword matching**: Apply rules when the user's prompt contains specific keywords
 - **Tool-based rules**: Apply rules only when specific MCP tools are available
 - **Global and project-level rules**: Define rules at both system and project scopes
@@ -34,7 +38,7 @@ approach.
 
 ### Installation
 
-Add the plugin to your opoencode config:
+Add the plugin to your opencode config:
 
 ```json
 {
@@ -210,6 +214,37 @@ keywords:
 
 This rule applies when the LSP tool is available OR TypeScript files are in context OR the user mentions type checking.
 
+### Runtime Environment Filtering
+
+Create `~/.config/opencode/rules/feature-branch-dev.mdc`:
+
+```markdown
+---
+model:
+  - gpt-5.3-codex
+  - claude-sonnet-4
+agent:
+  - programmer
+branch:
+  - feature/*
+os:
+  - linux
+  - darwin
+ci: false
+match: all
+---
+
+# Feature Branch Development
+
+When working on feature branches locally:
+
+- Create atomic commits with clear messages
+- Run tests before pushing
+- Keep changes focused and reviewable
+```
+
+This rule uses `match: all` and only applies when ALL conditions are met: specific model, programmer agent, feature branch, Unix OS, and not in CI.
+
 ### Organized Rules with Subdirectories
 
 You can organize rules into subdirectories for better management. Rules are discovered recursively from all subdirectories:
@@ -253,6 +288,7 @@ Both `.md` and `.mdc` files support optional YAML metadata for conditional rule 
 
 ```yaml
 ---
+# Legacy filters
 globs:
   - 'src/**/*.ts'
   - 'lib/**/*.js'
@@ -262,10 +298,33 @@ keywords:
 tools:
   - 'mcp_websearch'
   - 'mcp_lsp'
+# Runtime environment filters
+model:
+  - gpt-5.3-codex
+  - claude-sonnet-4
+agent:
+  - programmer
+command:
+  - /plan
+  - /review
+project:
+  - node
+  - monorepo
+branch:
+  - main
+  - feature/*
+os:
+  - linux
+  - darwin
+ci: false
+# Matching mode
+match: any
 ---
 ```
 
 ### Supported Fields
+
+#### Legacy Filters
 
 - `globs` (optional): Array of glob patterns for file-based matching
   - Rule applies when any file in context matches a pattern
@@ -278,13 +337,38 @@ tools:
   - Uses exact string matching against tool IDs (e.g., `mcp_websearch`, `mcp_bash`)
   - Enable debug logging (`OPENCODE_RULES_DEBUG=1`) to see available tool IDs
 
+#### Runtime Environment Filters
+
+- `model` (optional): Array of model IDs to match against the current LLM
+  - Example: `['gpt-5.3-codex', 'claude-sonnet-4']`
+- `agent` (optional): Array of agent types to match
+  - Example: `['programmer', 'planner']`
+- `command` (optional): Array of slash commands to match
+  - Example: `['/plan', '/review']`
+- `project` (optional): Array of project type tags to match
+  - Detected automatically from marker files (e.g., `package.json` -> `node`)
+  - Supported tags: `node`, `python`, `go`, `rust`, `monorepo`, `browser-extension`
+- `branch` (optional): Array of git branch patterns to match
+  - Supports exact names and glob patterns (e.g., `feature/*`, `release/**`)
+  - Uses minimatch for glob matching
+- `os` (optional): Array of operating systems to match
+  - Values: `linux`, `darwin`, `win32`
+- `ci` (optional): Boolean to match CI environment
+  - `true` matches when running in CI, `false` matches when not in CI
+- `match` (optional): Matching mode for multiple conditions
+  - `any` (default): Rule applies if ANY declared condition matches
+  - `all`: Rule applies only if ALL declared conditions match
+
+**Note:** When a runtime context value is unavailable (e.g., not in a git repository), that dimension is treated as a non-match.
+
 ### Matching Behavior
 
 - **No metadata**: Rule applies unconditionally (always included)
 - **Only globs**: Rule applies when any context file matches
 - **Only keywords**: Rule applies when the user's prompt contains any keyword
 - **Only tools**: Rule applies when any listed tool is available
-- **Multiple conditions**: Rule applies when ANY condition matches (OR logic across all fields)
+- **Multiple conditions with `match: any` (default)**: Rule applies when ANY condition matches (OR logic across all fields)
+- **Multiple conditions with `match: all`**: Rule applies only when ALL declared conditions match
 
 ## Glob Pattern Reference
 
@@ -302,8 +386,8 @@ The plugin uses `minimatch` for pattern matching:
 
 This repository includes a `crafting-rules/` skill that teaches AI agents how to create well-formatted rules. The skill provides:
 
-- **Rule format reference** - Frontmatter fields (`globs`, `keywords`, `tools`) and markdown body structure
-- **Matching strategy guidance** - When to use globs vs keywords vs tools vs combinations
+- **Rule format reference** - Frontmatter fields (`globs`, `keywords`, `tools`, `model`, `agent`, `command`, `project`, `branch`, `os`, `ci`, `match`) and markdown body structure
+- **Matching strategy guidance** - When to use globs vs keywords vs runtime filters vs combinations
 - **Pattern extraction workflow** - How to identify repeated conversation patterns that should become rules
 - **Keyword safety guidelines** - Denylist of overly broad keywords to avoid, allowlist of safe alternatives, and an audit checklist
 
@@ -383,10 +467,13 @@ This plugin uses OpenCode's hook system for incremental, stateful rule injection
 
 4. **`experimental.chat.system.transform`** - Rule injection and filtering
    - Fires before each LLM system prompt is constructed
+   - Receives full runtime filter context: model, agent, command, project type, git branch, OS, and CI environment
    - Reads discovered rule files and filters based on:
-     - Extracted file paths from session state
-     - Latest user prompt (keyword matching)
-     - Available tool IDs
+     - Extracted file paths from session state (`globs`)
+     - Latest user prompt (`keywords`)
+     - Available tool IDs (`tools`)
+     - Runtime environment (model, agent, command, project, branch, OS, CI)
+   - Command is inferred from the leading slash token (first token) of the latest user prompt
    - Appends formatted rules to the system prompt
 
 5. **`experimental.session.compacting`** - Compaction context preservation
