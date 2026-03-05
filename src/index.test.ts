@@ -19,6 +19,9 @@ import * as ruleFilterModule from './rule-filter.js';
 import * as messagePathsModule from './message-paths.js';
 import * as utilsModule from './utils.js';
 import * as sessionStoreModule from './session-store.js';
+// Runtime module boundary tests: verify decomposed runtime modules
+import * as runtimeContextModule from './runtime-context.js';
+import * as runtimeChatModule from './runtime-chat.js';
 import { __testOnly } from './index.js';
 
 // Test directories - initialized in setupTestDirs
@@ -1255,6 +1258,63 @@ describe('module boundary tests', () => {
       parts: [{ type: 'text', text: 'hello' }],
     };
     expect(msg.role).toBe('user');
+  });
+
+  // Runtime decomposition module boundary tests (Task 10)
+  it('should export buildFilterContext from runtime-context module', () => {
+    expect(runtimeContextModule.buildFilterContext).toBeDefined();
+    expect(typeof runtimeContextModule.buildFilterContext).toBe('function');
+  });
+
+  it('should export detectCiEnvironment from runtime-context module', () => {
+    expect(runtimeContextModule.detectCiEnvironment).toBeDefined();
+    expect(typeof runtimeContextModule.detectCiEnvironment).toBe('function');
+  });
+
+  it('should export handleChatMessage from runtime-chat module', () => {
+    expect(runtimeChatModule.handleChatMessage).toBeDefined();
+    expect(typeof runtimeChatModule.handleChatMessage).toBe('function');
+  });
+
+  it('should export extractUserPromptFromParts from runtime-chat module', () => {
+    expect(runtimeChatModule.extractUserPromptFromParts).toBeDefined();
+    expect(typeof runtimeChatModule.extractUserPromptFromParts).toBe(
+      'function'
+    );
+  });
+
+  it('should detect CI environment correctly via runtime-context module', () => {
+    // Save original env
+    const originalCI = process.env.CI;
+
+    // Test explicit CI=true
+    process.env.CI = 'true';
+    expect(runtimeContextModule.detectCiEnvironment()).toBe(true);
+
+    // Test explicit CI=false
+    process.env.CI = 'false';
+    expect(runtimeContextModule.detectCiEnvironment()).toBe(false);
+
+    // Restore
+    if (originalCI === undefined) {
+      delete process.env.CI;
+    } else {
+      process.env.CI = originalCI;
+    }
+  });
+
+  it('should extract user prompt from parts via runtime-chat module', () => {
+    const parts = [
+      { type: 'text', text: 'Hello ' },
+      { type: 'text', text: 'world' },
+    ];
+    const result = runtimeChatModule.extractUserPromptFromParts(parts);
+    expect(result).toBe('Hello world');
+  });
+
+  it('should return empty string for undefined parts in runtime-chat module', () => {
+    const result = runtimeChatModule.extractUserPromptFromParts(undefined);
+    expect(result).toBe('');
   });
 });
 
