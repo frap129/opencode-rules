@@ -573,7 +573,7 @@ This will log information about:
 1. Verify directories exist: `~/.config/opencode/rules/` and/or `.opencode/rules/`
 2. Check file extensions are `.md` or `.mdc`
 3. Ensure files with metadata have properly formatted YAML
-4. Test glob patterns using the `fileMatchesGlobs()` function
+4. Enable debug logging (`OPENCODE_RULES_DEBUG=1`) to see which rules are being matched
 
 ### Common Issues
 
