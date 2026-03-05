@@ -299,12 +299,6 @@ async function scanDirectoryRecursively(
   const results: Array<{ filePath: string; relativePath: string }> = [];
 
   try {
-    await stat(dir);
-  } catch {
-    return results;
-  }
-
-  try {
     const entries = await readdir(dir, { withFileTypes: true });
     for (const entry of entries) {
       // Skip hidden files and directories
@@ -324,7 +318,11 @@ async function scanDirectoryRecursively(
       }
     }
   } catch (error) {
-    // Log directory read errors instead of silently ignoring
+    // Treat ENOENT as benign (directory doesn't exist or was deleted)
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+      return results;
+    }
+    // Log non-ENOENT directory read errors
     const message = error instanceof Error ? error.message : String(error);
     console.warn(
       `[opencode-rules] Warning: Failed to read directory ${dir}: ${message}`
