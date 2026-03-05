@@ -4729,6 +4729,53 @@ describe('SessionState', () => {
     }
   });
 
+  it('sorts context paths deterministically using lexicographic order', async () => {
+    // Arrange
+    const originalEnv = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    try {
+      const { default: plugin, __testOnly } = await import('./index.js');
+      const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
+      const hooks = await plugin({
+        client: mockClient as any,
+        project: {} as any,
+        directory: testDir,
+        worktree: testDir,
+        $: {} as any,
+        serverUrl: new URL('http://localhost'),
+      });
+
+      // Use mixed case paths to distinguish localeCompare from default sort
+      // Default .sort() produces: Beta, alpha, gamma, zebra (ASCII order)
+      // localeCompare produces: alpha, Beta, gamma, zebra (locale-aware)
+      __testOnly.upsertSessionState('ses_sort_order', s => {
+        s.contextPaths.add('src/zebra.ts');
+        s.contextPaths.add('src/alpha.ts');
+        s.contextPaths.add('src/Beta.ts');
+        s.contextPaths.add('src/gamma.ts');
+      });
+
+      const compacting = hooks['experimental.session.compacting'] as any;
+      const output = { context: [] as string[] };
+      await compacting({ sessionID: 'ses_sort_order' }, output);
+
+      const contextText = output.context.join('\n');
+      const pathMatches = contextText.match(/src\/\w+\.ts/g) || [];
+
+      // Verify paths are in localeCompare order (not ASCII order)
+      // This fails if .sort() is used without comparator
+      expect(pathMatches).toEqual([
+        'src/alpha.ts',
+        'src/Beta.ts',
+        'src/gamma.ts',
+        'src/zebra.ts',
+      ]);
+    } finally {
+      process.env.XDG_CONFIG_HOME = originalEnv;
+    }
+  });
+
   it('skips full rule injection when session is compacting', async () => {
     // Arrange
     writeFileSync(
