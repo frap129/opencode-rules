@@ -4564,6 +4564,38 @@ describe('SessionState', () => {
     expect(snapshot?.lastUserPrompt).toBe('please add tests');
   });
 
+  it('extracts text from mixed parts using shared extraction logic', async () => {
+    const { default: plugin, __testOnly } = await import('./index.js');
+    const hooks = await plugin({
+      client: {} as any,
+      project: {} as any,
+      directory: testDir,
+      worktree: testDir,
+      $: {} as any,
+      serverUrl: new URL('http://localhost'),
+    });
+
+    const hook = hooks['chat.message'] as any;
+
+    // Mixed parts with typed, untyped, synthetic, and non-text parts
+    await hook(
+      { sessionID: 'ses_mixed' },
+      {
+        message: { role: 'user' },
+        parts: [
+          { type: 'text', text: 'typed' },
+          { text: 'untyped' },
+          { type: 'image', data: 'binary' },
+          { type: 'text', text: 'skip', synthetic: true },
+          { type: 'text', text: 'final' },
+        ],
+      }
+    );
+
+    const snapshot = __testOnly.getSessionStateSnapshot('ses_mixed');
+    expect(snapshot?.lastUserPrompt).toBe('typed untyped final');
+  });
+
   it('stores lastModelID from chat.message for user messages', async () => {
     const { default: plugin, __testOnly } = await import('./index.js');
     const hooks = await plugin({

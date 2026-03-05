@@ -17,6 +17,32 @@ export interface MessageWithInfo {
 }
 
 /**
+ * Extract and join text content from message parts.
+ * Skips synthetic parts and parts without text content.
+ * Returns an empty string if no text is extracted.
+ */
+export function extractTextFromParts(
+  parts: Array<{ type?: string; text?: string; synthetic?: boolean }>
+): string {
+  const textParts: string[] = [];
+  for (const part of parts) {
+    if (part.synthetic) continue;
+
+    if (part.type === 'text' && part.text) {
+      textParts.push(part.text);
+    } else if (typeof part.text === 'string' && !part.type) {
+      textParts.push(part.text);
+    }
+  }
+
+  return textParts
+    .map(t => t.trim())
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+}
+
+/**
  * Normalize paths to repo-relative POSIX format.
  * If path is absolute and under baseDir, convert to relative POSIX path.
  * Otherwise return path as-is.
@@ -67,24 +93,9 @@ export function extractLatestUserPrompt(
     if (message.role && message.role !== 'user') continue;
     const parts = message.parts || [];
 
-    const textParts: string[] = [];
-    for (const part of parts) {
-      if (part.synthetic) continue;
-
-      if (part.type === 'text' && part.text) {
-        textParts.push(part.text);
-      } else if (typeof part.text === 'string' && !part.type) {
-        textParts.push(part.text);
-      }
-    }
-
-    if (textParts.length > 0) {
-      const userPrompt = textParts
-        .map(t => t.trim())
-        .filter(Boolean)
-        .join(' ')
-        .trim();
-      return userPrompt || undefined;
+    const userPrompt = extractTextFromParts(parts);
+    if (userPrompt) {
+      return userPrompt;
     }
   }
 

@@ -8,6 +8,7 @@ import {
   extractLatestUserPrompt,
   extractSessionID,
   extractSlashCommand,
+  extractTextFromParts,
   normalizeContextPath,
   sanitizePathForContext,
   toExtractableMessages,
@@ -180,30 +181,11 @@ export class OpenCodeRulesRuntime {
       return;
     }
 
-    const textParts: string[] = [];
-    if (output.parts) {
-      for (const part of output.parts) {
-        if (part.synthetic) continue;
-
-        if (part.type === 'text' && part.text) {
-          textParts.push(part.text);
-        } else if (typeof part.text === 'string' && !part.type) {
-          textParts.push(part.text);
-        }
-      }
-    }
+    const userPrompt = output.parts ? extractTextFromParts(output.parts) : '';
 
     this.sessionStore.upsert(sessionID, state => {
-      if (textParts.length > 0) {
-        const userPrompt = textParts
-          .map(t => t.trim())
-          .filter(Boolean)
-          .join(' ')
-          .trim();
-
-        if (userPrompt) {
-          state.lastUserPrompt = userPrompt;
-        }
+      if (userPrompt) {
+        state.lastUserPrompt = userPrompt;
       }
 
       if (input.model?.modelID) {

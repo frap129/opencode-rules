@@ -6,6 +6,7 @@ import {
   extractSessionID,
   toExtractableMessages,
   extractSlashCommand,
+  extractTextFromParts,
   MessageWithInfo,
 } from './message-context.js';
 
@@ -75,6 +76,62 @@ describe('toExtractableMessages', () => {
 
   it('returns empty array for empty input', () => {
     expect(toExtractableMessages([])).toEqual([]);
+  });
+});
+
+describe('extractTextFromParts', () => {
+  it('extracts text from parts with type text', () => {
+    const parts = [
+      { type: 'text', text: 'hello' },
+      { type: 'text', text: 'world' },
+    ];
+    expect(extractTextFromParts(parts)).toBe('hello world');
+  });
+
+  it('extracts text from parts without type (implicit text)', () => {
+    const parts = [{ text: 'foo' }, { text: 'bar' }];
+    expect(extractTextFromParts(parts)).toBe('foo bar');
+  });
+
+  it('skips synthetic parts', () => {
+    const parts = [
+      { type: 'text', text: 'real', synthetic: false },
+      { type: 'text', text: 'skip', synthetic: true },
+      { type: 'text', text: 'also real' },
+    ];
+    expect(extractTextFromParts(parts)).toBe('real also real');
+  });
+
+  it('handles mixed part shapes', () => {
+    const parts = [
+      { type: 'text', text: 'typed' },
+      { text: 'untyped' },
+      { type: 'image', data: 'binary' },
+      { type: 'text', text: 'more', synthetic: true },
+    ];
+    expect(extractTextFromParts(parts)).toBe('typed untyped');
+  });
+
+  it('returns empty string for empty array', () => {
+    expect(extractTextFromParts([])).toBe('');
+  });
+
+  it('returns empty string when all parts are synthetic', () => {
+    const parts = [{ type: 'text', text: 'skip', synthetic: true }];
+    expect(extractTextFromParts(parts)).toBe('');
+  });
+
+  it('trims and filters whitespace-only text', () => {
+    const parts = [
+      { type: 'text', text: '  hello  ' },
+      { type: 'text', text: '   ' },
+    ];
+    expect(extractTextFromParts(parts)).toBe('hello');
+  });
+
+  it('returns undefined when result is empty after trimming', () => {
+    const parts = [{ type: 'text', text: '   ' }];
+    expect(extractTextFromParts(parts)).toBe('');
   });
 });
 
