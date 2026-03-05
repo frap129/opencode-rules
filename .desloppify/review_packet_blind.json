@@ -404,8 +404,7 @@
     },
     "dependencies": {},
     "testing": {
-      "total_files": 29,
-      "critical_untested": []
+      "total_files": 29
     },
     "api_surface": {
       "sync_async_mix": [
@@ -544,99 +543,7 @@
       "test": 11,
       "config": 1
     },
-    "existing_findings": {
-      "src/index.test.ts": [
-        "structural: Needs decomposition: large (672 LOC)",
-        "smells: 3x `as any` type casts",
-        "smells: 12x Hardcoded URL in source code"
-      ],
-      "src/debug.test.ts": [
-        "smells: 1x Explicit `any` types"
-      ],
-      "src/git-branch.ts": [
-        "subjective_review: No design review on record \u2014 run `desloppify review --prepare`"
-      ],
-      "src/mcp-tools.ts": [
-        "subjective_review: No design review on record \u2014 run `desloppify review --prepare`"
-      ],
-      "src/message-context.ts": [
-        "subjective_review: No design review on record \u2014 run `desloppify review --prepare`"
-      ],
-      "src/project-fingerprint.ts": [
-        "subjective_review: No design review on record \u2014 run `desloppify review --prepare`"
-      ],
-      "src/runtime.ts": [
-        "subjective_review: No design review on record \u2014 run `desloppify review --prepare`",
-        "smells: 1x `as any` type casts"
-      ],
-      "src/session-store.ts": [
-        "subjective_review: No design review on record \u2014 run `desloppify review --prepare`"
-      ],
-      "src/utils.ts": [
-        "subjective_review: No design review on record \u2014 run `desloppify review --prepare`",
-        "exports: Dead export: MessagePart"
-      ],
-      ".": [
-        "subjective_review: No holistic codebase review on record \u2014 run `desloppify review --prepare`"
-      ],
-      "src/index.rules.test.ts": [
-        "structural: Needs decomposition: large (1412 LOC)"
-      ],
-      "src/index.integration.test.ts": [
-        "structural: Needs decomposition: large (1101 LOC)",
-        "smells: 1x Magic numbers (>1000 in logic)"
-      ],
-      "src/index.runtime.test.ts": [
-        "structural: Needs decomposition: large (861 LOC)",
-        "smells: 2x .sort() without comparator function"
-      ],
-      "src": [
-        "flat_dirs: Flat directory: 28 files \u2014 consider grouping by domain",
-        "naming: Naming inconsistency: 7 flat_lower files in kebab-case-majority dir (26 total)"
-      ],
-      "src/api-surface.typecheck.ts": [
-        "orphaned: Orphaned file (31 LOC): zero importers, not an entry point",
-        "test_coverage: Untested module (31 LOC, 0 importers)",
-        "smells: 4x @ts-ignore / @ts-expect-error",
-        "subjective_review: No design review on record \u2014 run `desloppify review --prepare`"
-      ],
-      "vitest.config.ts": [
-        "orphaned: Orphaned file (21 LOC): zero importers, not an entry point"
-      ],
-      "src/test-fixtures.ts": [
-        "responsibility_cohesion: 10 disconnected function clusters (11 functions) \u2014 likely mixed responsibilities",
-        "smells: 1x Hardcoded URL in source code",
-        "subjective_review: No design review on record \u2014 run `desloppify review --prepare`"
-      ],
-      "src/mcp-tools.test.ts": [
-        "smells: 1x `as any` type casts",
-        "smells: 1x .sort() without comparator function"
-      ],
-      "src/runtime.tool-ids.test.ts": [
-        "smells: 4x `as any` type casts",
-        "smells: 1x .sort() without comparator function"
-      ],
-      "src/rule-filter.ts": [
-        "smells: 1x Async functions without await",
-        "smells: 1x Dead function (body is empty/return-only)",
-        "subjective_review: No design review on record \u2014 run `desloppify review --prepare`"
-      ],
-      "src/message-paths.ts": [
-        "subjective_review: No design review on record \u2014 run `desloppify review --prepare`"
-      ],
-      "src/rule-discovery.ts": [
-        "subjective_review: No design review on record \u2014 run `desloppify review --prepare`"
-      ],
-      "src/rule-metadata.ts": [
-        "subjective_review: No design review on record \u2014 run `desloppify review --prepare`"
-      ],
-      "src/runtime-chat.ts": [
-        "subjective_review: No design review on record \u2014 run `desloppify review --prepare`"
-      ],
-      "src/runtime-context.ts": [
-        "subjective_review: No design review on record \u2014 run `desloppify review --prepare`"
-      ]
-    },
+    "existing_findings": {},
     "codebase_stats": {
       "total_files": 29,
       "total_loc": 6905,
@@ -798,24 +705,10 @@
       "why": "architecture contracts, compatibility policy, docs-vs-runtime scope, and quality-gate coverage"
     },
     {
-      "name": "Design coherence \u2014 Mechanical Concern Signals",
-      "dimensions": [
-        "design_coherence"
-      ],
-      "files_to_read": [
-        "src/api-surface.typecheck.ts",
-        "src/index.integration.test.ts",
-        "src/index.runtime.test.ts",
-        "src/index.test.ts",
-        "src/test-fixtures.ts"
-      ],
-      "why": "mechanical detectors identified structural patterns needing judgment; concern types: design_concern, mixed_responsibilities, systemic_pattern",
-      "total_candidate_files": 5
-    },
-    {
       "name": "Cross-cutting Sweep",
       "dimensions": [
-        "authorization_consistency"
+        "authorization_consistency",
+        "design_coherence"
       ],
       "files_to_read": [
         "src/session-store.ts",
