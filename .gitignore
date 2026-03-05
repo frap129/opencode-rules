@@ -53,3 +53,10 @@ temp/
 
 # Agent planning
 .opencode/plans
+
+# Desloppify runtime artifacts
+.desloppify/external_review_sessions/
+.desloppify/review_packets/
+.desloppify/subagents/
+.desloppify/*.bak
+.desloppify/review_packet_blind.json
