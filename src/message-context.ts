@@ -1,5 +1,5 @@
 import path from 'path';
-import type { Message, MessagePart } from './utils.js';
+import type { Message, MessagePart } from './message-paths.js';
 
 export interface MessagePartWithSession {
   type?: string;

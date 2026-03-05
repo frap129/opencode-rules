@@ -1,9 +1,6 @@
-import {
-  readAndFormatRules,
-  extractFilePathsFromMessages,
-  type DiscoveredRule,
-  type RuleFilterContext,
-} from './utils.js';
+import { readAndFormatRules, type RuleFilterContext } from './rule-filter.js';
+import { extractFilePathsFromMessages } from './message-paths.js';
+import { type DiscoveredRule } from './rule-discovery.js';
 import {
   extractLatestUserPrompt,
   extractSessionID,

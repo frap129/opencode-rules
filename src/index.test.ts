@@ -12,6 +12,11 @@ import {
   clearRuleCache,
   type DiscoveredRule,
 } from './utils.js';
+// Module boundary tests: verify re-exports from focused modules work via utils.js facade
+import * as ruleDiscoveryModule from './rule-discovery.js';
+import * as ruleMetadataModule from './rule-metadata.js';
+import * as ruleFilterModule from './rule-filter.js';
+import * as messagePathsModule from './message-paths.js';
 import * as utilsModule from './utils.js';
 import * as sessionStoreModule from './session-store.js';
 import { __testOnly } from './index.js';
@@ -1161,6 +1166,95 @@ Combined rule`;
     expect(metadata?.os).toEqual(['linux']);
     expect(metadata?.ci).toBe(true);
     expect(metadata?.match).toBe('all');
+  });
+});
+
+describe('module boundary tests', () => {
+  it('should re-export discoverRuleFiles from rule-discovery module', () => {
+    expect(ruleDiscoveryModule.discoverRuleFiles).toBeDefined();
+    expect(typeof ruleDiscoveryModule.discoverRuleFiles).toBe('function');
+    // Verify utils facade re-exports it
+    expect(utilsModule.discoverRuleFiles).toBe(
+      ruleDiscoveryModule.discoverRuleFiles
+    );
+  });
+
+  it('should re-export parseRuleMetadata from rule-metadata module', () => {
+    expect(ruleMetadataModule.parseRuleMetadata).toBeDefined();
+    expect(typeof ruleMetadataModule.parseRuleMetadata).toBe('function');
+    // Verify utils facade re-exports it
+    expect(utilsModule.parseRuleMetadata).toBe(
+      ruleMetadataModule.parseRuleMetadata
+    );
+  });
+
+  it('should re-export promptMatchesKeywords and toolsMatchAvailable from rule-filter module', () => {
+    expect(ruleFilterModule.promptMatchesKeywords).toBeDefined();
+    expect(ruleFilterModule.toolsMatchAvailable).toBeDefined();
+    expect(typeof ruleFilterModule.promptMatchesKeywords).toBe('function');
+    expect(typeof ruleFilterModule.toolsMatchAvailable).toBe('function');
+    // Verify utils facade re-exports them
+    expect(utilsModule.promptMatchesKeywords).toBe(
+      ruleFilterModule.promptMatchesKeywords
+    );
+    expect(utilsModule.toolsMatchAvailable).toBe(
+      ruleFilterModule.toolsMatchAvailable
+    );
+  });
+
+  it('should re-export extractFilePathsFromMessages from message-paths module', () => {
+    expect(messagePathsModule.extractFilePathsFromMessages).toBeDefined();
+    expect(typeof messagePathsModule.extractFilePathsFromMessages).toBe(
+      'function'
+    );
+    // Verify utils facade re-exports it
+    expect(utilsModule.extractFilePathsFromMessages).toBe(
+      messagePathsModule.extractFilePathsFromMessages
+    );
+  });
+
+  it('should re-export readAndFormatRules from rule-filter module', () => {
+    expect(ruleFilterModule.readAndFormatRules).toBeDefined();
+    expect(typeof ruleFilterModule.readAndFormatRules).toBe('function');
+    // Verify utils facade re-exports it
+    expect(utilsModule.readAndFormatRules).toBe(
+      ruleFilterModule.readAndFormatRules
+    );
+  });
+
+  it('should re-export clearRuleCache from rule-discovery module', () => {
+    expect(ruleDiscoveryModule.clearRuleCache).toBeDefined();
+    expect(typeof ruleDiscoveryModule.clearRuleCache).toBe('function');
+    // Verify utils facade re-exports it
+    expect(utilsModule.clearRuleCache).toBe(ruleDiscoveryModule.clearRuleCache);
+  });
+
+  it('should re-export DiscoveredRule type via utils facade', () => {
+    // Type-level test - verify we can assign from one module to another
+    const rule: utilsModule.DiscoveredRule = {
+      filePath: '/test/rule.md',
+      relativePath: 'rule.md',
+    };
+    const ruleFromDiscovery: ruleDiscoveryModule.DiscoveredRule = rule;
+    expect(ruleFromDiscovery.filePath).toBe('/test/rule.md');
+  });
+
+  it('should re-export RuleFilterContext type via utils facade', () => {
+    // Type-level test - verify we can use RuleFilterContext from utils
+    const context: utilsModule.RuleFilterContext = {
+      userPrompt: 'test',
+      contextFilePaths: ['src/test.ts'],
+    };
+    expect(context.userPrompt).toBe('test');
+  });
+
+  it('should re-export Message and MessagePart types via utils facade', () => {
+    // Type-level test - verify we can use Message/MessagePart from utils
+    const msg: utilsModule.Message = {
+      role: 'user',
+      parts: [{ type: 'text', text: 'hello' }],
+    };
+    expect(msg.role).toBe('user');
   });
 });
 
