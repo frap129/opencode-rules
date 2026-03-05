@@ -14,12 +14,7 @@ import {
   type MessageWithInfo,
 } from './message-context.js';
 import { extractConnectedMcpCapabilityIDs } from './mcp-tools.js';
-import {
-  createDebugLog,
-  createWarnLog,
-  type DebugLog,
-  type WarnLog,
-} from './debug.js';
+import { createDebugLog, type DebugLog } from './debug.js';
 import type { SessionStore } from './session-store.js';
 import { detectProjectTags } from './project-fingerprint.js';
 import { getGitBranch } from './git-branch.js';
@@ -43,7 +38,6 @@ interface OpenCodeRulesRuntimeOptions {
   ruleFiles: DiscoveredRule[];
   sessionStore: SessionStore;
   debugLog?: DebugLog;
-  warnLog?: WarnLog;
   now?: () => number;
 }
 
@@ -54,7 +48,6 @@ export class OpenCodeRulesRuntime {
   private ruleFiles: DiscoveredRule[];
   private sessionStore: SessionStore;
   private debugLog: DebugLog;
-  private warnLog: WarnLog;
   private now: () => number;
 
   constructor(opts: OpenCodeRulesRuntimeOptions) {
@@ -64,7 +57,6 @@ export class OpenCodeRulesRuntime {
     this.ruleFiles = opts.ruleFiles;
     this.sessionStore = opts.sessionStore;
     this.debugLog = opts.debugLog ?? createDebugLog();
-    this.warnLog = opts.warnLog ?? createWarnLog();
     this.now = opts.now ?? (() => Date.now());
   }
 
@@ -395,7 +387,9 @@ export class OpenCodeRulesRuntime {
         toolResult.reason instanceof Error
           ? toolResult.reason.message
           : String(toolResult.reason);
-      this.warnLog(`Failed to query tool IDs: ${message}`);
+      console.warn(
+        `[opencode-rules] Warning: Failed to query tool IDs: ${message}`
+      );
     }
 
     if (mcpResult.status === 'fulfilled' && mcpResult.value?.data) {
@@ -411,7 +405,9 @@ export class OpenCodeRulesRuntime {
         mcpResult.reason instanceof Error
           ? mcpResult.reason.message
           : String(mcpResult.reason);
-      this.warnLog(`Failed to query MCP status: ${message}`);
+      console.warn(
+        `[opencode-rules] Warning: Failed to query MCP status: ${message}`
+      );
     }
 
     return Array.from(ids);
