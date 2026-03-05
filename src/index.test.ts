@@ -1029,6 +1029,107 @@ rule`;
     expect(metadata?.model).toEqual(['gpt-5']);
   });
 
+  describe('extractStringArray helper parity', () => {
+    it('should trim whitespace from array values', () => {
+      const content = `---
+globs:
+  - "  src/**/*.ts  "
+  - "  lib/*.js  "
+keywords:
+  - "  testing  "
+---
+rule`;
+
+      const metadata = parseRuleMetadata(content);
+      expect(metadata?.globs).toEqual(['src/**/*.ts', 'lib/*.js']);
+      expect(metadata?.keywords).toEqual(['testing']);
+    });
+
+    it('should filter empty strings from array values', () => {
+      const content = `---
+globs:
+  - "src/**/*.ts"
+  - ""
+  - "lib/*.js"
+keywords:
+  - ""
+  - "testing"
+  - "   "
+---
+rule`;
+
+      const metadata = parseRuleMetadata(content);
+      expect(metadata?.globs).toEqual(['src/**/*.ts', 'lib/*.js']);
+      expect(metadata?.keywords).toEqual(['testing']);
+    });
+
+    it('should filter non-string values from arrays', () => {
+      const content = `---
+tools:
+  - "mcp_bash"
+  - 123
+  - true
+  - "mcp_read"
+model:
+  - null
+  - "claude-opus"
+---
+rule`;
+
+      const metadata = parseRuleMetadata(content);
+      expect(metadata?.tools).toEqual(['mcp_bash', 'mcp_read']);
+      expect(metadata?.model).toEqual(['claude-opus']);
+    });
+
+    it('should return undefined when all array values are empty after trim/filter', () => {
+      const content = `---
+globs:
+  - ""
+  - "   "
+---
+rule`;
+
+      const metadata = parseRuleMetadata(content);
+      expect(metadata?.globs).toBeUndefined();
+    });
+
+    it('should process all array fields consistently', () => {
+      // Verify all array fields are parsed with identical trim/filter logic
+      const content = `---
+globs:
+  - "  *.ts  "
+keywords:
+  - "  test  "
+tools:
+  - "  mcp_bash  "
+model:
+  - "  gpt-5  "
+agent:
+  - "  coder  "
+command:
+  - "  /plan  "
+project:
+  - "  node  "
+branch:
+  - "  main  "
+os:
+  - "  linux  "
+---
+rule`;
+
+      const metadata = parseRuleMetadata(content);
+      expect(metadata?.globs).toEqual(['*.ts']);
+      expect(metadata?.keywords).toEqual(['test']);
+      expect(metadata?.tools).toEqual(['mcp_bash']);
+      expect(metadata?.model).toEqual(['gpt-5']);
+      expect(metadata?.agent).toEqual(['coder']);
+      expect(metadata?.command).toEqual(['/plan']);
+      expect(metadata?.project).toEqual(['node']);
+      expect(metadata?.branch).toEqual(['main']);
+      expect(metadata?.os).toEqual(['linux']);
+    });
+  });
+
   it('should handle all new filters combined', () => {
     const content = `---
 globs:

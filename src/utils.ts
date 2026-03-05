@@ -169,6 +169,36 @@ interface ParsedFrontmatter {
   match?: unknown;
 }
 
+/** Field names in ParsedFrontmatter that are string arrays */
+type StringArrayField =
+  | 'globs'
+  | 'keywords'
+  | 'tools'
+  | 'model'
+  | 'agent'
+  | 'command'
+  | 'project'
+  | 'branch'
+  | 'os';
+
+/**
+ * Extract and normalize a string array from parsed frontmatter.
+ * Filters non-strings, trims whitespace, and removes empty values.
+ *
+ * @param value - Raw value from parsed YAML (may be array or undefined)
+ * @returns Normalized string array, or undefined if empty after filtering
+ */
+function extractStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const result = value
+    .filter((v): v is string => typeof v === 'string')
+    .map(v => v.trim())
+    .filter(v => v.length > 0);
+  return result.length > 0 ? result : undefined;
+}
+
 /**
  * Parse YAML metadata from rule file content using the yaml package.
  * Extracts frontmatter (---) and returns metadata object.
@@ -200,102 +230,23 @@ export function parseRuleMetadata(content: string): RuleMetadata | undefined {
 
     const metadata: RuleMetadata = {};
 
-    // Extract globs array
-    if (Array.isArray(parsed.globs)) {
-      const globs = parsed.globs
-        .filter((g): g is string => typeof g === 'string')
-        .map(g => g.trim())
-        .filter(g => g.length > 0);
-      if (globs.length > 0) {
-        metadata.globs = globs;
-      }
-    }
+    // Array fields to extract using shared helper
+    const arrayFields: StringArrayField[] = [
+      'globs',
+      'keywords',
+      'tools',
+      'model',
+      'agent',
+      'command',
+      'project',
+      'branch',
+      'os',
+    ];
 
-    // Extract keywords array
-    if (Array.isArray(parsed.keywords)) {
-      const keywords = parsed.keywords
-        .filter((k): k is string => typeof k === 'string')
-        .map(k => k.trim())
-        .filter(k => k.length > 0);
-      if (keywords.length > 0) {
-        metadata.keywords = keywords;
-      }
-    }
-
-    // Extract tools array
-    if (Array.isArray(parsed.tools)) {
-      const tools = parsed.tools
-        .filter((t): t is string => typeof t === 'string')
-        .map(t => t.trim())
-        .filter(t => t.length > 0);
-      if (tools.length > 0) {
-        metadata.tools = tools;
-      }
-    }
-
-    // Extract model array
-    if (Array.isArray(parsed.model)) {
-      const model = parsed.model
-        .filter((m): m is string => typeof m === 'string')
-        .map(m => m.trim())
-        .filter(m => m.length > 0);
-      if (model.length > 0) {
-        metadata.model = model;
-      }
-    }
-
-    // Extract agent array
-    if (Array.isArray(parsed.agent)) {
-      const agent = parsed.agent
-        .filter((a): a is string => typeof a === 'string')
-        .map(a => a.trim())
-        .filter(a => a.length > 0);
-      if (agent.length > 0) {
-        metadata.agent = agent;
-      }
-    }
-
-    // Extract command array
-    if (Array.isArray(parsed.command)) {
-      const command = parsed.command
-        .filter((c): c is string => typeof c === 'string')
-        .map(c => c.trim())
-        .filter(c => c.length > 0);
-      if (command.length > 0) {
-        metadata.command = command;
-      }
-    }
-
-    // Extract project array
-    if (Array.isArray(parsed.project)) {
-      const project = parsed.project
-        .filter((p): p is string => typeof p === 'string')
-        .map(p => p.trim())
-        .filter(p => p.length > 0);
-      if (project.length > 0) {
-        metadata.project = project;
-      }
-    }
-
-    // Extract branch array
-    if (Array.isArray(parsed.branch)) {
-      const branch = parsed.branch
-        .filter((b): b is string => typeof b === 'string')
-        .map(b => b.trim())
-        .filter(b => b.length > 0);
-      if (branch.length > 0) {
-        metadata.branch = branch;
-      }
-    }
-
-    // Extract os array
-    if (Array.isArray(parsed.os)) {
-      const osArr = parsed.os
-        .filter((o): o is string => typeof o === 'string')
-        .map(o => o.trim())
-        .filter(o => o.length > 0);
-      if (osArr.length > 0) {
-        metadata.os = osArr;
+    for (const field of arrayFields) {
+      const extracted = extractStringArray(parsed[field]);
+      if (extracted) {
+        metadata[field] = extracted;
       }
     }
 
@@ -527,11 +478,12 @@ export async function readAndFormatRules(
 
       // Legacy: globs
       if (metadata.globs) {
+        const globs = metadata.globs;
         const globsMatch =
           context.contextFilePaths &&
           context.contextFilePaths.length > 0 &&
           context.contextFilePaths.some(contextPath =>
-            fileMatchesGlobs(contextPath, metadata.globs!)
+            fileMatchesGlobs(contextPath, globs)
           );
         declaredChecks.push(Boolean(globsMatch));
       }
@@ -575,26 +527,28 @@ export async function readAndFormatRules(
 
       // New: project
       if (metadata.project) {
+        const projectTags = context.projectTags;
         const projectMatch =
-          context.projectTags &&
-          context.projectTags.length > 0 &&
-          metadata.project.some(tag => context.projectTags!.includes(tag));
+          projectTags &&
+          projectTags.length > 0 &&
+          metadata.project.some(tag => projectTags.includes(tag));
         declaredChecks.push(Boolean(projectMatch));
       }
 
       // New: branch (supports glob patterns)
       if (metadata.branch) {
+        const gitBranch = context.gitBranch;
         const branchMatch =
-          context.gitBranch &&
+          gitBranch &&
           metadata.branch.some(pattern => {
             // Exact match for non-glob patterns
-            if (pattern === context.gitBranch) {
+            if (pattern === gitBranch) {
               return true;
             }
             // Only use glob matching if pattern contains glob characters
             const hasGlobChars = /[*?\[{]/.test(pattern);
             if (hasGlobChars) {
-              return minimatch(context.gitBranch!, pattern);
+              return minimatch(gitBranch, pattern);
             }
             return false;
           });
