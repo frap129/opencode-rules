@@ -35,7 +35,7 @@
   "files": [
     "dist",
     "README.md",
-    "lICENSE"
+    "LICENSE"
   ],
   "exports": {
     ".": {
