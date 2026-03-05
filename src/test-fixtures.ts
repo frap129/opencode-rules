@@ -4,14 +4,14 @@
  */
 import path from 'path';
 import os from 'os';
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'fs';
 import type { DiscoveredRule } from './utils.js';
 
 // ============================================================================
 // Test Directory Management
 // ============================================================================
 
-export interface TestDirs {
+interface TestDirs {
   testDir: string;
   globalRulesDir: string;
   projectRulesDir: string;
@@ -44,7 +44,7 @@ export function getTestDirs(): TestDirs {
 }
 
 // ============================================================================
-// Rule Conversion Helpers
+// Environment Snapshot Helpers
 // ============================================================================
 
 /**
@@ -61,7 +61,7 @@ export function toRules(paths: string[]): DiscoveredRule[] {
 // CI Environment Helpers
 // ============================================================================
 
-export const CI_ENV_VARS = [
+const CI_ENV_VARS = [
   'CI',
   'CONTINUOUS_INTEGRATION',
   'BUILD_NUMBER',
@@ -101,10 +101,10 @@ export function restoreCiEnvVars(saved: CiEnvSnapshot): void {
 }
 
 // ============================================================================
-// Mock Object Builders
+// Environment Snapshot Helpers
 // ============================================================================
 
-export interface MockPluginInput {
+interface MockPluginInput {
   testDir: string;
   toolIds?: string[];
   mcpStatus?: Record<string, { status: string }>;
@@ -149,120 +149,6 @@ export function createMockPluginInput(opts: MockPluginInput): {
     $: {},
     serverUrl: new URL('http://localhost:3000'),
   };
-}
-
-// ============================================================================
-// Message Part Builders
-// ============================================================================
-
-export interface TextPart {
-  type: 'text';
-  text: string;
-  sessionID?: string;
-  synthetic?: boolean;
-}
-
-export interface ToolInvocationPart {
-  type: 'tool-invocation';
-  toolInvocation: {
-    toolName: string;
-    args: Record<string, unknown>;
-  };
-  sessionID?: string;
-}
-
-export type MessagePart = TextPart | ToolInvocationPart;
-
-export interface MockMessage {
-  role: 'user' | 'assistant';
-  parts: MessagePart[];
-}
-
-/**
- * Creates a text message part with optional sessionID.
- */
-export function textPart(text: string, sessionID?: string): TextPart {
-  const part: TextPart = { type: 'text', text };
-  if (sessionID) part.sessionID = sessionID;
-  return part;
-}
-
-/**
- * Creates a tool invocation part for read operations.
- */
-export function readToolPart(
-  filePath: string,
-  sessionID?: string
-): ToolInvocationPart {
-  const part: ToolInvocationPart = {
-    type: 'tool-invocation',
-    toolInvocation: { toolName: 'read', args: { filePath } },
-  };
-  if (sessionID) part.sessionID = sessionID;
-  return part;
-}
-
-/**
- * Creates a tool invocation part for glob operations.
- */
-export function globToolPart(
-  pattern: string,
-  sessionID?: string
-): ToolInvocationPart {
-  const part: ToolInvocationPart = {
-    type: 'tool-invocation',
-    toolInvocation: { toolName: 'glob', args: { pattern } },
-  };
-  if (sessionID) part.sessionID = sessionID;
-  return part;
-}
-
-/**
- * Creates a mock message with the given role and parts.
- */
-export function mockMessage(
-  role: 'user' | 'assistant',
-  parts: MessagePart[]
-): MockMessage {
-  return { role, parts };
-}
-
-// ============================================================================
-// Rule File Helpers
-// ============================================================================
-
-/**
- * Writes a rule file with optional YAML frontmatter.
- */
-export function writeRuleFile(
-  dir: string,
-  filename: string,
-  content: string,
-  metadata?: Record<string, unknown>
-): string {
-  const filePath = path.join(dir, filename);
-  let fileContent = content;
-
-  if (metadata && Object.keys(metadata).length > 0) {
-    const yamlLines = ['---'];
-    for (const [key, value] of Object.entries(metadata)) {
-      if (Array.isArray(value)) {
-        yamlLines.push(`${key}:`);
-        for (const item of value) {
-          yamlLines.push(`  - "${item}"`);
-        }
-      } else if (typeof value === 'boolean') {
-        yamlLines.push(`${key}: ${value}`);
-      } else {
-        yamlLines.push(`${key}: ${value}`);
-      }
-    }
-    yamlLines.push('---', '', content);
-    fileContent = yamlLines.join('\n');
-  }
-
-  writeFileSync(filePath, fileContent);
-  return filePath;
 }
 
 // ============================================================================
