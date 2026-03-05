@@ -3253,6 +3253,843 @@ Follow testing best practices.`
     });
   });
 
+  describe('runtime filter context integration', () => {
+    it('should include model-conditional rule when session has matching modelID', async () => {
+      // Arrange
+      writeFileSync(
+        path.join(globalRulesDir, 'model-rule.mdc'),
+        `---
+model:
+  - claude-opus
+---
+
+Model-specific guidelines.`
+      );
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+      try {
+        const { default: plugin } = await import('./index.js');
+        const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
+        const hooks = await plugin({
+          client: mockClient as any,
+          project: {} as any,
+          directory: testDir,
+          worktree: testDir,
+          $: {} as any,
+          serverUrl: new URL('http://localhost'),
+        });
+
+        // Set model via chat.message hook
+        const chatMessage = hooks['chat.message'] as any;
+        await chatMessage(
+          { sessionID: 'ses_model_test', model: { modelID: 'claude-opus' } },
+          {
+            message: { role: 'user' },
+            parts: [{ type: 'text', text: 'hello' }],
+          }
+        );
+
+        // Act
+        const systemTransform = hooks[
+          'experimental.chat.system.transform'
+        ] as any;
+        const result = await systemTransform(
+          { sessionID: 'ses_model_test' },
+          { system: 'Base prompt.' }
+        );
+
+        // Assert - model-conditional rule should be included
+        expect(result.system).toContain('Model-specific guidelines');
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+      }
+    });
+
+    it('should include agent-conditional rule when session has matching agentType', async () => {
+      // Arrange
+      writeFileSync(
+        path.join(globalRulesDir, 'agent-rule.mdc'),
+        `---
+agent:
+  - programmer
+---
+
+Agent-specific guidelines.`
+      );
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+      try {
+        const { default: plugin } = await import('./index.js');
+        const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
+        const hooks = await plugin({
+          client: mockClient as any,
+          project: {} as any,
+          directory: testDir,
+          worktree: testDir,
+          $: {} as any,
+          serverUrl: new URL('http://localhost'),
+        });
+
+        // Set agent via chat.message hook
+        const chatMessage = hooks['chat.message'] as any;
+        await chatMessage(
+          { sessionID: 'ses_agent_test', agent: 'programmer' },
+          {
+            message: { role: 'user' },
+            parts: [{ type: 'text', text: 'hello' }],
+          }
+        );
+
+        // Act
+        const systemTransform = hooks[
+          'experimental.chat.system.transform'
+        ] as any;
+        const result = await systemTransform(
+          { sessionID: 'ses_agent_test' },
+          { system: 'Base prompt.' }
+        );
+
+        // Assert - agent-conditional rule should be included
+        expect(result.system).toContain('Agent-specific guidelines');
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+      }
+    });
+
+    it('should include command-conditional rule when user prompt starts with matching slash command', async () => {
+      // Arrange
+      writeFileSync(
+        path.join(globalRulesDir, 'plan-rule.mdc'),
+        `---
+command:
+  - /plan
+---
+
+Planning guidelines.`
+      );
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+      try {
+        const { default: plugin } = await import('./index.js');
+        const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
+        const hooks = await plugin({
+          client: mockClient as any,
+          project: {} as any,
+          directory: testDir,
+          worktree: testDir,
+          $: {} as any,
+          serverUrl: new URL('http://localhost'),
+        });
+
+        // Set user prompt with slash command via chat.message hook
+        const chatMessage = hooks['chat.message'] as any;
+        await chatMessage(
+          { sessionID: 'ses_cmd_test' },
+          {
+            message: { role: 'user' },
+            parts: [{ type: 'text', text: '/plan implement a new feature' }],
+          }
+        );
+
+        // Act
+        const systemTransform = hooks[
+          'experimental.chat.system.transform'
+        ] as any;
+        const result = await systemTransform(
+          { sessionID: 'ses_cmd_test' },
+          { system: 'Base prompt.' }
+        );
+
+        // Assert - command-conditional rule should be included
+        expect(result.system).toContain('Planning guidelines');
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+      }
+    });
+
+    it('should include os-conditional rule when current platform matches', async () => {
+      // Arrange - use current platform for test
+      const currentPlatform = process.platform;
+      writeFileSync(
+        path.join(globalRulesDir, 'os-rule.mdc'),
+        `---
+os:
+  - ${currentPlatform}
+---
+
+Platform-specific guidelines.`
+      );
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+      try {
+        const { default: plugin } = await import('./index.js');
+        const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
+        const hooks = await plugin({
+          client: mockClient as any,
+          project: {} as any,
+          directory: testDir,
+          worktree: testDir,
+          $: {} as any,
+          serverUrl: new URL('http://localhost'),
+        });
+
+        // Act
+        const systemTransform = hooks[
+          'experimental.chat.system.transform'
+        ] as any;
+        const result = await systemTransform({}, { system: 'Base prompt.' });
+
+        // Assert - os-conditional rule should be included
+        expect(result.system).toContain('Platform-specific guidelines');
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+      }
+    });
+
+    // CI env vars that must be isolated for hermetic CI detection tests
+    const CI_ENV_VARS = [
+      'CI',
+      'CONTINUOUS_INTEGRATION',
+      'BUILD_NUMBER',
+      'GITHUB_ACTIONS',
+      'GITLAB_CI',
+      'CIRCLECI',
+      'TRAVIS',
+      'JENKINS_URL',
+      'BUILDKITE',
+      'TEAMCITY_VERSION',
+    ] as const;
+
+    function saveCiEnvVars(): Record<string, string | undefined> {
+      const saved: Record<string, string | undefined> = {};
+      for (const key of CI_ENV_VARS) {
+        saved[key] = process.env[key];
+      }
+      return saved;
+    }
+
+    function clearCiEnvVars(): void {
+      for (const key of CI_ENV_VARS) {
+        delete process.env[key];
+      }
+    }
+
+    function restoreCiEnvVars(saved: Record<string, string | undefined>): void {
+      for (const key of CI_ENV_VARS) {
+        if (saved[key] === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = saved[key];
+        }
+      }
+    }
+
+    it('should include ci-conditional rule when CI env var is set', async () => {
+      // Arrange
+      writeFileSync(
+        path.join(globalRulesDir, 'ci-rule.mdc'),
+        `---
+ci: true
+---
+
+CI-specific guidelines.`
+      );
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      const savedCiEnv = saveCiEnvVars();
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+      clearCiEnvVars();
+      process.env.CI = 'true';
+
+      try {
+        const { default: plugin } = await import('./index.js');
+        const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
+        const hooks = await plugin({
+          client: mockClient as any,
+          project: {} as any,
+          directory: testDir,
+          worktree: testDir,
+          $: {} as any,
+          serverUrl: new URL('http://localhost'),
+        });
+
+        // Act
+        const systemTransform = hooks[
+          'experimental.chat.system.transform'
+        ] as any;
+        const result = await systemTransform({}, { system: 'Base prompt.' });
+
+        // Assert - ci-conditional rule should be included
+        expect(result.system).toContain('CI-specific guidelines');
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+        restoreCiEnvVars(savedCiEnv);
+      }
+    });
+
+    it('should NOT include ci:true rule when CI env var is "false"', async () => {
+      // Arrange - regression test for CI='false' being incorrectly treated as truthy
+      writeFileSync(
+        path.join(globalRulesDir, 'ci-only-rule.mdc'),
+        `---
+ci: true
+---
+
+CI-only guidelines.`
+      );
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      const savedCiEnv = saveCiEnvVars();
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+      clearCiEnvVars();
+      process.env.CI = 'false';
+
+      try {
+        const { default: plugin } = await import('./index.js');
+        const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
+        const hooks = await plugin({
+          client: mockClient as any,
+          project: {} as any,
+          directory: testDir,
+          worktree: testDir,
+          $: {} as any,
+          serverUrl: new URL('http://localhost'),
+        });
+
+        // Act
+        const systemTransform = hooks[
+          'experimental.chat.system.transform'
+        ] as any;
+        const result = await systemTransform({}, { system: 'Base prompt.' });
+
+        // Assert - ci:true rule should NOT be included when CI='false'
+        expect(result.system).not.toContain('CI-only guidelines');
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+        restoreCiEnvVars(savedCiEnv);
+      }
+    });
+
+    it('should NOT include ci:true rule when CI env var is "0"', async () => {
+      // Arrange - regression test for CI='0' being incorrectly treated as truthy
+      writeFileSync(
+        path.join(globalRulesDir, 'ci-zero-rule.mdc'),
+        `---
+ci: true
+---
+
+CI-zero guidelines.`
+      );
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      const savedCiEnv = saveCiEnvVars();
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+      clearCiEnvVars();
+      process.env.CI = '0';
+
+      try {
+        const { default: plugin } = await import('./index.js');
+        const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
+        const hooks = await plugin({
+          client: mockClient as any,
+          project: {} as any,
+          directory: testDir,
+          worktree: testDir,
+          $: {} as any,
+          serverUrl: new URL('http://localhost'),
+        });
+
+        // Act
+        const systemTransform = hooks[
+          'experimental.chat.system.transform'
+        ] as any;
+        const result = await systemTransform({}, { system: 'Base prompt.' });
+
+        // Assert - ci:true rule should NOT be included when CI='0'
+        expect(result.system).not.toContain('CI-zero guidelines');
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+        restoreCiEnvVars(savedCiEnv);
+      }
+    });
+
+    it('should include ci:true rule when CI env var is "1"', async () => {
+      // Arrange - verify truthy values still work
+      writeFileSync(
+        path.join(globalRulesDir, 'ci-one-rule.mdc'),
+        `---
+ci: true
+---
+
+CI-one guidelines.`
+      );
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      const savedCiEnv = saveCiEnvVars();
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+      clearCiEnvVars();
+      process.env.CI = '1';
+
+      try {
+        const { default: plugin } = await import('./index.js');
+        const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
+        const hooks = await plugin({
+          client: mockClient as any,
+          project: {} as any,
+          directory: testDir,
+          worktree: testDir,
+          $: {} as any,
+          serverUrl: new URL('http://localhost'),
+        });
+
+        // Act
+        const systemTransform = hooks[
+          'experimental.chat.system.transform'
+        ] as any;
+        const result = await systemTransform({}, { system: 'Base prompt.' });
+
+        // Assert - ci:true rule SHOULD be included when CI='1'
+        expect(result.system).toContain('CI-one guidelines');
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+        restoreCiEnvVars(savedCiEnv);
+      }
+    });
+
+    it('should NOT include ci:true rule when CI="false" even with GITHUB_ACTIONS set', async () => {
+      // Arrange - regression: CI='false' is authoritative, ignoring provider vars
+      writeFileSync(
+        path.join(globalRulesDir, 'ci-auth-rule.mdc'),
+        `---
+ci: true
+---
+
+CI-authoritative guidelines.`
+      );
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      const savedCiEnv = saveCiEnvVars();
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+      clearCiEnvVars();
+      process.env.CI = 'false';
+      process.env.GITHUB_ACTIONS = 'true';
+
+      try {
+        const { default: plugin } = await import('./index.js');
+        const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
+        const hooks = await plugin({
+          client: mockClient as any,
+          project: {} as any,
+          directory: testDir,
+          worktree: testDir,
+          $: {} as any,
+          serverUrl: new URL('http://localhost'),
+        });
+
+        // Act
+        const systemTransform = hooks[
+          'experimental.chat.system.transform'
+        ] as any;
+        const result = await systemTransform({}, { system: 'Base prompt.' });
+
+        // Assert - CI='false' is authoritative; GITHUB_ACTIONS should be ignored
+        expect(result.system).not.toContain('CI-authoritative guidelines');
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+        restoreCiEnvVars(savedCiEnv);
+      }
+    });
+
+    it('should detect CI from provider vars when CI env var is not set', async () => {
+      // Arrange - CI not set, but GITHUB_ACTIONS is set => detect as CI
+      writeFileSync(
+        path.join(globalRulesDir, 'ci-fallback-rule.mdc'),
+        `---
+ci: true
+---
+
+CI-fallback guidelines.`
+      );
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      const savedCiEnv = saveCiEnvVars();
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+      clearCiEnvVars();
+      // CI is NOT set (undefined), but GITHUB_ACTIONS is set
+      process.env.GITHUB_ACTIONS = 'true';
+
+      try {
+        const { default: plugin } = await import('./index.js');
+        const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
+        const hooks = await plugin({
+          client: mockClient as any,
+          project: {} as any,
+          directory: testDir,
+          worktree: testDir,
+          $: {} as any,
+          serverUrl: new URL('http://localhost'),
+        });
+
+        // Act
+        const systemTransform = hooks[
+          'experimental.chat.system.transform'
+        ] as any;
+        const result = await systemTransform({}, { system: 'Base prompt.' });
+
+        // Assert - should detect CI from GITHUB_ACTIONS fallback
+        expect(result.system).toContain('CI-fallback guidelines');
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+        restoreCiEnvVars(savedCiEnv);
+      }
+    });
+
+    it('should not throw when project tags detection fails', async () => {
+      // Arrange - use a project directory that doesn't exist
+      writeFileSync(
+        path.join(globalRulesDir, 'unconditional.md'),
+        'Always apply this rule.'
+      );
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+      try {
+        const { default: plugin } = await import('./index.js');
+        const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
+        const hooks = await plugin({
+          client: mockClient as any,
+          project: {} as any,
+          directory: path.join(testDir, 'nonexistent-project'),
+          worktree: testDir,
+          $: {} as any,
+          serverUrl: new URL('http://localhost'),
+        });
+
+        // Act - should not throw
+        const systemTransform = hooks[
+          'experimental.chat.system.transform'
+        ] as any;
+        const result = await systemTransform({}, { system: 'Base prompt.' });
+
+        // Assert - unconditional rule still included
+        expect(result.system).toContain('Always apply this rule');
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+      }
+    });
+
+    it('should not throw when git branch detection fails', async () => {
+      // Arrange - use a directory that is not a git repo
+      writeFileSync(
+        path.join(globalRulesDir, 'unconditional.md'),
+        'Always apply this rule.'
+      );
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+      try {
+        const nonGitDir = path.join(testDir, 'not-a-git-repo');
+        mkdirSync(nonGitDir, { recursive: true });
+
+        const { default: plugin } = await import('./index.js');
+        const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
+        const hooks = await plugin({
+          client: mockClient as any,
+          project: {} as any,
+          directory: nonGitDir,
+          worktree: nonGitDir,
+          $: {} as any,
+          serverUrl: new URL('http://localhost'),
+        });
+
+        // Act - should not throw
+        const systemTransform = hooks[
+          'experimental.chat.system.transform'
+        ] as any;
+        const result = await systemTransform({}, { system: 'Base prompt.' });
+
+        // Assert - unconditional rule still included
+        expect(result.system).toContain('Always apply this rule');
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+      }
+    });
+
+    it('should combine model, agent, and command filters with match: all', async () => {
+      // Arrange
+      writeFileSync(
+        path.join(globalRulesDir, 'all-match.mdc'),
+        `---
+model:
+  - claude-opus
+agent:
+  - programmer
+command:
+  - /plan
+match: all
+---
+
+All dimensions must match.`
+      );
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+      try {
+        const { default: plugin } = await import('./index.js');
+        const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
+        const hooks = await plugin({
+          client: mockClient as any,
+          project: {} as any,
+          directory: testDir,
+          worktree: testDir,
+          $: {} as any,
+          serverUrl: new URL('http://localhost'),
+        });
+
+        // Set model, agent, and command
+        const chatMessage = hooks['chat.message'] as any;
+        await chatMessage(
+          {
+            sessionID: 'ses_all',
+            model: { modelID: 'claude-opus' },
+            agent: 'programmer',
+          },
+          {
+            message: { role: 'user' },
+            parts: [{ type: 'text', text: '/plan implement something' }],
+          }
+        );
+
+        // Act
+        const systemTransform = hooks[
+          'experimental.chat.system.transform'
+        ] as any;
+        const result = await systemTransform(
+          { sessionID: 'ses_all' },
+          { system: 'Base prompt.' }
+        );
+
+        // Assert - all-match rule should be included when all dimensions match
+        expect(result.system).toContain('All dimensions must match');
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+      }
+    });
+
+    it('should exclude match: all rule when one dimension is missing', async () => {
+      // Arrange
+      writeFileSync(
+        path.join(globalRulesDir, 'all-match-fail.mdc'),
+        `---
+model:
+  - claude-opus
+agent:
+  - programmer
+command:
+  - /plan
+match: all
+---
+
+All dimensions must match.`
+      );
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+      try {
+        const { default: plugin } = await import('./index.js');
+        const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
+        const hooks = await plugin({
+          client: mockClient as any,
+          project: {} as any,
+          directory: testDir,
+          worktree: testDir,
+          $: {} as any,
+          serverUrl: new URL('http://localhost'),
+        });
+
+        // Set model and agent, but user prompt is not a slash command
+        const chatMessage = hooks['chat.message'] as any;
+        await chatMessage(
+          {
+            sessionID: 'ses_fail',
+            model: { modelID: 'claude-opus' },
+            agent: 'programmer',
+          },
+          {
+            message: { role: 'user' },
+            parts: [{ type: 'text', text: 'just a regular prompt' }],
+          }
+        );
+
+        // Act
+        const systemTransform = hooks[
+          'experimental.chat.system.transform'
+        ] as any;
+        const result = await systemTransform(
+          { sessionID: 'ses_fail' },
+          { system: 'Base prompt.' }
+        );
+
+        // Assert - rule should NOT be included because command dimension doesn't match
+        expect(result.system).not.toContain('All dimensions must match');
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+      }
+    });
+
+    it('should include project-conditional rule when project has matching tags', async () => {
+      // Arrange - create a node project with package.json
+      const projectDir = path.join(testDir, 'node-project');
+      mkdirSync(projectDir, { recursive: true });
+      writeFileSync(path.join(projectDir, 'package.json'), '{}');
+
+      writeFileSync(
+        path.join(globalRulesDir, 'node-rule.mdc'),
+        `---
+project:
+  - node
+---
+
+Node.js project guidelines.`
+      );
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+      try {
+        const { default: plugin } = await import('./index.js');
+        const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
+        const hooks = await plugin({
+          client: mockClient as any,
+          project: {} as any,
+          directory: projectDir,
+          worktree: projectDir,
+          $: {} as any,
+          serverUrl: new URL('http://localhost'),
+        });
+
+        // Act
+        const systemTransform = hooks[
+          'experimental.chat.system.transform'
+        ] as any;
+        const result = await systemTransform({}, { system: 'Base prompt.' });
+
+        // Assert - project-conditional rule should be included
+        expect(result.system).toContain('Node.js project guidelines');
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+      }
+    });
+
+    it('should include branch-conditional rule when getGitBranch returns matching branch', async () => {
+      // Arrange - create rule with branch glob pattern
+      writeFileSync(
+        path.join(globalRulesDir, 'feature-branch-rule.mdc'),
+        `---
+branch:
+  - feature/*
+---
+
+Feature branch guidelines.`
+      );
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+      // Mock getGitBranch to return a matching branch
+      const gitBranchModule = await import('./git-branch.js');
+      const getGitBranchSpy = vi
+        .spyOn(gitBranchModule, 'getGitBranch')
+        .mockResolvedValue('feature/add-login');
+
+      try {
+        const { default: plugin } = await import('./index.js');
+        const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
+        const hooks = await plugin({
+          client: mockClient as any,
+          project: {} as any,
+          directory: testDir,
+          worktree: testDir,
+          $: {} as any,
+          serverUrl: new URL('http://localhost'),
+        });
+
+        // Act
+        const systemTransform = hooks[
+          'experimental.chat.system.transform'
+        ] as any;
+        const result = await systemTransform({}, { system: 'Base prompt.' });
+
+        // Assert - branch-conditional rule should be included
+        expect(result.system).toContain('Feature branch guidelines');
+        expect(getGitBranchSpy).toHaveBeenCalled();
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+        getGitBranchSpy.mockRestore();
+      }
+    });
+
+    it('should exclude branch-conditional rule when getGitBranch returns non-matching branch', async () => {
+      // Arrange - create rule with branch glob pattern
+      writeFileSync(
+        path.join(globalRulesDir, 'feature-only-rule.mdc'),
+        `---
+branch:
+  - feature/*
+---
+
+Feature-only guidelines.`
+      );
+
+      const originalEnv = process.env.XDG_CONFIG_HOME;
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+      // Mock getGitBranch to return a non-matching branch
+      const gitBranchModule = await import('./git-branch.js');
+      const getGitBranchSpy = vi
+        .spyOn(gitBranchModule, 'getGitBranch')
+        .mockResolvedValue('main');
+
+      try {
+        const { default: plugin } = await import('./index.js');
+        const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
+        const hooks = await plugin({
+          client: mockClient as any,
+          project: {} as any,
+          directory: testDir,
+          worktree: testDir,
+          $: {} as any,
+          serverUrl: new URL('http://localhost'),
+        });
+
+        // Act
+        const systemTransform = hooks[
+          'experimental.chat.system.transform'
+        ] as any;
+        const result = await systemTransform({}, { system: 'Base prompt.' });
+
+        // Assert - branch-conditional rule should NOT be included
+        expect(result.system).not.toContain('Feature-only guidelines');
+        expect(getGitBranchSpy).toHaveBeenCalled();
+      } finally {
+        process.env.XDG_CONFIG_HOME = originalEnv;
+        getGitBranchSpy.mockRestore();
+      }
+    });
+  });
+
   describe('YAML Parsing Edge Cases', () => {
     beforeEach(() => {
       setupTestDirs();
@@ -3319,6 +4156,59 @@ Rule content`;
       // Only string elements should be included
       expect(metadata?.globs).toEqual(['**/*.ts']);
       expect(metadata?.keywords).toEqual(['test']);
+    });
+
+    it('should parse new filter arrays with inline YAML syntax', () => {
+      const content = `---
+model: ["gpt-5", "claude-opus"]
+agent: ["programmer"]
+command: ["/plan", "/review"]
+project: ["node", "python"]
+branch: ["main", "develop"]
+os: ["linux"]
+---
+Rule content`;
+      const metadata = parseRuleMetadata(content);
+      expect(metadata?.model).toEqual(['gpt-5', 'claude-opus']);
+      expect(metadata?.agent).toEqual(['programmer']);
+      expect(metadata?.command).toEqual(['/plan', '/review']);
+      expect(metadata?.project).toEqual(['node', 'python']);
+      expect(metadata?.branch).toEqual(['main', 'develop']);
+      expect(metadata?.os).toEqual(['linux']);
+    });
+
+    it('should parse ci boolean in complex frontmatter', () => {
+      const content = `---
+globs:
+  - "**/*.ts"
+ci: true
+---
+Rule content`;
+      const metadata = parseRuleMetadata(content);
+      expect(metadata?.ci).toBe(true);
+      expect(metadata?.globs).toEqual(['**/*.ts']);
+    });
+
+    it('should normalize match to any or all only', () => {
+      const validAny = `---
+model: ["gpt-5"]
+match: any
+---
+content`;
+      const validAll = `---
+model: ["gpt-5"]
+match: all
+---
+content`;
+      const invalid = `---
+model: ["gpt-5"]
+match: some
+---
+content`;
+
+      expect(parseRuleMetadata(validAny)?.match).toBe('any');
+      expect(parseRuleMetadata(validAll)?.match).toBe('all');
+      expect(parseRuleMetadata(invalid)?.match).toBeUndefined();
     });
   });
 
@@ -3932,89 +4822,466 @@ describe('Cross-Dimension Regression Coverage', () => {
     setupTestDirs();
   });
 
-    it('should parse ci boolean in complex frontmatter', () => {
-      const content = `---
-globs:
-  - "**/*.ts"
-ci: true
----
-Rule content`;
-      const metadata = parseRuleMetadata(content);
-      expect(metadata?.ci).toBe(true);
-      expect(metadata?.globs).toEqual(['**/*.ts']);
-    });
+  afterEach(() => {
+    teardownTestDirs();
+  });
 
-    it('should normalize match to any or all only', () => {
-      const validAny = `---
-model: ["gpt-5"]
+  describe('omitted match behaves as any', () => {
+    it('should produce identical behavior with omitted match vs explicit match: any', async () => {
+      // Regression: omitted match must be semantically equivalent to match: any
+      const ruleOmitted = path.join(globalRulesDir, 'omitted.mdc');
+      const ruleExplicit = path.join(globalRulesDir, 'explicit.mdc');
+
+      writeFileSync(
+        ruleOmitted,
+        `---
+model:
+  - gpt-5
+agent:
+  - programmer
+os:
+  - linux
+---
+
+Rule with omitted match.`
+      );
+
+      writeFileSync(
+        ruleExplicit,
+        `---
+model:
+  - gpt-5
+agent:
+  - programmer
+os:
+  - linux
 match: any
 ---
-content`;
-      const validAll = `---
-model: ["gpt-5"]
-match: all
----
-content`;
-      const invalid = `---
-model: ["gpt-5"]
-match: some
----
-content`;
 
-      expect(parseRuleMetadata(validAny)?.match).toBe('any');
-      expect(parseRuleMetadata(validAll)?.match).toBe('all');
-      expect(parseRuleMetadata(invalid)?.match).toBeUndefined();
+Rule with explicit match any.`
+      );
+
+      // Context: model and agent do NOT match, but os DOES match
+      const context = {
+        modelID: 'claude-opus',
+        agentType: 'reviewer',
+        os: 'linux',
+      };
+
+      // Both should be included because one dimension (os) matches
+      const omittedResult = await readAndFormatRules(
+        toRules([ruleOmitted]),
+        context
+      );
+      const explicitResult = await readAndFormatRules(
+        toRules([ruleExplicit]),
+        context
+      );
+
+      expect(omittedResult).toContain('Rule with omitted match');
+      expect(explicitResult).toContain('Rule with explicit match any');
     });
 
-    it('should parse new filter arrays with inline YAML syntax', () => {
-      const content = `---
-model: ["gpt-5", "claude-opus"]
-agent: ["programmer"]
-command: ["/plan", "/review"]
-project: ["node", "python"]
-branch: ["main", "develop"]
-os: ["linux"]
----
-Rule content`;
-      const metadata = parseRuleMetadata(content);
-      expect(metadata?.model).toEqual(['gpt-5', 'claude-opus']);
-      expect(metadata?.agent).toEqual(['programmer']);
-      expect(metadata?.command).toEqual(['/plan', '/review']);
-      expect(metadata?.project).toEqual(['node', 'python']);
-      expect(metadata?.branch).toEqual(['main', 'develop']);
-      expect(metadata?.os).toEqual(['linux']);
-    });
+    it('should exclude rule with omitted match when no dimension matches', async () => {
+      // Regression: omitted match still requires at least one dimension to match
+      const rulePath = path.join(globalRulesDir, 'none-match.mdc');
 
-    it('should parse ci boolean in complex frontmatter', () => {
-      const content = `---
+      writeFileSync(
+        rulePath,
+        `---
+model:
+  - gpt-5
+agent:
+  - programmer
+---
+
+Rule that should not match.`
+      );
+
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        modelID: 'claude-opus',
+        agentType: 'reviewer',
+      });
+
+      expect(formatted).toBe('');
+    });
+  });
+
+  describe('mixed legacy + new filters under match: any', () => {
+    it('should include rule when only legacy globs match (model, agent mismatch)', async () => {
+      const rulePath = path.join(globalRulesDir, 'legacy-globs-any.mdc');
+
+      writeFileSync(
+        rulePath,
+        `---
 globs:
   - "**/*.ts"
-ci: true
+keywords:
+  - refactor
+tools:
+  - mcp_websearch
+model:
+  - gpt-5
+agent:
+  - programmer
 ---
-Rule content`;
-      const metadata = parseRuleMetadata(content);
-      expect(metadata?.ci).toBe(true);
-      expect(metadata?.globs).toEqual(['**/*.ts']);
+
+Mixed legacy and new filters rule.`
+      );
+
+      // Only globs match (typescript file), everything else mismatches
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        contextFilePaths: ['src/index.ts'],
+        userPrompt: 'help with debugging', // keywords don't match
+        availableToolIDs: ['mcp_bash'], // tools don't match
+        modelID: 'claude-opus', // model doesn't match
+        agentType: 'reviewer', // agent doesn't match
+      });
+
+      expect(formatted).toContain('Mixed legacy and new filters rule');
     });
 
-    it('should normalize match to any or all only', () => {
-      const validAny = `---
-model: ["gpt-5"]
-match: any
+    it('should include rule when only legacy keywords match (globs, tools, new filters mismatch)', async () => {
+      const rulePath = path.join(globalRulesDir, 'legacy-keywords-any.mdc');
+
+      writeFileSync(
+        rulePath,
+        `---
+globs:
+  - "**/*.py"
+keywords:
+  - testing
+tools:
+  - mcp_lsp
+model:
+  - gpt-5
+os:
+  - windows
 ---
-content`;
-      const validAll = `---
-model: ["gpt-5"]
+
+Keywords only match rule.`
+      );
+
+      // Only keywords match
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        contextFilePaths: ['src/index.ts'], // globs don't match (.py)
+        userPrompt: 'help with testing this function', // keywords match
+        availableToolIDs: ['mcp_bash'], // tools don't match
+        modelID: 'claude-opus', // model doesn't match
+        os: 'linux', // os doesn't match
+      });
+
+      expect(formatted).toContain('Keywords only match rule');
+    });
+
+    it('should include rule when only legacy tools match (globs, keywords, new filters mismatch)', async () => {
+      const rulePath = path.join(globalRulesDir, 'legacy-tools-any.mdc');
+
+      writeFileSync(
+        rulePath,
+        `---
+globs:
+  - "**/*.go"
+keywords:
+  - deploy
+tools:
+  - mcp_websearch
+model:
+  - gpt-5
+branch:
+  - release/*
+---
+
+Tools only match rule.`
+      );
+
+      // Only tools match
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        contextFilePaths: ['src/index.ts'], // globs don't match
+        userPrompt: 'help with coding', // keywords don't match
+        availableToolIDs: ['mcp_websearch', 'mcp_bash'], // tools match
+        modelID: 'claude-opus', // model doesn't match
+        gitBranch: 'main', // branch doesn't match
+      });
+
+      expect(formatted).toContain('Tools only match rule');
+    });
+
+    it('should include rule when only new model filter matches (all legacy mismatch)', async () => {
+      const rulePath = path.join(globalRulesDir, 'new-model-any.mdc');
+
+      writeFileSync(
+        rulePath,
+        `---
+globs:
+  - "**/*.rs"
+keywords:
+  - rust
+tools:
+  - mcp_lsp
+model:
+  - claude-opus
+agent:
+  - unknown-agent
+---
+
+New model filter matches rule.`
+      );
+
+      // Only model matches
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        contextFilePaths: ['src/index.ts'], // globs don't match
+        userPrompt: 'help with typescript', // keywords don't match
+        availableToolIDs: ['mcp_bash'], // tools don't match
+        modelID: 'claude-opus', // model MATCHES
+        agentType: 'programmer', // agent doesn't match
+      });
+
+      expect(formatted).toContain('New model filter matches rule');
+    });
+  });
+
+  describe('mixed legacy + new filters under match: all', () => {
+    it('should include rule when all legacy and new dimensions match', async () => {
+      const rulePath = path.join(globalRulesDir, 'all-match-all.mdc');
+
+      writeFileSync(
+        rulePath,
+        `---
+globs:
+  - "**/*.ts"
+keywords:
+  - refactor
+tools:
+  - mcp_bash
+model:
+  - claude-opus
+agent:
+  - programmer
+os:
+  - linux
 match: all
 ---
-content`;
-      const invalid = `---
-model: ["gpt-5"]
-match: some
----
-content`;
 
-      expect(parseRuleMetadata(validAny)?.match).toBe('any');
-      expect(parseRuleMetadata(validAll)?.match).toBe('all');
-      expect(parseRuleMetadata(invalid)?.match).toBeUndefined();
+All dimensions match rule.`
+      );
+
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        contextFilePaths: ['src/utils.ts'], // globs match
+        userPrompt: 'help me refactor this code', // keywords match
+        availableToolIDs: ['mcp_bash', 'mcp_read'], // tools match
+        modelID: 'claude-opus', // model matches
+        agentType: 'programmer', // agent matches
+        os: 'linux', // os matches
+      });
+
+      expect(formatted).toContain('All dimensions match rule');
     });
+
+    it('should exclude rule when one legacy dimension fails (keywords mismatch)', async () => {
+      const rulePath = path.join(globalRulesDir, 'all-keywords-fail.mdc');
+
+      writeFileSync(
+        rulePath,
+        `---
+globs:
+  - "**/*.ts"
+keywords:
+  - database
+tools:
+  - mcp_bash
+model:
+  - claude-opus
+match: all
+---
+
+Keywords fail rule.`
+      );
+
+      // Keywords do NOT match
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        contextFilePaths: ['src/utils.ts'], // globs match
+        userPrompt: 'help me refactor this code', // keywords DON'T match (no "database")
+        availableToolIDs: ['mcp_bash'], // tools match
+        modelID: 'claude-opus', // model matches
+      });
+
+      expect(formatted).toBe('');
+    });
+
+    it('should exclude rule when one new dimension fails (agent mismatch)', async () => {
+      const rulePath = path.join(globalRulesDir, 'all-agent-fail.mdc');
+
+      writeFileSync(
+        rulePath,
+        `---
+globs:
+  - "**/*.ts"
+keywords:
+  - refactor
+model:
+  - claude-opus
+agent:
+  - reviewer
+match: all
+---
+
+Agent fail rule.`
+      );
+
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        contextFilePaths: ['src/utils.ts'], // globs match
+        userPrompt: 'help me refactor this', // keywords match
+        modelID: 'claude-opus', // model matches
+        agentType: 'programmer', // agent DON'T match (needs reviewer)
+      });
+
+      expect(formatted).toBe('');
+    });
+
+    it('should exclude rule when runtime field is missing (match: all)', async () => {
+      const rulePath = path.join(globalRulesDir, 'all-missing-field.mdc');
+
+      writeFileSync(
+        rulePath,
+        `---
+globs:
+  - "**/*.ts"
+model:
+  - claude-opus
+agent:
+  - programmer
+match: all
+---
+
+Missing field rule.`
+      );
+
+      // agentType not provided => agent dimension is non-match
+      const formatted = await readAndFormatRules(toRules([rulePath]), {
+        contextFilePaths: ['src/utils.ts'], // globs match
+        modelID: 'claude-opus', // model matches
+        // agentType is MISSING
+      });
+
+      expect(formatted).toBe('');
+    });
+  });
+
+  describe('unconditional rules injection', () => {
+    it('should always include unconditional rules alongside conditional rules', async () => {
+      const unconditionalPath = path.join(globalRulesDir, 'always-apply.md');
+      const conditionalPath = path.join(globalRulesDir, 'conditional.mdc');
+
+      writeFileSync(
+        unconditionalPath,
+        '# Always Apply\nThis rule always applies unconditionally.'
+      );
+      writeFileSync(
+        conditionalPath,
+        `---
+model:
+  - gpt-5
+---
+
+Conditional rule for gpt-5 only.`
+      );
+
+      // Conditional rule does NOT match, but unconditional should still be included
+      const formatted = await readAndFormatRules(
+        toRules([unconditionalPath, conditionalPath]),
+        {
+          modelID: 'claude-opus', // doesn't match gpt-5
+        }
+      );
+
+      expect(formatted).toContain('This rule always applies unconditionally');
+      expect(formatted).not.toContain('Conditional rule for gpt-5 only');
+    });
+
+    it('should include unconditional rules even when filter context is empty', async () => {
+      const unconditionalPath = path.join(globalRulesDir, 'no-conditions.md');
+      const conditionalPath = path.join(globalRulesDir, 'needs-match.mdc');
+
+      writeFileSync(
+        unconditionalPath,
+        '# Unconditional\nNo metadata means always apply.'
+      );
+      writeFileSync(
+        conditionalPath,
+        `---
+globs:
+  - "**/*.special"
+keywords:
+  - special
+---
+
+Only for special files.`
+      );
+
+      // Empty context - no filters satisfied
+      const formatted = await readAndFormatRules(
+        toRules([unconditionalPath, conditionalPath]),
+        {}
+      );
+
+      expect(formatted).toContain('No metadata means always apply');
+      expect(formatted).not.toContain('Only for special files');
+    });
+
+    it('should include unconditional rules when called with no context at all', async () => {
+      const unconditionalPath = path.join(globalRulesDir, 'bare.md');
+
+      writeFileSync(
+        unconditionalPath,
+        '# Bare Rule\nShould always be included.'
+      );
+
+      // Call with no context argument at all (legacy signature)
+      const formatted = await readAndFormatRules(toRules([unconditionalPath]));
+
+      expect(formatted).toContain('Should always be included');
+    });
+
+    it('should include multiple unconditional rules when all conditional rules are excluded', async () => {
+      const uncond1 = path.join(globalRulesDir, 'uncond1.md');
+      const uncond2 = path.join(globalRulesDir, 'uncond2.md');
+      const cond1 = path.join(globalRulesDir, 'cond1.mdc');
+      const cond2 = path.join(globalRulesDir, 'cond2.mdc');
+
+      writeFileSync(uncond1, '# First Unconditional\nAlways rule 1.');
+      writeFileSync(uncond2, '# Second Unconditional\nAlways rule 2.');
+      writeFileSync(
+        cond1,
+        `---
+model:
+  - nonexistent-model
+---
+
+Conditional 1.`
+      );
+      writeFileSync(
+        cond2,
+        `---
+os:
+  - nonexistent-os
+---
+
+Conditional 2.`
+      );
+
+      const formatted = await readAndFormatRules(
+        toRules([uncond1, uncond2, cond1, cond2]),
+        {
+          modelID: 'claude-opus',
+          os: 'linux',
+        }
+      );
+
+      expect(formatted).toContain('Always rule 1');
+      expect(formatted).toContain('Always rule 2');
+      expect(formatted).not.toContain('Conditional 1');
+      expect(formatted).not.toContain('Conditional 2');
+    });
+  });
+});

@@ -552,33 +552,114 @@ export async function readAndFormatRules(
       metadata?.ci !== undefined
     );
 
-      // Check globs against context file paths
-      if (metadata.globs && contextFilePaths && contextFilePaths.length > 0) {
-        globsMatch = contextFilePaths.some(contextPath =>
-          fileMatchesGlobs(contextPath, metadata.globs!)
-        );
+    if (hasConditions && metadata) {
+      // Compute per-dimension match booleans (only for declared conditions)
+      const declaredChecks: boolean[] = [];
+
+      // Legacy: globs
+      if (metadata.globs) {
+        const globsMatch =
+          context.contextFilePaths &&
+          context.contextFilePaths.length > 0 &&
+          context.contextFilePaths.some(contextPath =>
+            fileMatchesGlobs(contextPath, metadata.globs!)
+          );
+        declaredChecks.push(Boolean(globsMatch));
       }
 
-      // Check keywords against user prompt
-      if (metadata.keywords && userPrompt) {
-        keywordsMatch = promptMatchesKeywords(userPrompt, metadata.keywords);
+      // Legacy: keywords
+      if (metadata.keywords) {
+        const keywordsMatch =
+          context.userPrompt &&
+          promptMatchesKeywords(context.userPrompt, metadata.keywords);
+        declaredChecks.push(Boolean(keywordsMatch));
       }
 
-      // Check tools against available tool IDs
-      if (metadata.tools && availableToolSet) {
-        toolsMatch = metadata.tools.some(tool => availableToolSet.has(tool));
+      // Legacy: tools
+      if (metadata.tools) {
+        const toolsMatch =
+          availableToolSet &&
+          metadata.tools.some(tool => availableToolSet.has(tool));
+        declaredChecks.push(Boolean(toolsMatch));
       }
 
-      // If rule has conditions but none match, skip it
-      if (!globsMatch && !keywordsMatch && !toolsMatch) {
+      // New: model
+      if (metadata.model) {
+        const modelMatch =
+          context.modelID && metadata.model.includes(context.modelID);
+        declaredChecks.push(Boolean(modelMatch));
+      }
+
+      // New: agent
+      if (metadata.agent) {
+        const agentMatch =
+          context.agentType && metadata.agent.includes(context.agentType);
+        declaredChecks.push(Boolean(agentMatch));
+      }
+
+      // New: command
+      if (metadata.command) {
+        const commandMatch =
+          context.command && metadata.command.includes(context.command);
+        declaredChecks.push(Boolean(commandMatch));
+      }
+
+      // New: project
+      if (metadata.project) {
+        const projectMatch =
+          context.projectTags &&
+          context.projectTags.length > 0 &&
+          metadata.project.some(tag => context.projectTags!.includes(tag));
+        declaredChecks.push(Boolean(projectMatch));
+      }
+
+      // New: branch (supports glob patterns)
+      if (metadata.branch) {
+        const branchMatch =
+          context.gitBranch &&
+          metadata.branch.some(pattern => {
+            // Exact match for non-glob patterns
+            if (pattern === context.gitBranch) {
+              return true;
+            }
+            // Only use glob matching if pattern contains glob characters
+            const hasGlobChars = /[*?\[{]/.test(pattern);
+            if (hasGlobChars) {
+              return minimatch(context.gitBranch!, pattern);
+            }
+            return false;
+          });
+        declaredChecks.push(Boolean(branchMatch));
+      }
+
+      // New: os
+      if (metadata.os) {
+        const osMatch = context.os && metadata.os.includes(context.os);
+        declaredChecks.push(Boolean(osMatch));
+      }
+
+      // New: ci (strict boolean equality)
+      if (metadata.ci !== undefined) {
+        const ciMatch = context.ci === metadata.ci;
+        declaredChecks.push(ciMatch);
+      }
+
+      // Apply combinator: default 'any', or 'all' if specified
+      const mode = metadata.match ?? 'any';
+      const shouldInclude =
+        mode === 'all'
+          ? declaredChecks.every(Boolean)
+          : declaredChecks.some(Boolean);
+
+      if (!shouldInclude) {
         debugLog(
-          `Skipping conditional rule: ${relativePath} (no matching paths, keywords, or tools)`
+          `Skipping conditional rule: ${relativePath} (match: ${mode}, checks: ${declaredChecks.join(', ')})`
         );
         continue;
       }
 
       debugLog(
-        `Including conditional rule: ${relativePath} (globs: ${globsMatch}, keywords: ${keywordsMatch}, tools: ${toolsMatch})`
+        `Including conditional rule: ${relativePath} (match: ${mode}, checks: ${declaredChecks.join(', ')})`
       );
     }
 
