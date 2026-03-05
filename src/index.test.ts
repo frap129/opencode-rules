@@ -5288,8 +5288,8 @@ Conditional 2.`
   });
 });
 
-describe('utils public API surface', () => {
-  it('exports only expected symbols (no fileMatchesGlobs or RuleMetadata)', () => {
+describe('utils runtime exports', () => {
+  it('exports only expected functions at runtime', () => {
     const exportedKeys = Object.keys(utilsModule).sort();
     expect(exportedKeys).toEqual([
       'clearRuleCache',
@@ -5303,8 +5303,8 @@ describe('utils public API surface', () => {
   });
 });
 
-describe('session-store public API surface', () => {
-  it('exports only SessionState, SessionStore, and createSessionStore', () => {
+describe('session-store runtime exports', () => {
+  it('exports only SessionStore and createSessionStore at runtime', () => {
     const exportedKeys = Object.keys(sessionStoreModule).sort();
     expect(exportedKeys).toEqual(['SessionStore', 'createSessionStore']);
   });

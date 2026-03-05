@@ -3,8 +3,8 @@ import { OpenCodeRulesRuntime } from './runtime.js';
 import { SessionStore } from './session-store.js';
 import * as runtimeModule from './runtime.js';
 
-describe('runtime public API surface', () => {
-  it('exports only OpenCodeRulesRuntime class', () => {
+describe('runtime module runtime exports', () => {
+  it('exports only OpenCodeRulesRuntime class at runtime', () => {
     const exportedKeys = Object.keys(runtimeModule).sort();
     expect(exportedKeys).toEqual(['OpenCodeRulesRuntime']);
   });
