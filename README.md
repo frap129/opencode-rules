@@ -87,6 +87,8 @@ Both directories are scanned recursively, allowing you to organize rules into su
 
 ## Usage Examples
 
+For real-world examples, see the [`.opencode/rules/`](.opencode/rules/) directory in this repository.
+
 ### Basic Rule File
 
 Create `~/.config/opencode/rules/naming-convention.md`:
