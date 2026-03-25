@@ -435,9 +435,12 @@ The following highlights the primary runtime modules:
 - **rule-discovery.ts** - Recursively scans directories for `.md`/`.mdc` rule files
 - **rule-metadata.ts** - Parses YAML frontmatter into typed `RuleMetadata`
 - **rule-filter.ts** - Evaluates rules against context (globs, keywords, tools, runtime filters)
-- **message-paths.ts** - Extracts file paths from message content
+- **message-paths.ts** - Extracts file paths from tool invocation arguments and message text
+- **message-context.ts** - Extracts user prompt text, slash commands, and session IDs from message parts
 - **session-store.ts** - Manages per-session state with LRU eviction
 - **project-fingerprint.ts** - Detects project type from marker files (e.g., `package.json`)
+- **mcp-tools.ts** - Maps connected MCP clients to tool IDs for `tools` condition matching
+- **git-branch.ts** - Resolves current git branch for `branch` condition matching
 - **utils.ts** - Thin facade re-exporting from decomposed modules
 
 ### Build and Test
