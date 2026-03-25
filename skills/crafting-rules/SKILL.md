@@ -1,11 +1,34 @@
 ---
 name: crafting-rules
-description: Use when creating or modifying OpenCode rules (.md/.mdc files) that customize agent behavior. Helps extract patterns from conversation history, analyze project conventions (AGENTS.md, linters, package.json), and draft well-formatted rules with appropriate globs/keywords. Trigger when user wants to create a rule, codify repeated instructions, persist guidance across sessions, or customize agent behavior for specific files or topics.
+description: Use when creating or modifying OpenCode rules (.md/.mdc files) that customize agent behavior. Trigger when user wants to create a rule, codify repeated instructions, persist guidance across sessions, or scope rules to specific files, prompts, environments, or workflows.
 ---
 
 # Crafting Rules
 
-Rules are markdown files injected into the system prompt to guide agent behavior.
+## Overview
+
+Rules are markdown files with optional YAML frontmatter, injected into the system prompt to guide agent behavior. Scope them with filters or leave unconditional for global standards.
+
+## Field Reference
+
+| Field      | Type               | Category   | Purpose                                                    |
+| ---------- | ------------------ | ---------- | ---------------------------------------------------------- |
+| `globs`    | `string[]`         | Legacy     | Apply when any file in context matches a pattern           |
+| `keywords` | `string[]`         | Legacy     | Apply when the user's latest prompt matches a keyword      |
+| `tools`    | `string[]`         | Legacy     | Apply when any listed tool ID is available                 |
+| `model`    | `string[]`         | Runtime    | Match against the current LLM model ID                     |
+| `agent`    | `string[]`         | Runtime    | Match against the current agent type (e.g., `programmer`)  |
+| `command`  | `string[]`         | Runtime    | Match against the current slash command (e.g., `/plan`)    |
+| `project`  | `string[]`         | Runtime    | Match against detected project tags (e.g., `node`, `rust`) |
+| `branch`   | `string[]`         | Runtime    | Match against git branch name (supports glob patterns)     |
+| `os`       | `string[]`         | Runtime    | Match against OS (`linux`, `darwin`, `win32`)              |
+| `ci`       | `boolean`          | Runtime    | Match against CI environment (`true` = in CI)              |
+| `match`    | `'any'` \| `'all'` | Combinator | `any` (default): OR logic. `all`: AND logic.               |
+
+- All fields are optional; no frontmatter means the rule always applies.
+- With `match: any` (default), the rule applies if ANY declared condition matches.
+- With `match: all`, the rule applies only if ALL declared conditions match.
+- When a runtime value is unavailable (e.g., no git repo), that dimension is a non-match.
 
 ## Rule Format
 
@@ -15,6 +38,13 @@ globs:
   - '**/*.ts'
 keywords:
   - 'vitest'
+model:
+  - claude-sonnet-4
+agent:
+  - programmer
+branch:
+  - feature/*
+match: any
 ---
 
 # Rule Title
@@ -22,32 +52,37 @@ keywords:
 - Write rules as concrete, actionable instructions.
 ```
 
-## Field Reference
-
-| Field      | Type       | Purpose                                               |
-| ---------- | ---------- | ----------------------------------------------------- |
-| `globs`    | `string[]` | Apply when any file in context matches a pattern      |
-| `keywords` | `string[]` | Apply when the user's latest prompt matches a keyword |
-
-- Both fields are optional; no frontmatter means the rule always applies.
-- If both `globs` and `keywords` are present, matching is OR (either triggers).
-
 ## Matching Strategy
 
 - Use `globs` when the rule is about code in specific files/directories.
 - Use `keywords` when the rule is about a topic that may not include files.
-- Use both when either condition should trigger.
-- Use neither for global standards (tone, structure, safety, commit conventions).
+- Use `tools` when the rule depends on specific MCP tools being available.
+- Use runtime filters (`model`, `agent`, `command`, `project`, `branch`, `os`, `ci`) to scope rules to specific environments or workflows.
+- Use `match: all` when you need every declared condition to be true (AND logic).
+- Use `match: any` (or omit `match`) when any single condition should trigger (OR logic).
+- Use no filters for global standards (tone, structure, safety, commit conventions).
 
 Important constraints:
 
 - Keyword matching is case-insensitive word-boundary _prefix_ matching (e.g., `test` matches `tests` and `testing`).
-- You cannot express `globs AND keywords`; if you need that behavior, split into multiple rules.
+- Branch patterns support globs via minimatch (e.g., `feature/*`, `release/**`).
+- Missing runtime context (e.g., no git repo for `branch`) counts as a non-match for that dimension.
 
-## Storage Location
+## Keyword Selection
 
-- `~/.config/opencode/rules/`: personal preferences you want across projects.
-- `.opencode/rules/`: project/team conventions and repo-specific behavior.
+Keywords use case-insensitive word-boundary prefix matching — short or generic words over-match.
+
+Denylist: generic nouns (`code`, `file`, `project`, `repo`, `bug`, `issue`, `change`), common verbs (`add`, `update`, `remove`, `fix`, `make`, `create`, `implement`), over-broad topics (`testing`, `performance`, `security`, `deployment`, `database`, `api`), single-token abbreviations (`ci`, `cd`, `db`, `ui`, `ux`).
+
+Allowlist: tool/framework names (`vitest`, `jest`, `pytest`, `playwright`, `cypress`, `eslint`, `prettier`, `typescript`, `terraform`, `kubernetes`), compound phrases (`unit test`, `integration test`, `snapshot test`, `lint rule`, `error boundary`, `api endpoint`, `rest api`), high-intent verbs (`refactor`, `rollback`, `migrate`, `deprecate`).
+
+Audit checklist:
+
+- Would this keyword appear in prompts where the rule should NOT apply?
+- Is it likely to appear as part of another word due to prefix matching?
+- Can you scope via globs instead?
+- Prefer globs (file-scoped) over denylisted keywords.
+- Replace generic keywords with compound phrases or tool names that capture intent.
 
 ## Extracting Rules from Patterns
 
@@ -79,35 +114,10 @@ Conversation extraction examples:
 - User: "In unit tests, always use describe/it blocks" -> prefer glob-scoped rule (e.g., `**/*.{test,spec}.*`, `**/__tests__/**`); if prompt-scoped, use allowlisted keywords like `unit test`, `vitest`, `jest` (avoid `test`/`testing`).
 - User repeatedly fixes import ordering -> glob-scoped rule for the relevant languages/files.
 
-## Keyword Selection Guidelines
+## Storage Location
 
-How matching works (important):
-
-- Keywords are matched with case-insensitive word-boundary prefix matching, so short/generic keywords tend to over-match.
-
-Denylist (avoid by default):
-
-- Generic nouns: `code`, `file`, `project`, `repo`, `bug`, `issue`, `change`
-- Common verbs: `add`, `update`, `remove`, `fix`, `make`, `create`, `implement`
-- Over-broad topic nouns: `testing`, `performance`, `security`, `deployment`, `database`, `api`
-- Single-token abbreviations: `ci`, `cd`, `db`, `ui`, `ux`
-
-Allowlist (prefer by default):
-
-- Tool/framework names: `vitest`, `jest`, `pytest`, `playwright`, `cypress`, `eslint`, `prettier`, `typescript`, `terraform`, `kubernetes`
-- Compound phrases: `unit test`, `integration test`, `snapshot test`, `lint rule`, `error boundary`, `api endpoint`, `rest api`
-- High-intent engineering verbs: `refactor`, `rollback`, `migrate`, `deprecate`
-
-If you feel tempted to use a denylisted keyword:
-
-- Prefer globs (file-scoped) instead.
-- Or replace it with a compound phrase / tool name that captures intent.
-
-Keyword audit checklist:
-
-- Would this keyword appear in prompts where the rule should NOT apply?
-- Is it likely to appear as part of another word due to prefix matching?
-- Can you scope via globs instead?
+- `~/.config/opencode/rules/`: personal preferences you want across projects.
+- `.opencode/rules/`: project/team conventions and repo-specific behavior.
 
 ## Writing Guidelines
 
@@ -159,22 +169,31 @@ Unconditional: always-on standards
 - Extract magic numbers to named constants.
 ```
 
-Combined: deployment safety (OR logic)
+Runtime filters with `match: all`: feature branch development
 
 ```md
 ---
-globs:
-  - '**/deploy/**'
-  - '**/*.tf'
-keywords:
-  - 'terraform'
-  - 'kubernetes'
-  - 'production'
-  - 'rollback'
+agent:
+  - programmer
+branch:
+  - feature/*
+os:
+  - linux
+  - darwin
+ci: false
+match: all
 ---
 
-# Deployment
+# Feature Branch Dev
 
-- Never hardcode secrets; use environment variables or a secrets manager.
-- Include rollback steps in any production change plan.
+- Create atomic commits with clear messages.
+- Run tests before pushing.
 ```
+
+## Common Mistakes
+
+- **Using denylisted keywords**: `test` fires on nearly every prompt — use `unit test` or globs instead.
+- **Forgetting `match: all`**: Two filters with default OR means EITHER triggers — add `match: all` for AND logic.
+- **Overloading a single rule**: 6+ dimensions are hard to reason about — split into focused rules.
+- **Duplicating lint/formatter config**: Check Prettier/ESLint before adding a style rule.
+- **Using `ci` as a keyword**: Prefix-matches `circuit`, `citizen` — use `ci: true` boolean filter instead.
