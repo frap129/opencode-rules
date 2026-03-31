@@ -18,6 +18,13 @@ const writeQueues = new Map<string, Promise<void>>();
 // Allows tests to override the state directory
 let stateDirOverride: string | null = null;
 
+// Strict pattern for safe sessionId: alphanumeric, underscore, hyphen only
+const SAFE_SESSION_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
+
+function isValidSessionId(sessionId: string): boolean {
+  return SAFE_SESSION_ID_PATTERN.test(sessionId);
+}
+
 /** @internal Test-only: override the state directory */
 export function _setStateDirForTesting(dir: string | null): void {
   stateDirOverride = dir;
@@ -31,6 +38,9 @@ export function resolveStateDir(): string {
 }
 
 export function getStateFilePath(sessionId: string): string {
+  if (!isValidSessionId(sessionId)) {
+    throw new Error(`Invalid sessionId: ${sessionId}`);
+  }
   return path.join(resolveStateDir(), `${sessionId}.json`);
 }
 
@@ -38,6 +48,11 @@ export function writeActiveRulesState(
   sessionId: string,
   matchedPaths: string[]
 ): void {
+  if (!isValidSessionId(sessionId)) {
+    debugLog(`Invalid sessionId rejected: ${sessionId}`);
+    return;
+  }
+
   const state: ActiveRulesState = {
     sessionId,
     matchedRulePaths: matchedPaths,
@@ -97,29 +112,55 @@ async function doAtomicWrite(
 export async function readActiveRulesState(
   sessionId: string
 ): Promise<ActiveRulesState | null> {
+  if (!isValidSessionId(sessionId)) {
+    debugLog(`Invalid sessionId rejected: ${sessionId}`);
+    return null;
+  }
+
   const filePath = getStateFilePath(sessionId);
 
   try {
     const content = await fs.readFile(filePath, 'utf-8');
     const parsed: unknown = JSON.parse(content);
 
-    // Basic validation
-    if (
-      typeof parsed === 'object' &&
-      parsed !== null &&
-      'sessionId' in parsed &&
-      'matchedRulePaths' in parsed &&
-      'evaluatedAt' in parsed
-    ) {
-      return parsed as ActiveRulesState;
+    if (!isValidActiveRulesState(parsed)) {
+      debugLog(`Invalid active rules state format for session ${sessionId}`);
+      return null;
     }
 
-    debugLog(`Invalid active rules state format for session ${sessionId}`);
-    return null;
+    return parsed;
   } catch (error) {
     debugLog(
       `Failed to read active rules state for session ${sessionId}: ${error}`
     );
     return null;
   }
+}
+
+function isValidActiveRulesState(value: unknown): value is ActiveRulesState {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const obj = value as Record<string, unknown>;
+
+  if (typeof obj['sessionId'] !== 'string') {
+    return false;
+  }
+
+  if (typeof obj['evaluatedAt'] !== 'number') {
+    return false;
+  }
+
+  if (!Array.isArray(obj['matchedRulePaths'])) {
+    return false;
+  }
+
+  for (const item of obj['matchedRulePaths']) {
+    if (typeof item !== 'string') {
+      return false;
+    }
+  }
+
+  return true;
 }
