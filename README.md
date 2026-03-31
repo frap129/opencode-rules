@@ -51,6 +51,15 @@ Add the plugin to your opencode config:
 }
 ```
 
+To enable the TUI sidebar, add the same plugin entry to your TUI config:
+
+```json
+// ~/.config/opencode/tui.json
+{
+  "plugin": ["opencode-rules@latest"]
+}
+```
+
 ### Create Your First Rule
 
 1. Create the global rules directory:
