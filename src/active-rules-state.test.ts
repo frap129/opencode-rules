@@ -60,6 +60,18 @@ describe('active-rules-state', () => {
       const filePath = getStateFilePath('ses_123');
       expect(filePath).toBe(path.join(testStateDir, 'ses_123.json'));
     });
+
+    it('throws for sessionId with path traversal', () => {
+      expect(() => getStateFilePath('../escape')).toThrow('Invalid sessionId');
+      expect(() => getStateFilePath('foo/bar')).toThrow('Invalid sessionId');
+      expect(() => getStateFilePath('/absolute')).toThrow('Invalid sessionId');
+    });
+
+    it('throws for sessionId with special characters', () => {
+      expect(() => getStateFilePath('ses.123')).toThrow('Invalid sessionId');
+      expect(() => getStateFilePath('ses 123')).toThrow('Invalid sessionId');
+      expect(() => getStateFilePath('')).toThrow('Invalid sessionId');
+    });
   });
 
   describe('writeActiveRulesState and readActiveRulesState', () => {
@@ -103,6 +115,64 @@ describe('active-rules-state', () => {
       await fs.writeFile(filePath, JSON.stringify({ foo: 'bar' }), 'utf-8');
 
       const state = await readActiveRulesState('ses_invalid');
+      expect(state).toBeNull();
+    });
+
+    it('returns null for wrong-type values in state', async () => {
+      await fs.mkdir(testStateDir, { recursive: true });
+
+      const filePath = getStateFilePath('ses_wrongtypes');
+      await fs.writeFile(
+        filePath,
+        JSON.stringify({
+          sessionId: 123,
+          matchedRulePaths: 'not-an-array',
+          evaluatedAt: 'not-a-number',
+        }),
+        'utf-8'
+      );
+
+      const state = await readActiveRulesState('ses_wrongtypes');
+      expect(state).toBeNull();
+    });
+
+    it('returns null for array with non-string items', async () => {
+      await fs.mkdir(testStateDir, { recursive: true });
+
+      const filePath = getStateFilePath('ses_badarray');
+      await fs.writeFile(
+        filePath,
+        JSON.stringify({
+          sessionId: 'ses_badarray',
+          matchedRulePaths: ['/valid.md', 123, null],
+          evaluatedAt: Date.now(),
+        }),
+        'utf-8'
+      );
+
+      const state = await readActiveRulesState('ses_badarray');
+      expect(state).toBeNull();
+    });
+
+    it('silently ignores write with invalid sessionId', async () => {
+      writeActiveRulesState('../escape', ['/rule.md']);
+      writeActiveRulesState('foo/bar', ['/rule.md']);
+
+      // Give time for any writes to occur
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Verify no files were created
+      try {
+        await fs.access(testStateDir);
+        const files = await fs.readdir(testStateDir);
+        expect(files).toHaveLength(0);
+      } catch {
+        // Directory doesn't exist, which is expected
+      }
+    });
+
+    it('returns null for read with invalid sessionId', async () => {
+      const state = await readActiveRulesState('../escape');
       expect(state).toBeNull();
     });
 
