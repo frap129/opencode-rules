@@ -38,7 +38,7 @@ interface RuleSectionProps {
   hasEvaluationState: boolean;
 }
 
-const BULLET_GREEN: ThemeColor = 'green';
+const BULLET_GREEN: ThemeColor = '#02a25a';
 
 function RuleSection(props: RuleSectionProps): JSX.Element {
   const activeCount = createMemo(
@@ -211,6 +211,9 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
 
   // Refresh load: triggered by events, only updates rule data (no UI state reset)
   const loadRulesRefresh = async (): Promise<void> => {
+    // Skip refresh if initial load is still in flight
+    if (status() === 'loading') return;
+
     const thisRequest = ++requestId;
     const dir = resolveProjectDir();
     const sessionId = props.sessionId;
