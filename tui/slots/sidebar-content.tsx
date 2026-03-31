@@ -261,15 +261,16 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
   });
 
   // Subscribe to OpenCode events with debounce
-  const triggerRefresh = (...args: unknown[]): void => {
+  const triggerRefresh = (event: {
+    type: string;
+    properties: Record<string, unknown>;
+  }): void => {
     // Filter events to current sessionId before debouncing
-    const event = args[0];
+    // OpenCode SDK events nest sessionID inside properties: { type, properties: { sessionID, ... } }
+    const eventSessionID = event.properties.sessionID;
     if (
-      event !== null &&
-      typeof event === 'object' &&
-      'sessionId' in event &&
-      typeof (event as Record<string, unknown>).sessionId === 'string' &&
-      (event as Record<string, unknown>).sessionId !== props.sessionId
+      typeof eventSessionID === 'string' &&
+      eventSessionID !== props.sessionId
     ) {
       return;
     }
