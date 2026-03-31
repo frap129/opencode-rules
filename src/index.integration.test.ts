@@ -19,10 +19,13 @@ import { __testOnly } from './index.js';
 
 describe('readAndFormatRules', () => {
   let savedEnvXDG: string | undefined;
+  let savedEnvConfigDir: string | undefined;
 
   beforeEach(() => {
     setupTestDirs();
     savedEnvXDG = process.env.XDG_CONFIG_HOME;
+    savedEnvConfigDir = process.env.OPENCODE_CONFIG_DIR;
+    delete process.env.OPENCODE_CONFIG_DIR;
     clearRuleCache();
   });
 
@@ -32,6 +35,11 @@ describe('readAndFormatRules', () => {
       delete process.env.XDG_CONFIG_HOME;
     } else {
       process.env.XDG_CONFIG_HOME = savedEnvXDG;
+    }
+    if (savedEnvConfigDir === undefined) {
+      delete process.env.OPENCODE_CONFIG_DIR;
+    } else {
+      process.env.OPENCODE_CONFIG_DIR = savedEnvConfigDir;
     }
   });
 
@@ -411,10 +419,13 @@ All dimensions must match.`
 
 describe('Cross-Dimension Regression Coverage', () => {
   let savedEnvXDG: string | undefined;
+  let savedEnvConfigDir: string | undefined;
 
   beforeEach(() => {
     setupTestDirs();
     savedEnvXDG = process.env.XDG_CONFIG_HOME;
+    savedEnvConfigDir = process.env.OPENCODE_CONFIG_DIR;
+    delete process.env.OPENCODE_CONFIG_DIR;
     clearRuleCache();
   });
 
@@ -424,6 +435,11 @@ describe('Cross-Dimension Regression Coverage', () => {
       delete process.env.XDG_CONFIG_HOME;
     } else {
       process.env.XDG_CONFIG_HOME = savedEnvXDG;
+    }
+    if (savedEnvConfigDir === undefined) {
+      delete process.env.OPENCODE_CONFIG_DIR;
+    } else {
+      process.env.OPENCODE_CONFIG_DIR = savedEnvConfigDir;
     }
   });
 
@@ -825,10 +841,13 @@ Excluded rule.`
 
 describe('Conditional rules integration', () => {
   let savedEnvXDG: string | undefined;
+  let savedEnvConfigDir: string | undefined;
 
   beforeEach(() => {
     setupTestDirs();
     savedEnvXDG = process.env.XDG_CONFIG_HOME;
+    savedEnvConfigDir = process.env.OPENCODE_CONFIG_DIR;
+    delete process.env.OPENCODE_CONFIG_DIR;
     clearRuleCache();
   });
 
@@ -840,6 +859,11 @@ describe('Conditional rules integration', () => {
       delete process.env.XDG_CONFIG_HOME;
     } else {
       process.env.XDG_CONFIG_HOME = savedEnvXDG;
+    }
+    if (savedEnvConfigDir === undefined) {
+      delete process.env.OPENCODE_CONFIG_DIR;
+    } else {
+      process.env.OPENCODE_CONFIG_DIR = savedEnvConfigDir;
     }
   });
 
@@ -1032,10 +1056,13 @@ Special rule content.`
 
 describe('Session compacting behavior', () => {
   let savedEnvXDG: string | undefined;
+  let savedEnvConfigDir: string | undefined;
 
   beforeEach(() => {
     setupTestDirs();
     savedEnvXDG = process.env.XDG_CONFIG_HOME;
+    savedEnvConfigDir = process.env.OPENCODE_CONFIG_DIR;
+    delete process.env.OPENCODE_CONFIG_DIR;
     clearRuleCache();
   });
 
@@ -1047,6 +1074,11 @@ describe('Session compacting behavior', () => {
       delete process.env.XDG_CONFIG_HOME;
     } else {
       process.env.XDG_CONFIG_HOME = savedEnvXDG;
+    }
+    if (savedEnvConfigDir === undefined) {
+      delete process.env.OPENCODE_CONFIG_DIR;
+    } else {
+      process.env.OPENCODE_CONFIG_DIR = savedEnvConfigDir;
     }
   });
 

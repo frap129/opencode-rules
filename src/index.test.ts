@@ -31,11 +31,14 @@ import {
 // Retained plugin-level tests with complex runtime filter context
 describe('Runtime filter context integration (plugin-level)', () => {
   let savedEnvXDG: string | undefined;
+  let savedEnvConfigDir: string | undefined;
   let savedCiEnv: CiEnvSnapshot;
 
   beforeEach(() => {
     setupTestDirs();
     savedEnvXDG = process.env.XDG_CONFIG_HOME;
+    savedEnvConfigDir = process.env.OPENCODE_CONFIG_DIR;
+    delete process.env.OPENCODE_CONFIG_DIR;
     savedCiEnv = saveCiEnvVars();
     clearRuleCache();
   });
@@ -49,6 +52,11 @@ describe('Runtime filter context integration (plugin-level)', () => {
       delete process.env.XDG_CONFIG_HOME;
     } else {
       process.env.XDG_CONFIG_HOME = savedEnvXDG;
+    }
+    if (savedEnvConfigDir === undefined) {
+      delete process.env.OPENCODE_CONFIG_DIR;
+    } else {
+      process.env.OPENCODE_CONFIG_DIR = savedEnvConfigDir;
     }
   });
 
@@ -588,10 +596,13 @@ Feature branch guidelines.`
 // Retained API contract tests
 describe('readAndFormatRules API contract', () => {
   let savedEnvXDG: string | undefined;
+  let savedEnvConfigDir: string | undefined;
 
   beforeEach(() => {
     setupTestDirs();
     savedEnvXDG = process.env.XDG_CONFIG_HOME;
+    savedEnvConfigDir = process.env.OPENCODE_CONFIG_DIR;
+    delete process.env.OPENCODE_CONFIG_DIR;
     clearRuleCache();
   });
 
@@ -601,6 +612,11 @@ describe('readAndFormatRules API contract', () => {
       delete process.env.XDG_CONFIG_HOME;
     } else {
       process.env.XDG_CONFIG_HOME = savedEnvXDG;
+    }
+    if (savedEnvConfigDir === undefined) {
+      delete process.env.OPENCODE_CONFIG_DIR;
+    } else {
+      process.env.OPENCODE_CONFIG_DIR = savedEnvConfigDir;
     }
   });
 
