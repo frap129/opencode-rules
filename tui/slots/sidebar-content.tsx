@@ -248,7 +248,19 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
   // Subscribe to OpenCode events with debounce
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
-  const triggerRefresh = (): void => {
+  const triggerRefresh = (...args: unknown[]): void => {
+    // Filter events to current sessionId before debouncing
+    const event = args[0];
+    if (
+      event !== null &&
+      typeof event === 'object' &&
+      'sessionId' in event &&
+      typeof (event as Record<string, unknown>).sessionId === 'string' &&
+      (event as Record<string, unknown>).sessionId !== props.sessionId
+    ) {
+      return;
+    }
+
     if (debounceTimer !== null) {
       clearTimeout(debounceTimer);
     }
