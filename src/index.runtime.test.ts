@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import path from 'path';
-import { writeFileSync, mkdirSync } from 'fs';
+import { writeFileSync, mkdirSync, readdirSync } from 'fs';
 import {
   setupTestDirs,
   teardownTestDirs,
@@ -860,9 +860,10 @@ Conditional rule for gpt-5 only.`
     // Wait briefly
     await new Promise(resolve => setTimeout(resolve, 50));
 
-    // No state file should exist for undefined session
-    const state = await readActiveRulesState('undefined');
-    expect(state).toBeNull();
+    // Verify no state files were created in the state directory
+    const files = readdirSync(stateDir);
+    const jsonFiles = files.filter(f => f.endsWith('.json'));
+    expect(jsonFiles).toHaveLength(0);
   });
 });
 
