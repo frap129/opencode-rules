@@ -178,8 +178,14 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
     return props.api.state.path.directory ?? null;
   };
 
+  // Monotonic counter to detect stale async results
+  let requestId = 0;
+  // Debounce timer for event-driven refresh
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
   // Initial load: triggered by session/directory change, resets all UI state
   const loadRulesInitial = async (): Promise<void> => {
+    const thisRequest = ++requestId;
     const dir = resolveProjectDir();
     const sessionId = props.sessionId;
 
@@ -189,15 +195,15 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
 
     try {
       const result = await loadSidebarRules(dir, sessionId);
-      // Verify context hasn't changed during async load
-      if (resolveProjectDir() !== dir || props.sessionId !== sessionId) {
-        return; // Discard stale result
-      }
+      // Discard if a newer request started
+      if (requestId !== thisRequest) return;
       setRules(result.rules);
       setSkippedCount(result.skippedCount);
       setHasEvaluationState(result.hasEvaluationState);
       setStatus('loaded');
     } catch (err) {
+      // Discard if a newer request started
+      if (requestId !== thisRequest) return;
       console.error('[opencode-rules] Failed to load rules:', err);
       setStatus('error');
     }
@@ -205,19 +211,21 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
 
   // Refresh load: triggered by events, only updates rule data (no UI state reset)
   const loadRulesRefresh = async (): Promise<void> => {
+    const thisRequest = ++requestId;
     const dir = resolveProjectDir();
     const sessionId = props.sessionId;
 
     try {
       const result = await loadSidebarRules(dir, sessionId);
-      // Verify context hasn't changed during async load
-      if (resolveProjectDir() !== dir || props.sessionId !== sessionId) {
-        return; // Discard stale result
-      }
+      // Discard if a newer request started
+      if (requestId !== thisRequest) return;
       setRules(result.rules);
       setSkippedCount(result.skippedCount);
       setHasEvaluationState(result.hasEvaluationState);
+      setStatus('loaded');
     } catch (err) {
+      // Discard if a newer request started
+      if (requestId !== thisRequest) return;
       console.error('[opencode-rules] Failed to refresh rules:', err);
     }
   };
@@ -229,6 +237,11 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
 
     // Check if session or directory changed
     if (currentSessionId !== lastSessionId() || currentDir !== lastDir()) {
+      // Clear pending debounce from previous session
+      if (debounceTimer !== null) {
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+      }
       // Reset UI state on session/directory change
       setExpandedIndex(null);
       setProjectOpen(false);
@@ -246,8 +259,6 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
   });
 
   // Subscribe to OpenCode events with debounce
-  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-
   const triggerRefresh = (...args: unknown[]): void => {
     // Filter events to current sessionId before debouncing
     const event = args[0];
