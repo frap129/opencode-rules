@@ -45,6 +45,12 @@ declare module '@opencode-ai/plugin/tui' {
   }
 
   export interface TuiState {
+    readonly path: {
+      state: string;
+      config: string;
+      worktree: string;
+      directory: string;
+    };
     workspace: {
       get: (id: string) => { directory: string | null } | undefined;
     };
