@@ -56,11 +56,16 @@ declare module '@opencode-ai/plugin/tui' {
     };
   }
 
+  export interface TuiEventBus {
+    on: (type: string, handler: (...args: unknown[]) => void) => () => void;
+  }
+
   export interface TuiPluginApi {
     slots: TuiSlots;
     workspace: TuiWorkspace;
     state: TuiState;
     kv: unknown;
+    event: TuiEventBus;
   }
 
   export type TuiPlugin = (api: TuiPluginApi) => Promise<void> | void;

@@ -5,6 +5,10 @@ import os from 'os';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, chmodSync } from 'fs';
 import { clearRuleCache } from '../../src/rule-discovery.js';
 import {
+  _setStateDirForTesting,
+  writeActiveRulesState,
+} from '../../src/active-rules-state.js';
+import {
   ruleSource,
   hasConditions,
   formatConditionSummary,
@@ -329,6 +333,159 @@ describe('loadSidebarRules', () => {
   });
 });
 
+// ──────────────────────────────────────────────
+// loadSidebarRules isActive behavior
+// ──────────────────────────────────────────────
+
+describe('loadSidebarRules isActive behavior', () => {
+  let testDir: string;
+  let stateDir: string;
+  let savedXDG: string | undefined;
+
+  beforeEach(() => {
+    testDir = mkdtempSync(path.join(os.tmpdir(), 'tui-rules-active-test-'));
+    stateDir = path.join(testDir, 'state');
+    mkdirSync(stateDir, { recursive: true });
+    savedXDG = process.env['XDG_CONFIG_HOME'];
+    clearRuleCache();
+    _setStateDirForTesting(stateDir);
+  });
+
+  afterEach(() => {
+    _setStateDirForTesting(null);
+    rmSync(testDir, { recursive: true, force: true });
+    if (savedXDG === undefined) {
+      delete process.env['XDG_CONFIG_HOME'];
+    } else {
+      process.env['XDG_CONFIG_HOME'] = savedXDG;
+    }
+  });
+
+  it('sets hasEvaluationState to false when no sessionId provided', async () => {
+    const globalDir = path.join(testDir, '.config', 'opencode', 'rules');
+    mkdirSync(globalDir, { recursive: true });
+    writeFileSync(path.join(globalDir, 'rule.md'), '# Always');
+    process.env['XDG_CONFIG_HOME'] = path.join(testDir, '.config');
+
+    const result = await loadSidebarRules(null);
+
+    expect(result.hasEvaluationState).toBe(false);
+  });
+
+  it('sets hasEvaluationState to false when state file does not exist', async () => {
+    const globalDir = path.join(testDir, '.config', 'opencode', 'rules');
+    mkdirSync(globalDir, { recursive: true });
+    writeFileSync(path.join(globalDir, 'rule.md'), '# Always');
+    process.env['XDG_CONFIG_HOME'] = path.join(testDir, '.config');
+
+    const result = await loadSidebarRules(null, 'nonexistent-session');
+
+    expect(result.hasEvaluationState).toBe(false);
+  });
+
+  it('sets hasEvaluationState to true when state file exists', async () => {
+    const globalDir = path.join(testDir, '.config', 'opencode', 'rules');
+    mkdirSync(globalDir, { recursive: true });
+    writeFileSync(path.join(globalDir, 'rule.md'), '# Always');
+    process.env['XDG_CONFIG_HOME'] = path.join(testDir, '.config');
+
+    writeActiveRulesState('test-session', []);
+    // Wait for async write to complete
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    const result = await loadSidebarRules(null, 'test-session');
+
+    expect(result.hasEvaluationState).toBe(true);
+  });
+
+  it('sets isActive to true for unconditional rules without state file', async () => {
+    const globalDir = path.join(testDir, '.config', 'opencode', 'rules');
+    mkdirSync(globalDir, { recursive: true });
+    writeFileSync(path.join(globalDir, 'always.md'), '# Always active');
+    process.env['XDG_CONFIG_HOME'] = path.join(testDir, '.config');
+
+    const { rules } = await loadSidebarRules(null);
+
+    expect(rules[0]!.isConditional).toBe(false);
+    expect(rules[0]!.isActive).toBe(true);
+  });
+
+  it('sets isActive to null for conditional rules without state file', async () => {
+    const globalDir = path.join(testDir, '.config', 'opencode', 'rules');
+    mkdirSync(globalDir, { recursive: true });
+    writeFileSync(
+      path.join(globalDir, 'conditional.mdc'),
+      `---\nglobs:\n  - "**/*.ts"\n---\nConditional rule`
+    );
+    process.env['XDG_CONFIG_HOME'] = path.join(testDir, '.config');
+
+    const { rules } = await loadSidebarRules(null);
+
+    expect(rules[0]!.isConditional).toBe(true);
+    expect(rules[0]!.isActive).toBe(null);
+  });
+
+  it('sets isActive based on matchedRulePaths when state file exists', async () => {
+    const globalDir = path.join(testDir, '.config', 'opencode', 'rules');
+    mkdirSync(globalDir, { recursive: true });
+    const matchedPath = path.join(globalDir, 'matched.md');
+    const unmatchedPath = path.join(globalDir, 'unmatched.md');
+    writeFileSync(matchedPath, '# Matched');
+    writeFileSync(unmatchedPath, '# Unmatched');
+    process.env['XDG_CONFIG_HOME'] = path.join(testDir, '.config');
+
+    writeActiveRulesState('test-session', [matchedPath]);
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    const { rules } = await loadSidebarRules(null, 'test-session');
+
+    const matched = rules.find(r => r.name === 'matched');
+    const unmatched = rules.find(r => r.name === 'unmatched');
+
+    expect(matched!.isActive).toBe(true);
+    expect(unmatched!.isActive).toBe(false);
+  });
+
+  it('correctly matches conditional rules with state file', async () => {
+    const globalDir = path.join(testDir, '.config', 'opencode', 'rules');
+    mkdirSync(globalDir, { recursive: true });
+    const conditionalPath = path.join(globalDir, 'conditional.mdc');
+    writeFileSync(
+      conditionalPath,
+      `---\nglobs:\n  - "**/*.ts"\n---\nConditional rule`
+    );
+    process.env['XDG_CONFIG_HOME'] = path.join(testDir, '.config');
+
+    // Conditional rule is in matchedRulePaths
+    writeActiveRulesState('test-session', [conditionalPath]);
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    const { rules } = await loadSidebarRules(null, 'test-session');
+
+    expect(rules[0]!.isConditional).toBe(true);
+    expect(rules[0]!.isActive).toBe(true);
+  });
+
+  it('marks conditional rules as inactive when not in matchedRulePaths', async () => {
+    const globalDir = path.join(testDir, '.config', 'opencode', 'rules');
+    mkdirSync(globalDir, { recursive: true });
+    writeFileSync(
+      path.join(globalDir, 'conditional.mdc'),
+      `---\nglobs:\n  - "**/*.ts"\n---\nConditional rule`
+    );
+    process.env['XDG_CONFIG_HOME'] = path.join(testDir, '.config');
+
+    // Empty matchedRulePaths - nothing matched
+    writeActiveRulesState('test-session', []);
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    const { rules } = await loadSidebarRules(null, 'test-session');
+
+    expect(rules[0]!.isConditional).toBe(true);
+    expect(rules[0]!.isActive).toBe(false);
+  });
+});
+
 /** Helper to create a minimal SidebarRuleEntry for disambiguation tests */
 function makeEntry(
   overrides: Partial<SidebarRuleEntry> & { path: string }
@@ -340,5 +497,6 @@ function makeEntry(
     isConditional: overrides.isConditional ?? false,
     conditionSummary: overrides.conditionSummary ?? 'always active',
     metadata: overrides.metadata ?? {},
+    isActive: overrides.isActive ?? true,
   };
 }
