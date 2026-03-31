@@ -25,6 +25,7 @@ export {
   toolsMatchAvailable,
   readAndFormatRules,
   type RuleFilterContext,
+  type FilterResult,
 } from './rule-filter.js';
 
 // Re-export from message-paths

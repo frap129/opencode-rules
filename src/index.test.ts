@@ -617,13 +617,13 @@ tools:
 Tools rule.`
     );
 
-    const formatted = await readAndFormatRules(toRules([rulePath]), {
+    const { formattedRules } = await readAndFormatRules(toRules([rulePath]), {
       userPrompt: 'some prompt',
       availableToolIDs: ['mcp_websearch', 'mcp_bash'],
     });
 
-    expect(formatted).toContain('tools-rule.mdc');
-    expect(formatted).toContain('Tools rule');
+    expect(formattedRules).toContain('tools-rule.mdc');
+    expect(formattedRules).toContain('Tools rule');
   });
 
   it('should ignore array passed as second arg (legacy positional pattern rejected)', async () => {
@@ -640,11 +640,11 @@ Legacy globs rule.`
     );
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const formatted = await readAndFormatRules(toRules([rulePath]), [
+    const { formattedRules } = await readAndFormatRules(toRules([rulePath]), [
       'src/app.ts',
     ] as any);
 
-    expect(formatted).toBe('');
+    expect(formattedRules).toBe('');
   });
 
   it('should ignore third positional arg (legacy userPrompt rejected)', async () => {
@@ -661,13 +661,13 @@ Legacy keywords rule.`
     );
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const formatted = await (readAndFormatRules as any)(
+    const { formattedRules } = await (readAndFormatRules as any)(
       toRules([rulePath]),
       {},
       'help with testing'
     );
 
-    expect(formatted).toBe('');
+    expect(formattedRules).toBe('');
   });
 
   it('should ignore fourth positional arg (legacy availableToolIDs rejected)', async () => {
@@ -684,13 +684,13 @@ Legacy tools rule.`
     );
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const formatted = await (readAndFormatRules as any)(
+    const { formattedRules } = await (readAndFormatRules as any)(
       toRules([rulePath]),
       {},
       undefined,
       ['mcp_websearch', 'mcp_bash']
     );
 
-    expect(formatted).toBe('');
+    expect(formattedRules).toBe('');
   });
 });
