@@ -97,9 +97,13 @@ export async function loadSidebarRules(
 
   disambiguateNames(entries);
 
-  // Sort: project first, then global. Alpha by name, path as tiebreaker.
+  // Sort: project first, then global. Active rules to top, then alpha by name.
+  const activeOrder = (v: boolean | null): number =>
+    v === true ? 0 : v === null ? 1 : 2;
   entries.sort((a, b) => {
     if (a.source !== b.source) return a.source === 'project' ? -1 : 1;
+    const activeCmp = activeOrder(a.isActive) - activeOrder(b.isActive);
+    if (activeCmp !== 0) return activeCmp;
     const nameCompare = a.name.localeCompare(b.name);
     if (nameCompare !== 0) return nameCompare;
     return a.path.localeCompare(b.path);
