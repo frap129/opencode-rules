@@ -110,7 +110,7 @@ That's it! The rule will now be automatically injected into all AI agent prompts
 
 Rules are automatically discovered from these directories (including all subdirectories):
 
-1. **Global rules**: `$XDG_CONFIG_HOME/opencode/rules/` (typically `~/.config/opencode/rules/`)
+1. **Global rules**: `$OPENCODE_CONFIG_DIR/rules/` if set, otherwise `$XDG_CONFIG_HOME/opencode/rules/` (typically `~/.config/opencode/rules/`)
 2. **Project rules**: `.opencode/rules/` (in your project root)
 
 Both directories are scanned recursively, allowing you to organize rules into subdirectories.
