@@ -988,7 +988,7 @@ describe('discoverRuleFiles', () => {
 
   beforeEach(() => {
     setupTestDirs();
-    envSnapshot = saveEnv('XDG_CONFIG_HOME', 'HOME');
+    envSnapshot = saveEnv('XDG_CONFIG_HOME', 'HOME', 'OPENCODE_CONFIG_DIR');
   });
 
   afterEach(() => {
@@ -1067,6 +1067,49 @@ describe('discoverRuleFiles', () => {
 
       const files = await discoverRuleFiles();
       expect(files.every(f => !f.filePath.includes('.hidden.md'))).toBe(true);
+    });
+
+    it('should use OPENCODE_CONFIG_DIR/rules as global dir when set', async () => {
+      const { testDir } = getTestDirs();
+      const customDir = path.join(testDir, 'custom-config');
+      const customRulesDir = path.join(customDir, 'rules');
+      mkdirSync(customRulesDir, { recursive: true });
+      writeFileSync(path.join(customRulesDir, 'custom.md'), '# Custom Rule');
+
+      process.env.OPENCODE_CONFIG_DIR = customDir;
+
+      const files = await discoverRuleFiles();
+      expect(
+        files.some(f => f.filePath === path.join(customRulesDir, 'custom.md'))
+      ).toBe(true);
+    });
+
+    it('should prefer OPENCODE_CONFIG_DIR over XDG_CONFIG_HOME', async () => {
+      const { testDir, globalRulesDir } = getTestDirs();
+      writeFileSync(path.join(globalRulesDir, 'xdg-rule.md'), '# XDG Rule');
+
+      const customDir = path.join(testDir, 'custom-config');
+      const customRulesDir = path.join(customDir, 'rules');
+      mkdirSync(customRulesDir, { recursive: true });
+      writeFileSync(path.join(customRulesDir, 'custom.md'), '# Custom Rule');
+
+      process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+      process.env.OPENCODE_CONFIG_DIR = customDir;
+
+      const files = await discoverRuleFiles();
+      expect(files.some(f => f.filePath.includes('custom.md'))).toBe(true);
+      expect(files.some(f => f.filePath.includes('xdg-rule.md'))).toBe(false);
+    });
+
+    it('should handle missing OPENCODE_CONFIG_DIR/rules gracefully', async () => {
+      const { testDir } = getTestDirs();
+      const customDir = path.join(testDir, 'no-rules-here');
+      mkdirSync(customDir, { recursive: true });
+
+      process.env.OPENCODE_CONFIG_DIR = customDir;
+
+      const files = await discoverRuleFiles();
+      expect(files).toEqual([]);
     });
   });
 
