@@ -22,10 +22,7 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
   );
 
   const resolveProjectDir = (): string | null => {
-    const workspaceId = props.api.workspace.current();
-    if (!workspaceId) return null;
-    const workspace = props.api.state.workspace.get(workspaceId);
-    return workspace?.directory ?? null;
+    return props.api.state.path.directory ?? null;
   };
 
   const loadRules = async (): Promise<void> => {
