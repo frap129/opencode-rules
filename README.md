@@ -421,6 +421,15 @@ opencode-rules/
 │   ├── utils.ts              # Re-export facade for backwards compatibility
 │   ├── test-fixtures.ts      # Shared test fixtures and builders
 │   └── *.test.ts             # Unit/integration tests (11 test files)
+├── tui/
+│   ├── index.tsx             # TUI entrypoint, exports { id, tui }
+│   ├── slots/
+│   │   └── sidebar-content.tsx # Sidebar widget component
+│   ├── data/
+│   │   ├── rules.ts          # Rule discovery + formatting for sidebar
+│   │   └── rules.test.ts     # Data layer tests
+│   └── types/
+│       └── opencode-plugin-tui.d.ts  # Vendored type shim
 ├── docs/
 │   └── rules.md              # Detailed usage documentation
 ├── openspec/                 # Project specifications and proposals
@@ -444,6 +453,20 @@ The following highlights the primary runtime modules:
 - **mcp-tools.ts** - Maps connected MCP clients to tool IDs for `tools` condition matching
 - **git-branch.ts** - Resolves current git branch for `branch` condition matching
 - **utils.ts** - Thin facade re-exporting from decomposed modules
+
+### TUI Sidebar
+
+The plugin registers a `sidebar_content` slot in the OpenCode TUI, displaying all discovered rules (global and project-local) with their metadata.
+
+**Requirements:** `@opencode-ai/plugin` ^1.3.7 with TUI support.
+
+**What it shows:**
+
+- Rule name with `[P]` (project) or `[G]` (global) prefix
+- Condition summary for conditional rules ("always active" for unconditional ones)
+- Expandable detail panel with all metadata fields (globs, keywords, tools, model, agent, command, project, branch, os, ci, match)
+- Loading, error, and empty states
+- Automatic reload on workspace change
 
 ### Build and Test
 
