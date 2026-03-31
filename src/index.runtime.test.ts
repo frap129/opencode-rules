@@ -26,6 +26,10 @@ import * as sessionStoreModule from './session-store.js';
 import * as runtimeContextModule from './runtime-context.js';
 import * as runtimeChatModule from './runtime-chat.js';
 import { __testOnly } from './index.js';
+import {
+  _setStateDirForTesting,
+  readActiveRulesState,
+} from './active-rules-state.js';
 
 describe('module boundary tests', () => {
   it('should re-export discoverRuleFiles from rule-discovery module', () => {
@@ -722,6 +726,143 @@ describe('SessionState', () => {
     );
 
     expect(result.system).toBe('Base prompt.');
+  });
+});
+
+describe('Active rules state persistence', () => {
+  let savedEnvXDG: string | undefined;
+  let stateDir: string;
+
+  beforeEach(() => {
+    setupTestDirs();
+    savedEnvXDG = process.env.XDG_CONFIG_HOME;
+    const { testDir } = getTestDirs();
+    stateDir = path.join(testDir, 'state');
+    mkdirSync(stateDir, { recursive: true });
+    _setStateDirForTesting(stateDir);
+  });
+
+  afterEach(async () => {
+    teardownTestDirs();
+    _setStateDirForTesting(null);
+    const { __testOnly } = await import('./index.js');
+    __testOnly.resetSessionState();
+    if (savedEnvXDG === undefined) {
+      delete process.env.XDG_CONFIG_HOME;
+    } else {
+      process.env.XDG_CONFIG_HOME = savedEnvXDG;
+    }
+  });
+
+  it('writes matched rule paths to state file when rules match', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    const rulePath = path.join(globalRulesDir, 'always-apply.md');
+    writeFileSync(rulePath, '# Always Apply\nThis rule always applies.');
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+
+    const sessionID = 'ses-state-match';
+    const systemTransform = hooks['experimental.chat.system.transform'] as (
+      input: { sessionID?: string },
+      output: { system: string }
+    ) => Promise<{ system: string }>;
+
+    const result = await systemTransform(
+      { sessionID },
+      { system: 'Base prompt.' }
+    );
+
+    expect(result.system).toContain('Always Apply');
+
+    // Wait for fire-and-forget write to complete
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    const state = await readActiveRulesState(sessionID);
+    expect(state).not.toBeNull();
+    expect(state?.sessionId).toBe(sessionID);
+    expect(state?.matchedRulePaths).toHaveLength(1);
+    expect(state?.matchedRulePaths[0]).toBe(rulePath);
+  });
+
+  it('writes empty matchedPaths to state file when no rules match', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    const rulePath = path.join(globalRulesDir, 'conditional.mdc');
+    writeFileSync(
+      rulePath,
+      `---
+model:
+  - gpt-5
+---
+
+Conditional rule for gpt-5 only.`
+    );
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+
+    const sessionID = 'ses-state-nomatch';
+    const systemTransform = hooks['experimental.chat.system.transform'] as (
+      input: { sessionID?: string },
+      output: { system: string }
+    ) => Promise<{ system: string }>;
+
+    const result = await systemTransform(
+      { sessionID },
+      { system: 'Base prompt.' }
+    );
+
+    // No rules should match (model is not gpt-5)
+    expect(result.system).not.toContain('Conditional rule');
+
+    // Wait for fire-and-forget write to complete
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    const state = await readActiveRulesState(sessionID);
+    expect(state).not.toBeNull();
+    expect(state?.sessionId).toBe(sessionID);
+    expect(state?.matchedRulePaths).toHaveLength(0);
+  });
+
+  it('does not write state when sessionID is missing', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    writeFileSync(path.join(globalRulesDir, 'rule.md'), '# Test Rule\nContent');
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+
+    const systemTransform = hooks['experimental.chat.system.transform'] as (
+      input: { sessionID?: string },
+      output: { system: string }
+    ) => Promise<{ system: string }>;
+
+    // Call without sessionID
+    await systemTransform({}, { system: 'Base prompt.' });
+
+    // Wait briefly
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    // No state file should exist for undefined session
+    const state = await readActiveRulesState('undefined');
+    expect(state).toBeNull();
   });
 });
 
