@@ -60,6 +60,14 @@ export function toolsMatchAvailable(
 }
 
 /**
+ * Result of reading and formatting rules
+ */
+export interface FilterResult {
+  formattedRules: string;
+  matchedPaths: string[];
+}
+
+/**
  * Runtime filter context for conditional rule matching
  */
 export interface RuleFilterContext {
@@ -93,12 +101,13 @@ export interface RuleFilterContext {
 export async function readAndFormatRules(
   files: DiscoveredRule[],
   context: RuleFilterContext = {}
-): Promise<string> {
+): Promise<FilterResult> {
   if (files.length === 0) {
-    return '';
+    return { formattedRules: '', matchedPaths: [] };
   }
 
   const ruleContents: string[] = [];
+  const matchedPaths: string[] = [];
   const availableToolSet =
     context.availableToolIDs && context.availableToolIDs.length > 0
       ? new Set(context.availableToolIDs)
@@ -244,14 +253,17 @@ export async function readAndFormatRules(
     // Use cached stripped content for output
     // Use relativePath for unique headings instead of just filename
     ruleContents.push(`## ${relativePath}\n\n${strippedContent}`);
+    matchedPaths.push(filePath);
   }
 
   if (ruleContents.length === 0) {
-    return '';
+    return { formattedRules: '', matchedPaths: [] };
   }
 
-  return (
-    `# OpenCode Rules\n\nPlease follow the following rules:\n\n` +
-    ruleContents.join('\n\n---\n\n')
-  );
+  return {
+    formattedRules:
+      `# OpenCode Rules\n\nPlease follow the following rules:\n\n` +
+      ruleContents.join('\n\n---\n\n'),
+    matchedPaths,
+  };
 }
