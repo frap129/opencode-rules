@@ -42,6 +42,13 @@ approach.
 
 ### Installation
 
+```bash
+opencode plugin opencode-rules@latest --global
+```
+
+<details>
+<summary>Manual installation</summary>
+
 Add the plugin to your opencode config:
 
 ```json
@@ -59,6 +66,8 @@ To enable the TUI sidebar, add the same plugin entry to your TUI config:
   "plugin": ["opencode-rules@latest"]
 }
 ```
+
+</details>
 
 ### Create Your First Rule
 
