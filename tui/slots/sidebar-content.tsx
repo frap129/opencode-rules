@@ -17,139 +17,119 @@ interface SidebarContentProps {
   theme: TuiTheme;
 }
 
-const SINGLE_BORDER = { type: 'single' } as any;
+type ThemeColor = string | import('@opentui/core').RGBA;
 
-type PaletteColor = import('@opentui/core').RGBA | string;
-
-interface Palette {
-  panel: PaletteColor;
-  surface: PaletteColor;
-  text: PaletteColor;
-  muted: PaletteColor;
-  accent: PaletteColor;
-}
-
-function getPalette(theme: TuiTheme): Palette {
-  const raw = theme.current as unknown as Record<string, unknown>;
-  const get = (name: string, fallback: string): PaletteColor => {
-    const v = raw[name];
-    if (typeof v === 'string') return v;
-    if (v && typeof v === 'object') return v as import('@opentui/core').RGBA;
-    return fallback;
-  };
-  return {
-    panel: get('backgroundPanel', '#111111'),
-    surface: get('background', '#171717'),
-    text: get('text', '#f0f0f0'),
-    muted: get('textMuted', '#a5a5a5'),
-    accent: get('primary', '#5f87ff'),
-  };
+interface ThemeColors {
+  text: ThemeColor;
+  textMuted: ThemeColor;
+  [key: string]: unknown;
 }
 
 interface RuleSectionProps {
-  label: string;
+  title: string;
   rules: SidebarRuleEntry[];
-  palette: Palette;
+  theme: ThemeColors;
+  open: boolean;
+  onToggle: () => void;
   expandedIndex: number | null;
   globalOffset: number;
-  onToggle: (globalIndex: number) => void;
+  onExpandToggle: (globalIndex: number) => void;
 }
 
 function RuleSection(props: RuleSectionProps): JSX.Element {
   return (
     <Show when={props.rules.length > 0}>
-      <box flexDirection="column" paddingTop={1}>
-        <text fg={props.palette.muted}>
-          {`${props.rules.length} ${props.label}`}
-        </text>
-        <For each={props.rules}>
-          {(rule, localIndex) => {
-            const globalIndex = () => props.globalOffset + localIndex();
-            return (
-              <box
-                flexDirection="column"
-                onMouseDown={() => props.onToggle(globalIndex())}
-              >
-                <text fg={props.palette.text} content={`  ${rule.name}`} />
-
-                <Show when={props.expandedIndex === globalIndex()}>
-                  <box flexDirection="column" paddingLeft={4}>
-                    <text
-                      fg={props.palette.muted}
-                      content={`Path: ${rule.path}`}
-                    />
-                    <Show when={(rule.metadata.globs?.length ?? 0) > 0}>
-                      <text
-                        fg={props.palette.muted}
-                        content={`Globs: ${rule.metadata.globs!.join(', ')}`}
-                      />
-                    </Show>
-                    <Show when={(rule.metadata.keywords?.length ?? 0) > 0}>
-                      <text
-                        fg={props.palette.muted}
-                        content={`Keywords: ${rule.metadata.keywords!.join(', ')}`}
-                      />
-                    </Show>
-                    <Show when={(rule.metadata.tools?.length ?? 0) > 0}>
-                      <text
-                        fg={props.palette.muted}
-                        content={`Tools: ${rule.metadata.tools!.join(', ')}`}
-                      />
-                    </Show>
-                    <Show when={(rule.metadata.model?.length ?? 0) > 0}>
-                      <text
-                        fg={props.palette.muted}
-                        content={`Model: ${rule.metadata.model!.join(', ')}`}
-                      />
-                    </Show>
-                    <Show when={(rule.metadata.agent?.length ?? 0) > 0}>
-                      <text
-                        fg={props.palette.muted}
-                        content={`Agent: ${rule.metadata.agent!.join(', ')}`}
-                      />
-                    </Show>
-                    <Show when={(rule.metadata.command?.length ?? 0) > 0}>
-                      <text
-                        fg={props.palette.muted}
-                        content={`Command: ${rule.metadata.command!.join(', ')}`}
-                      />
-                    </Show>
-                    <Show when={(rule.metadata.project?.length ?? 0) > 0}>
-                      <text
-                        fg={props.palette.muted}
-                        content={`Project: ${rule.metadata.project!.join(', ')}`}
-                      />
-                    </Show>
-                    <Show when={(rule.metadata.branch?.length ?? 0) > 0}>
-                      <text
-                        fg={props.palette.muted}
-                        content={`Branch: ${rule.metadata.branch!.join(', ')}`}
-                      />
-                    </Show>
-                    <Show when={(rule.metadata.os?.length ?? 0) > 0}>
-                      <text
-                        fg={props.palette.muted}
-                        content={`OS: ${rule.metadata.os!.join(', ')}`}
-                      />
-                    </Show>
-                    <Show when={rule.metadata.ci !== undefined}>
-                      <text
-                        fg={props.palette.muted}
-                        content={`CI: ${String(rule.metadata.ci)}`}
-                      />
-                    </Show>
-                    <Show when={rule.metadata.match}>
-                      <text
-                        fg={props.palette.muted}
-                        content={`Match: ${rule.metadata.match}`}
-                      />
-                    </Show>
+      <box>
+        <box flexDirection="row" gap={1} onMouseDown={() => props.onToggle()}>
+          <text fg={props.theme.text}>{props.open ? '▼' : '▶'}</text>
+          <text fg={props.theme.text}>
+            {props.title}
+            <Show when={!props.open}>
+              <span style={{ fg: props.theme.textMuted }}>
+                {' '}
+                ({props.rules.length})
+              </span>
+            </Show>
+          </text>
+        </box>
+        <Show when={props.open}>
+          <For each={props.rules}>
+            {(rule, localIndex) => {
+              const globalIndex = () => props.globalOffset + localIndex();
+              return (
+                <box
+                  flexDirection="column"
+                  onMouseDown={() => props.onExpandToggle(globalIndex())}
+                >
+                  <box flexDirection="row" gap={1}>
+                    <text fg={props.theme.textMuted}>•</text>
+                    <text fg={props.theme.text}>{rule.name}</text>
                   </box>
-                </Show>
-              </box>
-            );
-          }}
-        </For>
+                  <Show when={props.expandedIndex === globalIndex()}>
+                    <box flexDirection="column" paddingLeft={4}>
+                      <text fg={props.theme.textMuted}>{rule.path}</text>
+                      <Show when={(rule.metadata.globs?.length ?? 0) > 0}>
+                        <text fg={props.theme.textMuted}>
+                          Globs: {rule.metadata.globs!.join(', ')}
+                        </text>
+                      </Show>
+                      <Show when={(rule.metadata.keywords?.length ?? 0) > 0}>
+                        <text fg={props.theme.textMuted}>
+                          Keywords: {rule.metadata.keywords!.join(', ')}
+                        </text>
+                      </Show>
+                      <Show when={(rule.metadata.tools?.length ?? 0) > 0}>
+                        <text fg={props.theme.textMuted}>
+                          Tools: {rule.metadata.tools!.join(', ')}
+                        </text>
+                      </Show>
+                      <Show when={(rule.metadata.model?.length ?? 0) > 0}>
+                        <text fg={props.theme.textMuted}>
+                          Model: {rule.metadata.model!.join(', ')}
+                        </text>
+                      </Show>
+                      <Show when={(rule.metadata.agent?.length ?? 0) > 0}>
+                        <text fg={props.theme.textMuted}>
+                          Agent: {rule.metadata.agent!.join(', ')}
+                        </text>
+                      </Show>
+                      <Show when={(rule.metadata.command?.length ?? 0) > 0}>
+                        <text fg={props.theme.textMuted}>
+                          Command: {rule.metadata.command!.join(', ')}
+                        </text>
+                      </Show>
+                      <Show when={(rule.metadata.project?.length ?? 0) > 0}>
+                        <text fg={props.theme.textMuted}>
+                          Project: {rule.metadata.project!.join(', ')}
+                        </text>
+                      </Show>
+                      <Show when={(rule.metadata.branch?.length ?? 0) > 0}>
+                        <text fg={props.theme.textMuted}>
+                          Branch: {rule.metadata.branch!.join(', ')}
+                        </text>
+                      </Show>
+                      <Show when={(rule.metadata.os?.length ?? 0) > 0}>
+                        <text fg={props.theme.textMuted}>
+                          OS: {rule.metadata.os!.join(', ')}
+                        </text>
+                      </Show>
+                      <Show when={rule.metadata.ci !== undefined}>
+                        <text fg={props.theme.textMuted}>
+                          CI: {String(rule.metadata.ci)}
+                        </text>
+                      </Show>
+                      <Show when={rule.metadata.match}>
+                        <text fg={props.theme.textMuted}>
+                          Match: {rule.metadata.match}
+                        </text>
+                      </Show>
+                    </box>
+                  </Show>
+                </box>
+              );
+            }}
+          </For>
+        </Show>
       </box>
     </Show>
   );
@@ -165,6 +145,10 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
   const [lastDir, setLastDir] = createSignal<string | null | undefined>(
     undefined
   );
+  const [projectOpen, setProjectOpen] = createSignal(false);
+  const [globalOpen, setGlobalOpen] = createSignal(false);
+
+  const theme = (): ThemeColors => props.theme.current as ThemeColors;
 
   const resolveProjectDir = (): string | null => {
     return props.api.state.path.directory ?? null;
@@ -177,6 +161,8 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
     setLastDir(dir);
     setStatus('loading');
     setExpandedIndex(null);
+    setProjectOpen(false);
+    setGlobalOpen(false);
 
     try {
       const result = await loadSidebarRules(dir);
@@ -189,10 +175,6 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
     }
   };
 
-  // Load rules on mount and reload when the workspace changes.
-  // Track both sessionId (which changes on workspace switch) and
-  // the resolved directory. The loadRules guard (dir === lastDir())
-  // prevents redundant reloads if sessionId changes but dir stays the same.
   createEffect(() => {
     void props.sessionId;
     const currentDir = resolveProjectDir();
@@ -204,7 +186,6 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
     setExpandedIndex(prev => (prev === index ? null : index));
   };
 
-  const palette = () => getPalette(props.theme);
   const projectRules = createMemo(() =>
     rules().filter(r => r.source === 'project')
   );
@@ -213,64 +194,47 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
   );
 
   return (
-    <box
-      width="100%"
-      flexDirection="column"
-      backgroundColor={palette().surface}
-      border={SINGLE_BORDER}
-      borderColor={palette().accent}
-      paddingTop={1}
-      paddingBottom={1}
-      paddingLeft={1}
-      paddingRight={1}
-    >
-      {/* Header badge */}
-      <box flexDirection="row" alignItems="center">
-        <box
-          paddingLeft={1}
-          paddingRight={1}
-          backgroundColor={palette().accent}
-        >
-          <text fg={palette().panel}>
-            <b>oc-rules</b>
-          </text>
-        </box>
-      </box>
+    <box>
+      <text fg={theme().text}>
+        <b>Rules</b>
+      </text>
 
-      {/* Loading / Error states */}
       <Show when={status() === 'loading'}>
-        <text fg={palette().muted} content="Loading rules..." />
+        <text fg={theme().textMuted}>Loading...</text>
       </Show>
       <Show when={status() === 'error'}>
-        <text fg={palette().muted} content="Failed to load rules" />
+        <text fg={theme().textMuted}>Failed to load rules</text>
       </Show>
 
-      {/* Rule sections */}
       <Show when={status() === 'loaded'}>
         <Show
           when={rules().length > 0}
-          fallback={<text fg={palette().muted} content="No rules found" />}
+          fallback={<text fg={theme().textMuted}>No rules found</text>}
         >
           <RuleSection
-            label="project rules"
+            title="Project"
             rules={projectRules()}
-            palette={palette()}
+            theme={theme()}
+            open={projectOpen()}
+            onToggle={() => setProjectOpen(x => !x)}
             expandedIndex={expandedIndex()}
             globalOffset={0}
-            onToggle={toggleExpand}
+            onExpandToggle={toggleExpand}
           />
           <RuleSection
-            label="global rules"
+            title="Global"
             rules={globalRules()}
-            palette={palette()}
+            theme={theme()}
+            open={globalOpen()}
+            onToggle={() => setGlobalOpen(x => !x)}
             expandedIndex={expandedIndex()}
             globalOffset={projectRules().length}
-            onToggle={toggleExpand}
+            onExpandToggle={toggleExpand}
           />
         </Show>
         <Show when={skippedCount() > 0}>
-          <text fg={palette().muted}>
-            {`${skippedCount()} rules skipped (unreadable)`}
+          <text fg={theme().textMuted}>
+            {skippedCount()} rules skipped (unreadable)
           </text>
         </Show>
       </Show>
