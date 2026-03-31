@@ -166,10 +166,13 @@ describe('module boundary tests', () => {
 
 describe('OpenCodeRulesPlugin', () => {
   let savedEnvXDG: string | undefined;
+  let savedEnvConfigDir: string | undefined;
 
   beforeEach(() => {
     setupTestDirs();
     savedEnvXDG = process.env.XDG_CONFIG_HOME;
+    savedEnvConfigDir = process.env.OPENCODE_CONFIG_DIR;
+    delete process.env.OPENCODE_CONFIG_DIR;
   });
 
   afterEach(() => {
@@ -180,6 +183,11 @@ describe('OpenCodeRulesPlugin', () => {
       delete process.env.XDG_CONFIG_HOME;
     } else {
       process.env.XDG_CONFIG_HOME = savedEnvXDG;
+    }
+    if (savedEnvConfigDir === undefined) {
+      delete process.env.OPENCODE_CONFIG_DIR;
+    } else {
+      process.env.OPENCODE_CONFIG_DIR = savedEnvConfigDir;
     }
   });
 
@@ -381,10 +389,13 @@ describe('OpenCodeRulesPlugin', () => {
 
 describe('SessionState', () => {
   let savedEnvXDG: string | undefined;
+  let savedEnvConfigDir: string | undefined;
 
   beforeEach(() => {
     setupTestDirs();
     savedEnvXDG = process.env.XDG_CONFIG_HOME;
+    savedEnvConfigDir = process.env.OPENCODE_CONFIG_DIR;
+    delete process.env.OPENCODE_CONFIG_DIR;
   });
 
   afterEach(async () => {
@@ -395,6 +406,11 @@ describe('SessionState', () => {
       delete process.env.XDG_CONFIG_HOME;
     } else {
       process.env.XDG_CONFIG_HOME = savedEnvXDG;
+    }
+    if (savedEnvConfigDir === undefined) {
+      delete process.env.OPENCODE_CONFIG_DIR;
+    } else {
+      process.env.OPENCODE_CONFIG_DIR = savedEnvConfigDir;
     }
   });
 
@@ -731,11 +747,14 @@ describe('SessionState', () => {
 
 describe('Active rules state persistence', () => {
   let savedEnvXDG: string | undefined;
+  let savedEnvConfigDir: string | undefined;
   let stateDir: string;
 
   beforeEach(() => {
     setupTestDirs();
     savedEnvXDG = process.env.XDG_CONFIG_HOME;
+    savedEnvConfigDir = process.env.OPENCODE_CONFIG_DIR;
+    delete process.env.OPENCODE_CONFIG_DIR;
     const { testDir } = getTestDirs();
     stateDir = path.join(testDir, 'state');
     mkdirSync(stateDir, { recursive: true });
@@ -751,6 +770,11 @@ describe('Active rules state persistence', () => {
       delete process.env.XDG_CONFIG_HOME;
     } else {
       process.env.XDG_CONFIG_HOME = savedEnvXDG;
+    }
+    if (savedEnvConfigDir === undefined) {
+      delete process.env.OPENCODE_CONFIG_DIR;
+    } else {
+      process.env.OPENCODE_CONFIG_DIR = savedEnvConfigDir;
     }
   });
 
@@ -892,11 +916,14 @@ describe('session-store runtime exports', () => {
 describe('CI environment detection', () => {
   let savedCiEnv: CiEnvSnapshot;
   let savedXDG: string | undefined;
+  let savedConfigDir: string | undefined;
 
   beforeEach(() => {
     setupTestDirs();
     savedCiEnv = saveCiEnvVars();
     savedXDG = process.env.XDG_CONFIG_HOME;
+    savedConfigDir = process.env.OPENCODE_CONFIG_DIR;
+    delete process.env.OPENCODE_CONFIG_DIR;
   });
 
   afterEach(async () => {
@@ -908,6 +935,11 @@ describe('CI environment detection', () => {
       delete process.env.XDG_CONFIG_HOME;
     } else {
       process.env.XDG_CONFIG_HOME = savedXDG;
+    }
+    if (savedConfigDir === undefined) {
+      delete process.env.OPENCODE_CONFIG_DIR;
+    } else {
+      process.env.OPENCODE_CONFIG_DIR = savedConfigDir;
     }
   });
 

@@ -10,7 +10,7 @@ This document explains how to use OpenCode Rules to inject custom instructions i
 
 Rules are defined in Markdown files (`.md` or `.mdc`). These files can be located in two places:
 
-- **Global Rules:** `~/.config/opencode/rules/`
+- **Global Rules:** `$OPENCODE_CONFIG_DIR/rules/` if set, otherwise `$XDG_CONFIG_HOME/opencode/rules/` (typically `~/.config/opencode/rules/`)
 - **Project Rules:** `.opencode/rules/` in the root of your project.
 
 Both directories are scanned **recursively**, so you can organize your rules into subdirectories. Rule discovery happens once when the plugin initializes.

@@ -215,10 +215,13 @@ describe('disambiguateNames', () => {
 describe('loadSidebarRules', () => {
   let testDir: string;
   let savedXDG: string | undefined;
+  let savedConfigDir: string | undefined;
 
   beforeEach(() => {
     testDir = mkdtempSync(path.join(os.tmpdir(), 'tui-rules-test-'));
     savedXDG = process.env['XDG_CONFIG_HOME'];
+    savedConfigDir = process.env['OPENCODE_CONFIG_DIR'];
+    delete process.env['OPENCODE_CONFIG_DIR'];
     clearRuleCache();
   });
 
@@ -228,6 +231,11 @@ describe('loadSidebarRules', () => {
       delete process.env['XDG_CONFIG_HOME'];
     } else {
       process.env['XDG_CONFIG_HOME'] = savedXDG;
+    }
+    if (savedConfigDir === undefined) {
+      delete process.env['OPENCODE_CONFIG_DIR'];
+    } else {
+      process.env['OPENCODE_CONFIG_DIR'] = savedConfigDir;
     }
   });
 
@@ -341,12 +349,15 @@ describe('loadSidebarRules isActive behavior', () => {
   let testDir: string;
   let stateDir: string;
   let savedXDG: string | undefined;
+  let savedConfigDir: string | undefined;
 
   beforeEach(() => {
     testDir = mkdtempSync(path.join(os.tmpdir(), 'tui-rules-active-test-'));
     stateDir = path.join(testDir, 'state');
     mkdirSync(stateDir, { recursive: true });
     savedXDG = process.env['XDG_CONFIG_HOME'];
+    savedConfigDir = process.env['OPENCODE_CONFIG_DIR'];
+    delete process.env['OPENCODE_CONFIG_DIR'];
     clearRuleCache();
     _setStateDirForTesting(stateDir);
   });
@@ -358,6 +369,11 @@ describe('loadSidebarRules isActive behavior', () => {
       delete process.env['XDG_CONFIG_HOME'];
     } else {
       process.env['XDG_CONFIG_HOME'] = savedXDG;
+    }
+    if (savedConfigDir === undefined) {
+      delete process.env['OPENCODE_CONFIG_DIR'];
+    } else {
+      process.env['OPENCODE_CONFIG_DIR'] = savedConfigDir;
     }
   });
 

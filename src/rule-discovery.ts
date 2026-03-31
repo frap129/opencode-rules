@@ -91,6 +91,11 @@ export async function getCachedRule(
  * Get the global rules directory path
  */
 function getGlobalRulesDir(): string | null {
+  const opencodeConfigDir = process.env.OPENCODE_CONFIG_DIR;
+  if (opencodeConfigDir) {
+    return path.join(opencodeConfigDir, 'rules');
+  }
+
   const xdgConfigHome = process.env.XDG_CONFIG_HOME;
   if (xdgConfigHome) {
     return path.join(xdgConfigHome, 'opencode', 'rules');
@@ -160,6 +165,7 @@ export interface DiscoveredRule {
 /**
  * Discover markdown rule files from standard directories
  * Searches recursively in:
+ * - $OPENCODE_CONFIG_DIR/rules/ (highest priority)
  * - $XDG_CONFIG_HOME/opencode/rules/ (or ~/.config/opencode/rules as fallback)
  * - .opencode/rules/ (in project directory if provided)
  * Finds all .md and .mdc files including nested subdirectories.
