@@ -1,6 +1,7 @@
 // tui/data/rules.ts
 import { discoverRuleFiles, getCachedRule } from '../../src/rule-discovery.js';
 import type { RuleMetadata } from '../../src/rule-metadata.js';
+import { readActiveRulesState } from '../../src/active-rules-state.js';
 import path from 'path';
 
 /** Represents a rule as displayed in the sidebar */
@@ -17,11 +18,20 @@ export interface SidebarRuleEntry {
   conditionSummary: string;
   /** Full metadata for expanded view */
   metadata: RuleMetadata;
+  /**
+   * Active state of the rule.
+   * - true: rule is active (matched by evaluation or unconditional without state file)
+   * - false: rule is not active (not matched by evaluation)
+   * - null: state not yet determined (conditional rule without state file)
+   */
+  isActive: boolean | null;
 }
 
 export interface LoadSidebarRulesResult {
   rules: SidebarRuleEntry[];
   skippedCount: number;
+  /** Whether active rules state was successfully read from disk */
+  hasEvaluationState: boolean;
 }
 
 /**
@@ -29,12 +39,22 @@ export interface LoadSidebarRulesResult {
  * Reuses discoverRuleFiles/getCachedRule from the server plugin.
  *
  * @param projectDir - Project directory or null (global rules only)
+ * @param sessionId - Optional session ID to read active rules state
  */
 export async function loadSidebarRules(
-  projectDir: string | null
+  projectDir: string | null,
+  sessionId?: string
 ): Promise<LoadSidebarRulesResult> {
   // discoverRuleFiles accepts string | undefined, not null
   const discovered = await discoverRuleFiles(projectDir ?? undefined);
+
+  // Read active rules state if sessionId provided
+  const activeState = sessionId ? await readActiveRulesState(sessionId) : null;
+  const hasEvaluationState = activeState !== null;
+  const matchedPathsSet = hasEvaluationState
+    ? new Set(activeState.matchedRulePaths)
+    : null;
+
   const entries: SidebarRuleEntry[] = [];
   let skippedCount = 0;
 
@@ -54,6 +74,16 @@ export async function loadSidebarRules(
       ? formatConditionSummary(meta!)
       : 'always active';
 
+    // Determine isActive based on state file or fallback logic
+    let isActive: boolean | null;
+    if (matchedPathsSet !== null) {
+      // With state file: check if this rule's absolute path is in matchedPaths
+      isActive = matchedPathsSet.has(rule.filePath);
+    } else {
+      // Without state file: unconditional = true, conditional = null
+      isActive = isConditional ? null : true;
+    }
+
     entries.push({
       name: '', // placeholder — set in disambiguation pass
       path: rule.relativePath,
@@ -61,6 +91,7 @@ export async function loadSidebarRules(
       isConditional,
       conditionSummary,
       metadata: meta ?? {},
+      isActive,
     });
   }
 
@@ -74,7 +105,7 @@ export async function loadSidebarRules(
     return a.path.localeCompare(b.path);
   });
 
-  return { rules: entries, skippedCount };
+  return { rules: entries, skippedCount, hasEvaluationState };
 }
 
 /**
