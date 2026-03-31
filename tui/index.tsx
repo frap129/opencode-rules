@@ -7,7 +7,7 @@ const id = 'opencode-rules' as const;
 
 const tui: TuiPlugin = async api => {
   api.slots.register({
-    order: 90,
+    order: 350,
     slots: {
       sidebar_content: (ctx, props) => (
         <SidebarContent
