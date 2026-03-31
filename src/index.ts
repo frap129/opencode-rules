@@ -62,5 +62,6 @@ const __testOnly = Object.freeze(
   })
 );
 
-export default openCodeRulesPlugin;
+const id = 'opencode-rules' as const;
+export default { id, server: openCodeRulesPlugin };
 export { __testOnly };

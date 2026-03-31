@@ -65,7 +65,9 @@ Model-specific guidelines.`
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
     const hooks = await plugin({
       client: mockClient as unknown,
@@ -113,7 +115,9 @@ Agent-specific guidelines.`
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
     const hooks = await plugin({
       client: mockClient as unknown,
@@ -161,7 +165,9 @@ Planning guidelines.`
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
     const hooks = await plugin({
       client: mockClient as unknown,
@@ -210,7 +216,9 @@ Platform-specific guidelines.`
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
     const hooks = await plugin({
       client: mockClient as unknown,
@@ -245,7 +253,9 @@ CI-authoritative guidelines.`
     process.env.CI = 'false';
     process.env.GITHUB_ACTIONS = 'true';
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
     const hooks = await plugin({
       client: mockClient as unknown,
@@ -283,7 +293,9 @@ All dimensions must match.`
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
     const hooks = await plugin({
       client: mockClient as unknown,
@@ -340,7 +352,9 @@ All dimensions must match.`
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
     const hooks = await plugin({
       client: mockClient as unknown,
@@ -396,7 +410,9 @@ Node.js project guidelines.`
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
     const hooks = await plugin({
       client: mockClient as unknown,
@@ -435,7 +451,9 @@ Feature branch guidelines.`
       .mockResolvedValue('feature/add-login');
 
     try {
-      const { default: plugin } = await import('./index.js');
+      const {
+        default: { server: plugin },
+      } = await import('./index.js');
       const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
       const hooks = await plugin({
         client: mockClient as unknown,
@@ -470,7 +488,9 @@ Feature branch guidelines.`
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     try {
-      const { default: plugin } = await import('./index.js');
+      const {
+        default: { server: plugin },
+      } = await import('./index.js');
       const mockClient = {
         tool: {
           ids: vi.fn(async () => {
@@ -509,7 +529,9 @@ Feature branch guidelines.`
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
     const hooks = await plugin({
       client: mockClient as unknown,
@@ -540,7 +562,9 @@ Feature branch guidelines.`
     const nonGitDir = path.join(testDir, 'not-a-git-repo');
     mkdirSync(nonGitDir, { recursive: true });
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
     const hooks = await plugin({
       client: mockClient as unknown,

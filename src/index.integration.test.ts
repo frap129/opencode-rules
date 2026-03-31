@@ -748,7 +748,9 @@ Use React best practices for components.`
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
 
     const hooks = await plugin(
@@ -807,7 +809,9 @@ Use React best practices for components.`
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
 
     const hooks = await plugin(
@@ -870,7 +874,9 @@ Special rule content.`
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
 
     const hooks = await plugin(
@@ -940,7 +946,10 @@ describe('Session compacting behavior', () => {
     const { testDir } = getTestDirs();
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin, __testOnly } = await import('./index.js');
+    const {
+      default: { server: plugin },
+      __testOnly,
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
     const hooks = await plugin(
       mockInput as unknown as Parameters<typeof plugin>[0]
@@ -970,7 +979,10 @@ describe('Session compacting behavior', () => {
     const { testDir } = getTestDirs();
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin, __testOnly } = await import('./index.js');
+    const {
+      default: { server: plugin },
+      __testOnly,
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
     const hooks = await plugin(
       mockInput as unknown as Parameters<typeof plugin>[0]
@@ -1007,7 +1019,10 @@ describe('Session compacting behavior', () => {
     const { testDir } = getTestDirs();
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin, __testOnly } = await import('./index.js');
+    const {
+      default: { server: plugin },
+      __testOnly,
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
     const hooks = await plugin(
       mockInput as unknown as Parameters<typeof plugin>[0]
@@ -1039,7 +1054,10 @@ describe('Session compacting behavior', () => {
     const { testDir } = getTestDirs();
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin, __testOnly } = await import('./index.js');
+    const {
+      default: { server: plugin },
+      __testOnly,
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
     const hooks = await plugin(
       mockInput as unknown as Parameters<typeof plugin>[0]
@@ -1080,7 +1098,9 @@ MCP Context7 rule content`;
     writeFileSync(path.join(globalRulesDir, 'context7.md'), ruleContent);
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({
       testDir,
       mcpStatus: { context7: { status: 'connected' } },
