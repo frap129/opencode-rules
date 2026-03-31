@@ -4,6 +4,7 @@ import {
   createSignal,
   createEffect,
   createMemo,
+  onCleanup,
   Show,
   For,
   type JSX,
@@ -34,9 +35,27 @@ interface RuleSectionProps {
   expandedIndex: number | null;
   globalOffset: number;
   onExpandToggle: (globalIndex: number) => void;
+  hasEvaluationState: boolean;
 }
 
+const BULLET_GREEN: ThemeColor = 'green';
+
 function RuleSection(props: RuleSectionProps): JSX.Element {
+  const activeCount = createMemo(
+    () => props.rules.filter(r => r.isActive === true).length
+  );
+
+  const headerCount = createMemo(() => {
+    if (props.hasEvaluationState) {
+      return `(${activeCount()}/${props.rules.length})`;
+    }
+    return `(${props.rules.length})`;
+  });
+
+  const bulletColor = (rule: SidebarRuleEntry): ThemeColor => {
+    return rule.isActive === true ? BULLET_GREEN : props.theme.textMuted;
+  };
+
   return (
     <Show when={props.rules.length > 0}>
       <box>
@@ -47,7 +66,7 @@ function RuleSection(props: RuleSectionProps): JSX.Element {
             <Show when={!props.open}>
               <span style={{ fg: props.theme.textMuted }}>
                 {' '}
-                ({props.rules.length})
+                {headerCount()}
               </span>
             </Show>
           </text>
@@ -62,7 +81,7 @@ function RuleSection(props: RuleSectionProps): JSX.Element {
                   onMouseDown={() => props.onExpandToggle(globalIndex())}
                 >
                   <box flexDirection="row" gap={1}>
-                    <text fg={props.theme.textMuted}>•</text>
+                    <text fg={bulletColor(rule)}>•</text>
                     <text fg={props.theme.text}>{rule.name}</text>
                   </box>
                   <Show when={props.expandedIndex === globalIndex()}>
@@ -141,12 +160,17 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
     'loading'
   );
   const [skippedCount, setSkippedCount] = createSignal(0);
+  const [hasEvaluationState, setHasEvaluationState] = createSignal(false);
   const [expandedIndex, setExpandedIndex] = createSignal<number | null>(null);
   const [lastDir, setLastDir] = createSignal<string | null | undefined>(
     undefined
   );
+  const [lastSessionId, setLastSessionId] = createSignal<string | undefined>(
+    undefined
+  );
   const [projectOpen, setProjectOpen] = createSignal(false);
   const [globalOpen, setGlobalOpen] = createSignal(false);
+  const [refreshCounter, setRefreshCounter] = createSignal(0);
 
   const theme = (): ThemeColors => props.theme.current as ThemeColors;
 
@@ -154,20 +178,24 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
     return props.api.state.path.directory ?? null;
   };
 
-  const loadRules = async (): Promise<void> => {
+  // Initial load: triggered by session/directory change, resets all UI state
+  const loadRulesInitial = async (): Promise<void> => {
     const dir = resolveProjectDir();
-    if (dir === lastDir()) return;
+    const sessionId = props.sessionId;
 
     setLastDir(dir);
+    setLastSessionId(sessionId);
     setStatus('loading');
-    setExpandedIndex(null);
-    setProjectOpen(false);
-    setGlobalOpen(false);
 
     try {
-      const result = await loadSidebarRules(dir);
+      const result = await loadSidebarRules(dir, sessionId);
+      // Verify context hasn't changed during async load
+      if (resolveProjectDir() !== dir || props.sessionId !== sessionId) {
+        return; // Discard stale result
+      }
       setRules(result.rules);
       setSkippedCount(result.skippedCount);
+      setHasEvaluationState(result.hasEvaluationState);
       setStatus('loaded');
     } catch (err) {
       console.error('[opencode-rules] Failed to load rules:', err);
@@ -175,11 +203,76 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
     }
   };
 
+  // Refresh load: triggered by events, only updates rule data (no UI state reset)
+  const loadRulesRefresh = async (): Promise<void> => {
+    const dir = resolveProjectDir();
+    const sessionId = props.sessionId;
+
+    try {
+      const result = await loadSidebarRules(dir, sessionId);
+      // Verify context hasn't changed during async load
+      if (resolveProjectDir() !== dir || props.sessionId !== sessionId) {
+        return; // Discard stale result
+      }
+      setRules(result.rules);
+      setSkippedCount(result.skippedCount);
+      setHasEvaluationState(result.hasEvaluationState);
+    } catch (err) {
+      console.error('[opencode-rules] Failed to refresh rules:', err);
+    }
+  };
+
+  // Effect 1: Initial load on session/directory change
   createEffect(() => {
-    void props.sessionId;
+    const currentSessionId = props.sessionId;
     const currentDir = resolveProjectDir();
-    void currentDir;
-    void loadRules();
+
+    // Check if session or directory changed
+    if (currentSessionId !== lastSessionId() || currentDir !== lastDir()) {
+      // Reset UI state on session/directory change
+      setExpandedIndex(null);
+      setProjectOpen(false);
+      setGlobalOpen(false);
+      void loadRulesInitial();
+    }
+  });
+
+  // Effect 2: Refresh on event-driven updates (refreshCounter changes)
+  createEffect(() => {
+    const counter = refreshCounter();
+    if (counter > 0) {
+      void loadRulesRefresh();
+    }
+  });
+
+  // Subscribe to OpenCode events with debounce
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const triggerRefresh = (): void => {
+    if (debounceTimer !== null) {
+      clearTimeout(debounceTimer);
+    }
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null;
+      setRefreshCounter(c => c + 1);
+    }, 150);
+  };
+
+  const unsubMessageUpdated = props.api.event.on(
+    'message.updated',
+    triggerRefresh
+  );
+  const unsubSessionStatus = props.api.event.on(
+    'session.status',
+    triggerRefresh
+  );
+
+  onCleanup(() => {
+    if (debounceTimer !== null) {
+      clearTimeout(debounceTimer);
+    }
+    unsubMessageUpdated();
+    unsubSessionStatus();
   });
 
   const toggleExpand = (index: number): void => {
@@ -220,6 +313,7 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
             expandedIndex={expandedIndex()}
             globalOffset={0}
             onExpandToggle={toggleExpand}
+            hasEvaluationState={hasEvaluationState()}
           />
           <RuleSection
             title="Global"
@@ -230,6 +324,7 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
             expandedIndex={expandedIndex()}
             globalOffset={projectRules().length}
             onExpandToggle={toggleExpand}
+            hasEvaluationState={hasEvaluationState()}
           />
         </Show>
         <Show when={skippedCount() > 0}>
