@@ -23,6 +23,7 @@ type ThemeColor = string | import('@opentui/core').RGBA;
 interface ThemeColors {
   text: ThemeColor;
   textMuted: ThemeColor;
+  success: ThemeColor;
   [key: string]: unknown;
 }
 
@@ -38,8 +39,6 @@ interface RuleSectionProps {
   hasEvaluationState: boolean;
 }
 
-const BULLET_GREEN: ThemeColor = '#02a25a';
-
 function RuleSection(props: RuleSectionProps): JSX.Element {
   const activeCount = createMemo(
     () => props.rules.filter(r => r.isActive === true).length
@@ -53,7 +52,7 @@ function RuleSection(props: RuleSectionProps): JSX.Element {
   });
 
   const bulletColor = (rule: SidebarRuleEntry): ThemeColor => {
-    return rule.isActive === true ? BULLET_GREEN : props.theme.textMuted;
+    return rule.isActive === true ? props.theme.success : props.theme.textMuted;
   };
 
   return (
