@@ -14,14 +14,13 @@ declare module '@opencode-ai/plugin/tui' {
 
   export interface TuiSlotMap {
     sidebar_content: { session_id: string };
-    [key: string]: Record<string, unknown>;
   }
 
   export interface TuiSlotContext {
     theme: TuiTheme;
   }
 
-  export type SlotRenderer<K extends keyof TuiSlotMap = keyof TuiSlotMap> = (
+  export type SlotRenderer<K extends keyof TuiSlotMap> = (
     ctx: Readonly<TuiSlotContext>,
     props: TuiSlotMap[K]
   ) => JSX.Element;

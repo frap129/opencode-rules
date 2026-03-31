@@ -5,14 +5,18 @@
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
   "type": "module",
+  "oc-plugin": [
+    "server",
+    "tui"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
     "test": "vitest",
     "test:run": "vitest run",
-    "lint": "eslint src",
-    "format": "prettier --write src/**/*.ts",
-    "format:check": "prettier --check src/**/*.ts",
+    "lint": "eslint src tui",
+    "format": "prettier --write 'src/**/*.ts' 'tui/**/*.tsx' 'tui/**/*.ts'",
+    "format:check": "prettier --check 'src/**/*.ts' 'tui/**/*.tsx' 'tui/**/*.ts'",
     "clean": "rm -rf dist",
     "prepublishOnly": "npm run clean && npm run build"
   },
@@ -34,6 +38,20 @@
   },
   "files": [
     "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*",
+    "!dist/**/test-fixtures.*",
+    "!dist/**/api-surface.typecheck.*",
+    "src/",
+    "!src/**/*.test.ts",
+    "!src/**/*.spec.ts",
+    "!src/test-fixtures.ts",
+    "!src/api-surface.typecheck.ts",
+    "tui/",
+    "!tui/**/*.test.ts",
+    "!tui/**/*.test.tsx",
+    "!tui/**/*.spec.ts",
+    "!tui/**/*.spec.tsx",
     "README.md",
     "LICENSE"
   ],
@@ -41,6 +59,10 @@
     ".": {
       "types": "./dist/src/index.d.ts",
       "import": "./dist/src/index.js"
+    },
+    "./tui": {
+      "types": "./dist/tui/index.d.ts",
+      "import": "./tui/index.tsx"
     }
   },
   "peerDependencies": {
