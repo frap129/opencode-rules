@@ -1,6 +1,6 @@
 {
   "name": "opencode-rules",
-  "version": "0.6.0",
+  "version": "0.6.0-beta",
   "description": "OpenCode plugin that discovers and injects markdown rules into system prompts",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
@@ -90,7 +90,7 @@
     "@typescript-eslint/parser": "^6.21.0",
     "eslint": "^8.57.1",
     "prettier": "^3.8.1",
-    "solid-js": "^1.9.12",
+    "solid-js": "1.9.11",
     "typescript": "^5.9.3",
     "vitest": "^1.6.1"
   },
