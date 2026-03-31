@@ -65,7 +65,9 @@ Model-specific guidelines.`
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
     const hooks = await plugin({
       client: mockClient as unknown,
@@ -113,7 +115,9 @@ Agent-specific guidelines.`
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
     const hooks = await plugin({
       client: mockClient as unknown,
@@ -161,7 +165,9 @@ Planning guidelines.`
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
     const hooks = await plugin({
       client: mockClient as unknown,
@@ -210,7 +216,9 @@ Platform-specific guidelines.`
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
     const hooks = await plugin({
       client: mockClient as unknown,
@@ -245,7 +253,9 @@ CI-authoritative guidelines.`
     process.env.CI = 'false';
     process.env.GITHUB_ACTIONS = 'true';
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
     const hooks = await plugin({
       client: mockClient as unknown,
@@ -283,7 +293,9 @@ All dimensions must match.`
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
     const hooks = await plugin({
       client: mockClient as unknown,
@@ -340,7 +352,9 @@ All dimensions must match.`
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
     const hooks = await plugin({
       client: mockClient as unknown,
@@ -396,7 +410,9 @@ Node.js project guidelines.`
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
     const hooks = await plugin({
       client: mockClient as unknown,
@@ -435,7 +451,9 @@ Feature branch guidelines.`
       .mockResolvedValue('feature/add-login');
 
     try {
-      const { default: plugin } = await import('./index.js');
+      const {
+        default: { server: plugin },
+      } = await import('./index.js');
       const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
       const hooks = await plugin({
         client: mockClient as unknown,
@@ -470,7 +488,9 @@ Feature branch guidelines.`
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     try {
-      const { default: plugin } = await import('./index.js');
+      const {
+        default: { server: plugin },
+      } = await import('./index.js');
       const mockClient = {
         tool: {
           ids: vi.fn(async () => {
@@ -509,7 +529,9 @@ Feature branch guidelines.`
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
     const hooks = await plugin({
       client: mockClient as unknown,
@@ -540,7 +562,9 @@ Feature branch guidelines.`
     const nonGitDir = path.join(testDir, 'not-a-git-repo');
     mkdirSync(nonGitDir, { recursive: true });
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
     const hooks = await plugin({
       client: mockClient as unknown,
@@ -593,13 +617,13 @@ tools:
 Tools rule.`
     );
 
-    const formatted = await readAndFormatRules(toRules([rulePath]), {
+    const { formattedRules } = await readAndFormatRules(toRules([rulePath]), {
       userPrompt: 'some prompt',
       availableToolIDs: ['mcp_websearch', 'mcp_bash'],
     });
 
-    expect(formatted).toContain('tools-rule.mdc');
-    expect(formatted).toContain('Tools rule');
+    expect(formattedRules).toContain('tools-rule.mdc');
+    expect(formattedRules).toContain('Tools rule');
   });
 
   it('should ignore array passed as second arg (legacy positional pattern rejected)', async () => {
@@ -616,11 +640,11 @@ Legacy globs rule.`
     );
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const formatted = await readAndFormatRules(toRules([rulePath]), [
+    const { formattedRules } = await readAndFormatRules(toRules([rulePath]), [
       'src/app.ts',
     ] as any);
 
-    expect(formatted).toBe('');
+    expect(formattedRules).toBe('');
   });
 
   it('should ignore third positional arg (legacy userPrompt rejected)', async () => {
@@ -637,13 +661,13 @@ Legacy keywords rule.`
     );
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const formatted = await (readAndFormatRules as any)(
+    const { formattedRules } = await (readAndFormatRules as any)(
       toRules([rulePath]),
       {},
       'help with testing'
     );
 
-    expect(formatted).toBe('');
+    expect(formattedRules).toBe('');
   });
 
   it('should ignore fourth positional arg (legacy availableToolIDs rejected)', async () => {
@@ -660,13 +684,13 @@ Legacy tools rule.`
     );
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const formatted = await (readAndFormatRules as any)(
+    const { formattedRules } = await (readAndFormatRules as any)(
       toRules([rulePath]),
       {},
       undefined,
       ['mcp_websearch', 'mcp_bash']
     );
 
-    expect(formatted).toBe('');
+    expect(formattedRules).toBe('');
   });
 });

@@ -19,6 +19,9 @@ This approach allows you to dynamically include rules automatically like style g
 guidance on specific actions, etc. Unlike skills, which are called on by the agent, rules use a simple matching
 approach.
 
+> _Note:_ The name `opencode-rules` is to be concise about what this plugin does. It is in no way affiliated with Anomaly Co. or
+> the official OpenCode project.
+
 ## Features
 
 - **Dual-format support**: Load rules from both `.md` and `.mdc` files
@@ -33,10 +36,18 @@ approach.
 - **Zero-configuration**: Works out of the box with XDG Base Directory specification
 - **TypeScript-first**: Built with TypeScript for type safety and developer experience
 - **Performance optimized**: Efficient file discovery and minimal startup overhead
+- **TUI sidebar**: Real-time sidebar in the OpenCode TUI showing rule status with active/inactive indicators
 
 ## Quick Start
 
 ### Installation
+
+```bash
+opencode plugin opencode-rules@latest --global
+```
+
+<details>
+<summary>Manual installation</summary>
 
 Add the plugin to your opencode config:
 
@@ -46,6 +57,17 @@ Add the plugin to your opencode config:
   "plugin": ["opencode-rules@latest"]
 }
 ```
+
+To enable the TUI sidebar, add the same plugin entry to your TUI config:
+
+```json
+// ~/.config/opencode/tui.json
+{
+  "plugin": ["opencode-rules@latest"]
+}
+```
+
+</details>
 
 ### Create Your First Rule
 
@@ -69,6 +91,28 @@ Add the plugin to your opencode config:
 
 That's it! The rule will now be automatically injected into all AI agent prompts.
 
+## How It Works
+
+1. **Discovery**: Scan global and project directories for `.md` and `.mdc` files (at plugin init)
+2. **Parsing**: Extract metadata from files with YAML front matter
+3. **Tool Execution**: `tool.execute.before` hook captures file paths before tools run
+4. **Message Flow**: `chat.message` hook updates user prompt as messages arrive
+5. **Initial Seeding**: `experimental.chat.messages.transform` extracts context from message history once
+6. **Rule Filtering**: `experimental.chat.system.transform` evaluates rules based on context and injects into system prompt
+7. **State Persistence**: After filtering, matched rule paths are written to `~/.opencode/state/opencode-rules/{sessionId}.json` for TUI consumption
+8. **Compaction Persistence**: `experimental.session.compacting` preserves context during session compression
+
+## Performance
+
+- Rule discovery performed once at plugin initialization
+- Rule content cached with mtime-based invalidation for fast re-reads
+- Incremental session state tracking (set of paths, not message rescanning)
+- Per-session state pruned after 100 concurrent sessions to prevent memory growth
+- Efficient glob matching with `minimatch`
+- Tool-based path capture is non-blocking with minimal overhead
+- Session context cleaned up when exceeded (LRU eviction)
+- Minimal memory footprint with efficient state management
+
 ## Configuration
 
 ### Rule Discovery Locations
@@ -84,6 +128,110 @@ Both directories are scanned recursively, allowing you to organize rules into su
 
 - `.md` - Standard markdown files with optional metadata
 - `.mdc` - Markdown files with optional metadata
+
+## Metadata Format
+
+Both `.md` and `.mdc` files support optional YAML metadata for conditional rule application:
+
+```yaml
+---
+globs:
+  - 'src/**/*.ts'
+  - 'lib/**/*.js'
+keywords:
+  - 'refactoring'
+  - 'cleanup'
+tools:
+  - 'mcp_websearch'
+  - 'mcp_lsp'
+model:
+  - gpt-5.3-codex
+  - claude-sonnet-4
+agent:
+  - programmer
+command:
+  - /plan
+  - /review
+project:
+  - node
+  - monorepo
+branch:
+  - main
+  - feature/*
+os:
+  - linux
+  - darwin
+ci: false
+# Matching mode
+match: any
+---
+```
+
+### Supported Fields
+
+- `globs` (optional): Array of glob patterns for file-based matching
+  - Rule applies when any file in context matches a pattern
+- `keywords` (optional): Array of keywords for prompt-based matching
+  - Rule applies when the user's prompt contains any keyword
+  - Case-insensitive, word-boundary matching (e.g., "test" matches "testing")
+  - Does NOT match mid-word (e.g., "test" does NOT match "contest")
+- `tools` (optional): Array of tool IDs for tool-availability matching
+  - Rule applies when any listed tool is available to the agent
+  - Uses exact string matching against tool IDs (e.g., `mcp_websearch`, `mcp_bash`)
+  - Enable debug logging (`OPENCODE_RULES_DEBUG=1`) to see available tool IDs
+- `model` (optional): Array of model IDs to match against the current LLM
+  - Example: `['gpt-5.3-codex', 'claude-sonnet-4']`
+- `agent` (optional): Array of agent types to match
+  - Example: `['programmer', 'planner']`
+- `command` (optional): Array of slash commands to match
+  - Example: `['/plan', '/review']`
+- `project` (optional): Array of project type tags to match
+  - Detected automatically from marker files (e.g., `package.json` -> `node`)
+  - Supported tags: `node`, `python`, `go`, `rust`, `monorepo`, `browser-extension`
+- `branch` (optional): Array of git branch patterns to match
+  - Supports exact names and glob patterns (e.g., `feature/*`, `release/**`)
+  - Uses minimatch for glob matching
+- `os` (optional): Array of operating systems to match
+  - Values: `linux`, `darwin`, `win32`
+- `ci` (optional): Boolean to match CI environment
+  - `true` matches when running in CI, `false` matches when not in CI
+- `match` (optional): Matching mode for multiple conditions
+  - `any` (default): Rule applies if ANY declared condition matches
+  - `all`: Rule applies only if ALL declared conditions match
+
+**Note:** When a runtime context value is unavailable (e.g., not in a git repository), that dimension is treated as a non-match.
+
+### Matching Behavior
+
+- **No metadata**: Rule applies unconditionally (always included)
+- **Only globs**: Rule applies when any context file matches
+- **Only keywords**: Rule applies when the user's prompt contains any keyword
+- **Only tools**: Rule applies when any listed tool is available
+- **Multiple conditions with `match: any` (default)**: Rule applies when ANY condition matches (OR logic across all fields)
+- **Multiple conditions with `match: all`**: Rule applies only when ALL declared conditions match
+
+## Glob Pattern Reference
+
+The plugin uses `minimatch` for pattern matching:
+
+| Pattern                       | Matches                                         |
+| ----------------------------- | ----------------------------------------------- |
+| `src/**/*.ts`                 | All TypeScript files in src and subdirectories  |
+| `**/*.test.ts`                | All test files at any depth                     |
+| `src/components/**/*.tsx`     | React components in components directory        |
+| `*.json`                      | JSON files in root directory only               |
+| `lib/{utils,helpers}/**/*.js` | JavaScript files in specific lib subdirectories |
+
+## Included Skill: crafting-rules
+
+This repository includes a `crafting-rules/` skill that teaches AI agents how to create well-formatted rules. The skill provides:
+
+- **Rule format reference** - Frontmatter fields (`globs`, `keywords`, `tools`, `model`, `agent`, `command`, `project`, `branch`, `os`, `ci`, `match`) and markdown body structure
+- **Matching strategy guidance** - When to use globs vs keywords vs runtime filters vs combinations
+- **Pattern extraction workflow** - How to identify repeated conversation patterns that should become rules
+- **Keyword safety guidelines** - Denylist of overly broad keywords to avoid, allowlist of safe alternatives, and an audit checklist
+
+To use the skill, copy `skills/crafting-rules/` to `~/.config/opencode/skills/` or reference it directly. The skill triggers when users ask to create rules, codify preferences, or persist guidance across sessions.
 
 ## Usage Examples
 
@@ -284,117 +432,6 @@ globs:
 - Co-locate styles with components
 ```
 
-## Metadata Format
-
-Both `.md` and `.mdc` files support optional YAML metadata for conditional rule application:
-
-```yaml
----
-# Legacy filters
-globs:
-  - 'src/**/*.ts'
-  - 'lib/**/*.js'
-keywords:
-  - 'refactoring'
-  - 'cleanup'
-tools:
-  - 'mcp_websearch'
-  - 'mcp_lsp'
-# Runtime environment filters
-model:
-  - gpt-5.3-codex
-  - claude-sonnet-4
-agent:
-  - programmer
-command:
-  - /plan
-  - /review
-project:
-  - node
-  - monorepo
-branch:
-  - main
-  - feature/*
-os:
-  - linux
-  - darwin
-ci: false
-# Matching mode
-match: any
----
-```
-
-### Supported Fields
-
-#### Legacy Filters
-
-- `globs` (optional): Array of glob patterns for file-based matching
-  - Rule applies when any file in context matches a pattern
-- `keywords` (optional): Array of keywords for prompt-based matching
-  - Rule applies when the user's prompt contains any keyword
-  - Case-insensitive, word-boundary matching (e.g., "test" matches "testing")
-  - Does NOT match mid-word (e.g., "test" does NOT match "contest")
-- `tools` (optional): Array of tool IDs for tool-availability matching
-  - Rule applies when any listed tool is available to the agent
-  - Uses exact string matching against tool IDs (e.g., `mcp_websearch`, `mcp_bash`)
-  - Enable debug logging (`OPENCODE_RULES_DEBUG=1`) to see available tool IDs
-
-#### Runtime Environment Filters
-
-- `model` (optional): Array of model IDs to match against the current LLM
-  - Example: `['gpt-5.3-codex', 'claude-sonnet-4']`
-- `agent` (optional): Array of agent types to match
-  - Example: `['programmer', 'planner']`
-- `command` (optional): Array of slash commands to match
-  - Example: `['/plan', '/review']`
-- `project` (optional): Array of project type tags to match
-  - Detected automatically from marker files (e.g., `package.json` -> `node`)
-  - Supported tags: `node`, `python`, `go`, `rust`, `monorepo`, `browser-extension`
-- `branch` (optional): Array of git branch patterns to match
-  - Supports exact names and glob patterns (e.g., `feature/*`, `release/**`)
-  - Uses minimatch for glob matching
-- `os` (optional): Array of operating systems to match
-  - Values: `linux`, `darwin`, `win32`
-- `ci` (optional): Boolean to match CI environment
-  - `true` matches when running in CI, `false` matches when not in CI
-- `match` (optional): Matching mode for multiple conditions
-  - `any` (default): Rule applies if ANY declared condition matches
-  - `all`: Rule applies only if ALL declared conditions match
-
-**Note:** When a runtime context value is unavailable (e.g., not in a git repository), that dimension is treated as a non-match.
-
-### Matching Behavior
-
-- **No metadata**: Rule applies unconditionally (always included)
-- **Only globs**: Rule applies when any context file matches
-- **Only keywords**: Rule applies when the user's prompt contains any keyword
-- **Only tools**: Rule applies when any listed tool is available
-- **Multiple conditions with `match: any` (default)**: Rule applies when ANY condition matches (OR logic across all fields)
-- **Multiple conditions with `match: all`**: Rule applies only when ALL declared conditions match
-
-## Glob Pattern Reference
-
-The plugin uses `minimatch` for pattern matching:
-
-| Pattern                       | Matches                                         |
-| ----------------------------- | ----------------------------------------------- |
-| `src/**/*.ts`                 | All TypeScript files in src and subdirectories  |
-| `**/*.test.ts`                | All test files at any depth                     |
-| `src/components/**/*.tsx`     | React components in components directory        |
-| `*.json`                      | JSON files in root directory only               |
-| `lib/{utils,helpers}/**/*.js` | JavaScript files in specific lib subdirectories |
-
-## Included Skill: crafting-rules
-
-This repository includes a `crafting-rules/` skill that teaches AI agents how to create well-formatted rules. The skill provides:
-
-- **Rule format reference** - Frontmatter fields (`globs`, `keywords`, `tools`, `model`, `agent`, `command`, `project`, `branch`, `os`, `ci`, `match`) and markdown body structure
-- **Matching strategy guidance** - When to use globs vs keywords vs runtime filters vs combinations
-- **Pattern extraction workflow** - How to identify repeated conversation patterns that should become rules
-- **Keyword safety guidelines** - Denylist of overly broad keywords to avoid, allowlist of safe alternatives, and an audit checklist
-
-To use the skill, copy `skills/crafting-rules/` to `~/.config/opencode/skills/` or reference it directly. The skill triggers when users ask to create rules, codify preferences, or persist guidance across sessions.
-
 ## Development
 
 ### Project Structure (Abridged)
@@ -417,10 +454,20 @@ opencode-rules/
 │   ├── project-fingerprint.ts # Project type detection (Node.js, Python, etc.)
 │   ├── mcp-tools.ts          # MCP tool ID extraction
 │   ├── git-branch.ts         # Git branch detection
+│   ├── active-rules-state.ts # Persists matched rules per session for TUI
 │   ├── debug.ts              # Debug logging utilities
 │   ├── utils.ts              # Re-export facade for backwards compatibility
 │   ├── test-fixtures.ts      # Shared test fixtures and builders
 │   └── *.test.ts             # Unit/integration tests (11 test files)
+├── tui/
+│   ├── index.tsx             # TUI entrypoint, exports { id, tui }
+│   ├── slots/
+│   │   └── sidebar-content.tsx # Sidebar widget component
+│   ├── data/
+│   │   ├── rules.ts          # Rule discovery + formatting for sidebar
+│   │   └── rules.test.ts     # Data layer tests
+│   └── types/
+│       └── opencode-plugin-tui.d.ts  # Vendored type shim
 ├── docs/
 │   └── rules.md              # Detailed usage documentation
 ├── openspec/                 # Project specifications and proposals
@@ -436,14 +483,35 @@ The following highlights the primary runtime modules:
 - **runtime-chat.ts** - Extracts text from chat message parts for keyword matching
 - **rule-discovery.ts** - Recursively scans directories for `.md`/`.mdc` rule files
 - **rule-metadata.ts** - Parses YAML frontmatter into typed `RuleMetadata`
-- **rule-filter.ts** - Evaluates rules against context (globs, keywords, tools, runtime filters)
+- **rule-filter.ts** - Evaluates rules against context (globs, keywords, tools, runtime filters); returns `FilterResult` with `formattedRules` and `matchedPaths`
 - **message-paths.ts** - Extracts file paths from tool invocation arguments and message text
 - **message-context.ts** - Extracts user prompt text, slash commands, and session IDs from message parts
 - **session-store.ts** - Manages per-session state with LRU eviction
 - **project-fingerprint.ts** - Detects project type from marker files (e.g., `package.json`)
 - **mcp-tools.ts** - Maps connected MCP clients to tool IDs for `tools` condition matching
 - **git-branch.ts** - Resolves current git branch for `branch` condition matching
+- **active-rules-state.ts** - Persists which rules matched per session to `~/.opencode/state/opencode-rules/{sessionId}.json` for TUI consumption (atomic writes, per-session queuing)
 - **utils.ts** - Thin facade re-exporting from decomposed modules
+
+### TUI Sidebar
+
+The plugin registers a `sidebar_content` slot in the OpenCode TUI, displaying all discovered rules (global and project-local) with their active state and metadata.
+
+**Requirements:** `@opencode-ai/plugin` ^1.3.7 with TUI support.
+
+**What it shows:**
+
+- Collapsible "Project" and "Global" sections grouping rules by scope
+- Active/inactive status indicators (green bullet for active, muted for inactive) based on persisted state from the current session
+- Condition summary for conditional rules ("always active" for unconditional ones)
+- Expandable detail panel with all metadata fields (globs, keywords, tools, model, agent, command, project, branch, os, ci, match)
+- Loading, error, and empty states
+
+**Behavior:**
+
+- Active rules are sorted to the top within each section
+- Subscribes to `message.updated` and `session.status` events for real-time refresh (150ms debounce, filtered by session ID)
+- Active state is read from `~/.opencode/state/opencode-rules/{sessionId}.json`, written by the server plugin after each rule evaluation
 
 ### Build and Test
 
@@ -517,14 +585,6 @@ This plugin uses OpenCode's hook system for incremental, stateful rule injection
    - Injects current context paths into the compaction context
    - Prevents rules from being lost during session compression
 
-### Benefits Over Previous Approach
-
-- **Incremental state tracking** - Builds context incrementally rather than rescanning messages each turn
-- **Authoritative path capture** - Tool hooks provide verified file paths directly from the tool definition
-- **Real-time responsiveness** - Context updates as tools execute and messages arrive
-- **Compaction-aware** - Context persists through session compression
-- **Efficient caching** - Rule discovery happens once at startup, not on every LLM call
-
 ### Experimental API Notice
 
 This plugin depends on experimental OpenCode APIs:
@@ -534,27 +594,6 @@ This plugin depends on experimental OpenCode APIs:
 - `experimental.session.compacting` (compaction context)
 
 These APIs may change in future OpenCode versions. Check OpenCode release notes when upgrading.
-
-## How It Works
-
-1. **Discovery**: Scan global and project directories for `.md` and `.mdc` files (at plugin init)
-2. **Parsing**: Extract metadata from files with YAML front matter
-3. **Tool Execution**: `tool.execute.before` hook captures file paths before tools run
-4. **Message Flow**: `chat.message` hook updates user prompt as messages arrive
-5. **Initial Seeding**: `experimental.chat.messages.transform` extracts context from message history once
-6. **Rule Filtering**: `experimental.chat.system.transform` evaluates rules based on context and injects into system prompt
-7. **Compaction Persistence**: `experimental.session.compacting` preserves context during session compression
-
-## Performance
-
-- Rule discovery performed once at plugin initialization
-- Rule content cached with mtime-based invalidation for fast re-reads
-- Incremental session state tracking (set of paths, not message rescanning)
-- Per-session state pruned after 100 concurrent sessions to prevent memory growth
-- Efficient glob matching with `minimatch`
-- Tool-based path capture is non-blocking with minimal overhead
-- Session context cleaned up when exceeded (LRU eviction)
-- Minimal memory footprint with efficient state management
 
 ## Debug Logging
 

@@ -21,6 +21,7 @@ import {
   type ChatMessageInput,
   type ChatMessageOutput,
 } from './runtime-chat.js';
+import { writeActiveRulesState } from './active-rules-state.js';
 
 interface MessagesTransformOutput {
   messages: MessageWithInfo[];
@@ -217,10 +218,14 @@ export class OpenCodeRulesRuntime {
       this.debugLog
     );
 
-    const formattedRules = await readAndFormatRules(
+    const { formattedRules, matchedPaths } = await readAndFormatRules(
       this.ruleFiles,
       filterContext
     );
+
+    if (sessionID) {
+      writeActiveRulesState(sessionID, matchedPaths);
+    }
 
     if (!formattedRules) {
       this.debugLog('No applicable rules for current context');

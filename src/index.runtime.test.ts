@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import path from 'path';
-import { writeFileSync, mkdirSync } from 'fs';
+import { writeFileSync, mkdirSync, readdirSync } from 'fs';
 import {
   setupTestDirs,
   teardownTestDirs,
@@ -26,6 +26,10 @@ import * as sessionStoreModule from './session-store.js';
 import * as runtimeContextModule from './runtime-context.js';
 import * as runtimeChatModule from './runtime-chat.js';
 import { __testOnly } from './index.js';
+import {
+  _setStateDirForTesting,
+  readActiveRulesState,
+} from './active-rules-state.js';
 
 describe('module boundary tests', () => {
   it('should re-export discoverRuleFiles from rule-discovery module', () => {
@@ -179,9 +183,10 @@ describe('OpenCodeRulesPlugin', () => {
     }
   });
 
-  it('should export a default plugin function', async () => {
-    const { default: plugin } = await import('./index.js');
-    expect(typeof plugin).toBe('function');
+  it('should export a plugin module with id and server', async () => {
+    const { default: pluginModule } = await import('./index.js');
+    expect(pluginModule).toHaveProperty('id', 'opencode-rules');
+    expect(typeof pluginModule.server).toBe('function');
   });
 
   it('should return transform hooks even when no rules exist', async () => {
@@ -191,7 +196,9 @@ describe('OpenCodeRulesPlugin', () => {
       recursive: true,
     });
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({
       testDir: path.join(testDir, 'empty-project'),
     });
@@ -212,7 +219,9 @@ describe('OpenCodeRulesPlugin', () => {
     writeFileSync(path.join(globalRulesDir, 'rule.md'), '# Test Rule');
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
 
     const hooks = await plugin(
@@ -230,7 +239,9 @@ describe('OpenCodeRulesPlugin', () => {
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
 
     const hooks = await plugin(
@@ -255,7 +266,9 @@ describe('OpenCodeRulesPlugin', () => {
     writeFileSync(path.join(globalRulesDir, 'rule.md'), '# My Rule');
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
 
     const hooks = await plugin(
@@ -279,7 +292,9 @@ describe('OpenCodeRulesPlugin', () => {
     writeFileSync(path.join(globalRulesDir, 'rule.md'), '# Rule Content');
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
 
     const hooks = await plugin(
@@ -300,7 +315,9 @@ describe('OpenCodeRulesPlugin', () => {
     writeFileSync(path.join(globalRulesDir, 'rule.md'), '# Rule');
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
 
     const originalMessages = [
@@ -324,7 +341,9 @@ describe('OpenCodeRulesPlugin', () => {
 
   it('seeds session state once from messages.transform and does not rescan', async () => {
     const { testDir } = getTestDirs();
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
 
     const hooks = await plugin(
@@ -395,7 +414,9 @@ describe('SessionState', () => {
 
   it('updates lastUserPrompt from chat.message', async () => {
     const { testDir } = getTestDirs();
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
 
     const hooks = await plugin(
@@ -422,7 +443,10 @@ describe('SessionState', () => {
 
   it('extracts text from mixed parts using shared extraction logic', async () => {
     const { testDir } = getTestDirs();
-    const { default: plugin, __testOnly } = await import('./index.js');
+    const {
+      default: { server: plugin },
+      __testOnly,
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
 
     const hooks = await plugin(
@@ -453,7 +477,10 @@ describe('SessionState', () => {
 
   it('stores lastModelID from chat.message for user messages', async () => {
     const { testDir } = getTestDirs();
-    const { default: plugin, __testOnly } = await import('./index.js');
+    const {
+      default: { server: plugin },
+      __testOnly,
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
 
     const hooks = await plugin(
@@ -478,7 +505,10 @@ describe('SessionState', () => {
 
   it('stores lastAgentType from chat.message for user messages', async () => {
     const { testDir } = getTestDirs();
-    const { default: plugin, __testOnly } = await import('./index.js');
+    const {
+      default: { server: plugin },
+      __testOnly,
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
 
     const hooks = await plugin(
@@ -503,7 +533,10 @@ describe('SessionState', () => {
 
   it('stores both model and agent from chat.message', async () => {
     const { testDir } = getTestDirs();
-    const { default: plugin, __testOnly } = await import('./index.js');
+    const {
+      default: { server: plugin },
+      __testOnly,
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
 
     const hooks = await plugin(
@@ -533,7 +566,10 @@ describe('SessionState', () => {
 
   it('does not update model/agent for non-user messages', async () => {
     const { testDir } = getTestDirs();
-    const { default: plugin, __testOnly } = await import('./index.js');
+    const {
+      default: { server: plugin },
+      __testOnly,
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
 
     const hooks = await plugin(
@@ -575,7 +611,10 @@ describe('SessionState', () => {
 
   it('updates model/agent on subsequent user messages', async () => {
     const { testDir } = getTestDirs();
-    const { default: plugin, __testOnly } = await import('./index.js');
+    const {
+      default: { server: plugin },
+      __testOnly,
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
 
     const hooks = await plugin(
@@ -624,7 +663,9 @@ describe('SessionState', () => {
       `---\nglobs:\n  - "src/components/**/*.tsx"\n---\n\nUse React best practices.`
     );
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
     const hooks = await plugin(
       mockInput as unknown as Parameters<typeof plugin>[0]
@@ -661,7 +702,10 @@ describe('SessionState', () => {
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin, __testOnly } = await import('./index.js');
+    const {
+      default: { server: plugin },
+      __testOnly,
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
     const hooks = await plugin(
       mockInput as unknown as Parameters<typeof plugin>[0]
@@ -682,6 +726,144 @@ describe('SessionState', () => {
     );
 
     expect(result.system).toBe('Base prompt.');
+  });
+});
+
+describe('Active rules state persistence', () => {
+  let savedEnvXDG: string | undefined;
+  let stateDir: string;
+
+  beforeEach(() => {
+    setupTestDirs();
+    savedEnvXDG = process.env.XDG_CONFIG_HOME;
+    const { testDir } = getTestDirs();
+    stateDir = path.join(testDir, 'state');
+    mkdirSync(stateDir, { recursive: true });
+    _setStateDirForTesting(stateDir);
+  });
+
+  afterEach(async () => {
+    teardownTestDirs();
+    _setStateDirForTesting(null);
+    const { __testOnly } = await import('./index.js');
+    __testOnly.resetSessionState();
+    if (savedEnvXDG === undefined) {
+      delete process.env.XDG_CONFIG_HOME;
+    } else {
+      process.env.XDG_CONFIG_HOME = savedEnvXDG;
+    }
+  });
+
+  it('writes matched rule paths to state file when rules match', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    const rulePath = path.join(globalRulesDir, 'always-apply.md');
+    writeFileSync(rulePath, '# Always Apply\nThis rule always applies.');
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+
+    const sessionID = 'ses-state-match';
+    const systemTransform = hooks['experimental.chat.system.transform'] as (
+      input: { sessionID?: string },
+      output: { system: string }
+    ) => Promise<{ system: string }>;
+
+    const result = await systemTransform(
+      { sessionID },
+      { system: 'Base prompt.' }
+    );
+
+    expect(result.system).toContain('Always Apply');
+
+    // Wait for fire-and-forget write to complete
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    const state = await readActiveRulesState(sessionID);
+    expect(state).not.toBeNull();
+    expect(state?.sessionId).toBe(sessionID);
+    expect(state?.matchedRulePaths).toHaveLength(1);
+    expect(state?.matchedRulePaths[0]).toBe(rulePath);
+  });
+
+  it('writes empty matchedPaths to state file when no rules match', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    const rulePath = path.join(globalRulesDir, 'conditional.mdc');
+    writeFileSync(
+      rulePath,
+      `---
+model:
+  - gpt-5
+---
+
+Conditional rule for gpt-5 only.`
+    );
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+
+    const sessionID = 'ses-state-nomatch';
+    const systemTransform = hooks['experimental.chat.system.transform'] as (
+      input: { sessionID?: string },
+      output: { system: string }
+    ) => Promise<{ system: string }>;
+
+    const result = await systemTransform(
+      { sessionID },
+      { system: 'Base prompt.' }
+    );
+
+    // No rules should match (model is not gpt-5)
+    expect(result.system).not.toContain('Conditional rule');
+
+    // Wait for fire-and-forget write to complete
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    const state = await readActiveRulesState(sessionID);
+    expect(state).not.toBeNull();
+    expect(state?.sessionId).toBe(sessionID);
+    expect(state?.matchedRulePaths).toHaveLength(0);
+  });
+
+  it('does not write state when sessionID is missing', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    writeFileSync(path.join(globalRulesDir, 'rule.md'), '# Test Rule\nContent');
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+
+    const systemTransform = hooks['experimental.chat.system.transform'] as (
+      input: { sessionID?: string },
+      output: { system: string }
+    ) => Promise<{ system: string }>;
+
+    // Call without sessionID
+    await systemTransform({}, { system: 'Base prompt.' });
+
+    // Wait briefly
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    // Verify no state files were created in the state directory
+    const files = readdirSync(stateDir);
+    const jsonFiles = files.filter(f => f.endsWith('.json'));
+    expect(jsonFiles).toHaveLength(0);
   });
 });
 
@@ -740,7 +922,9 @@ describe('CI environment detection', () => {
     clearCiEnvVars();
     process.env.CI = 'true';
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
     const hooks = await plugin(
       mockInput as unknown as Parameters<typeof plugin>[0]
@@ -766,7 +950,9 @@ describe('CI environment detection', () => {
     clearCiEnvVars();
     process.env.CI = 'false';
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
     const hooks = await plugin(
       mockInput as unknown as Parameters<typeof plugin>[0]
@@ -792,7 +978,9 @@ describe('CI environment detection', () => {
     clearCiEnvVars();
     process.env.CI = '0';
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
     const hooks = await plugin(
       mockInput as unknown as Parameters<typeof plugin>[0]
@@ -818,7 +1006,9 @@ describe('CI environment detection', () => {
     clearCiEnvVars();
     process.env.GITHUB_ACTIONS = 'true';
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
     const hooks = await plugin(
       mockInput as unknown as Parameters<typeof plugin>[0]
@@ -844,7 +1034,9 @@ describe('CI environment detection', () => {
     clearCiEnvVars();
     process.env.BUILD_NUMBER = 'false';
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
     const hooks = await plugin(
       mockInput as unknown as Parameters<typeof plugin>[0]

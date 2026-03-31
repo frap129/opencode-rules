@@ -1,0 +1,14 @@
+# Exclusions handled by package.json "files" negation patterns
+# This file is kept for documentation purposes
+
+# Test files - excluded via !src/**/*.test.ts, !tui/**/*.test.ts patterns
+# *.test.ts
+# *.test.tsx
+# *.spec.ts
+# *.spec.tsx
+
+# Test fixtures - excluded via !src/test-fixtures.ts
+# src/test-fixtures.ts
+
+# Compile-time type checks - excluded via !src/api-surface.typecheck.ts
+# src/api-surface.typecheck.ts

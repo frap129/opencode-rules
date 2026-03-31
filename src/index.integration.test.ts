@@ -42,18 +42,20 @@ describe('readAndFormatRules', () => {
     writeFileSync(rule1Path, '# Rule 1\nContent of rule 1');
     writeFileSync(rule2Path, '# Rule 2\nContent of rule 2');
 
-    const formatted = await readAndFormatRules(toRules([rule1Path, rule2Path]));
+    const { formattedRules } = await readAndFormatRules(
+      toRules([rule1Path, rule2Path])
+    );
 
-    expect(formatted).toContain('OpenCode Rules');
-    expect(formatted).toContain('rule1.md');
-    expect(formatted).toContain('rule2.md');
-    expect(formatted).toContain('Rule 1');
-    expect(formatted).toContain('Rule 2');
+    expect(formattedRules).toContain('OpenCode Rules');
+    expect(formattedRules).toContain('rule1.md');
+    expect(formattedRules).toContain('rule2.md');
+    expect(formattedRules).toContain('Rule 1');
+    expect(formattedRules).toContain('Rule 2');
   });
 
   it('should return empty string when no files provided', async () => {
-    const formatted = await readAndFormatRules([]);
-    expect(formatted).toBe('');
+    const { formattedRules } = await readAndFormatRules([]);
+    expect(formattedRules).toBe('');
   });
 
   it('should handle file read errors gracefully', async () => {
@@ -62,10 +64,10 @@ describe('readAndFormatRules', () => {
     const validFile = path.join(globalRulesDir, 'valid.md');
     writeFileSync(validFile, '# Valid Rule');
 
-    const formatted = await readAndFormatRules(
+    const { formattedRules } = await readAndFormatRules(
       toRules([nonExistentFile, validFile])
     );
-    expect(formatted).toContain('valid.md');
+    expect(formattedRules).toContain('valid.md');
   });
 
   it('should include filename as subheader in output', async () => {
@@ -73,8 +75,8 @@ describe('readAndFormatRules', () => {
     const rulePath = path.join(globalRulesDir, 'my-rules.md');
     writeFileSync(rulePath, 'Rule content');
 
-    const formatted = await readAndFormatRules(toRules([rulePath]));
-    expect(formatted).toMatch(/##\s+my-rules\.md/);
+    const { formattedRules } = await readAndFormatRules(toRules([rulePath]));
+    expect(formattedRules).toMatch(/##\s+my-rules\.md/);
   });
 
   it('should include rule when file matches glob pattern in metadata', async () => {
@@ -88,12 +90,14 @@ globs:
 This is a rule for TypeScript components.`;
     writeFileSync(rulePath, ruleContent);
 
-    const formatted = await readAndFormatRules(toRules([rulePath]), {
+    const { formattedRules } = await readAndFormatRules(toRules([rulePath]), {
       contextFilePaths: ['src/components/button.ts'],
     });
 
-    expect(formatted).toContain('typescript.mdc');
-    expect(formatted).toContain('This is a rule for TypeScript components.');
+    expect(formattedRules).toContain('typescript.mdc');
+    expect(formattedRules).toContain(
+      'This is a rule for TypeScript components.'
+    );
   });
 
   it('should exclude rule when file does not match glob pattern in metadata', async () => {
@@ -107,11 +111,11 @@ globs:
 This is a rule for TypeScript components.`;
     writeFileSync(rulePath, ruleContent);
 
-    const formatted = await readAndFormatRules(toRules([rulePath]), {
+    const { formattedRules } = await readAndFormatRules(toRules([rulePath]), {
       contextFilePaths: ['src/utils/helpers.js'],
     });
 
-    expect(formatted).toBe('');
+    expect(formattedRules).toBe('');
   });
 
   it('should include rule when user prompt matches keywords', async () => {
@@ -128,12 +132,12 @@ keywords:
 Follow testing best practices.`
     );
 
-    const formatted = await readAndFormatRules(toRules([rulePath]), {
+    const { formattedRules } = await readAndFormatRules(toRules([rulePath]), {
       userPrompt: 'I need help testing this function',
     });
 
-    expect(formatted).toContain('testing-rule.mdc');
-    expect(formatted).toContain('Follow testing best practices');
+    expect(formattedRules).toContain('testing-rule.mdc');
+    expect(formattedRules).toContain('Follow testing best practices');
   });
 
   it('should include rule when tool is available', async () => {
@@ -149,12 +153,12 @@ tools:
 Use web search best practices.`
     );
 
-    const formatted = await readAndFormatRules(toRules([rulePath]), {
+    const { formattedRules } = await readAndFormatRules(toRules([rulePath]), {
       availableToolIDs: ['mcp_bash', 'mcp_websearch', 'mcp_read'],
     });
 
-    expect(formatted).toContain('websearch-rule.mdc');
-    expect(formatted).toContain('Use web search best practices');
+    expect(formattedRules).toContain('websearch-rule.mdc');
+    expect(formattedRules).toContain('Use web search best practices');
   });
 
   describe('new filter dimensions', () => {
@@ -172,12 +176,12 @@ model:
 Model-specific rule.`
       );
 
-      const formatted = await readAndFormatRules(toRules([rulePath]), {
+      const { formattedRules } = await readAndFormatRules(toRules([rulePath]), {
         modelID: 'claude-opus',
       });
 
-      expect(formatted).toContain('model-rule.mdc');
-      expect(formatted).toContain('Model-specific rule');
+      expect(formattedRules).toContain('model-rule.mdc');
+      expect(formattedRules).toContain('Model-specific rule');
     });
 
     it('should include rule when agent matches', async () => {
@@ -194,12 +198,12 @@ agent:
 Agent-specific rule.`
       );
 
-      const formatted = await readAndFormatRules(toRules([rulePath]), {
+      const { formattedRules } = await readAndFormatRules(toRules([rulePath]), {
         agentType: 'programmer',
       });
 
-      expect(formatted).toContain('agent-rule.mdc');
-      expect(formatted).toContain('Agent-specific rule');
+      expect(formattedRules).toContain('agent-rule.mdc');
+      expect(formattedRules).toContain('Agent-specific rule');
     });
 
     it('should include rule when os matches', async () => {
@@ -216,12 +220,12 @@ os:
 Unix-specific rule.`
       );
 
-      const formatted = await readAndFormatRules(toRules([rulePath]), {
+      const { formattedRules } = await readAndFormatRules(toRules([rulePath]), {
         os: 'linux',
       });
 
-      expect(formatted).toContain('os-rule.mdc');
-      expect(formatted).toContain('Unix-specific rule');
+      expect(formattedRules).toContain('os-rule.mdc');
+      expect(formattedRules).toContain('Unix-specific rule');
     });
 
     it('should include rule when ci is true and rule requires ci', async () => {
@@ -236,12 +240,12 @@ ci: true
 CI-specific rule.`
       );
 
-      const formatted = await readAndFormatRules(toRules([rulePath]), {
+      const { formattedRules } = await readAndFormatRules(toRules([rulePath]), {
         ci: true,
       });
 
-      expect(formatted).toContain('ci-rule.mdc');
-      expect(formatted).toContain('CI-specific rule');
+      expect(formattedRules).toContain('ci-rule.mdc');
+      expect(formattedRules).toContain('CI-specific rule');
     });
 
     it('should include rule when branch matches glob pattern', async () => {
@@ -258,12 +262,12 @@ branch:
 Feature branch rule.`
       );
 
-      const formatted = await readAndFormatRules(toRules([rulePath]), {
+      const { formattedRules } = await readAndFormatRules(toRules([rulePath]), {
         gitBranch: 'feature/add-login',
       });
 
-      expect(formatted).toContain('branch-glob-rule.mdc');
-      expect(formatted).toContain('Feature branch rule');
+      expect(formattedRules).toContain('branch-glob-rule.mdc');
+      expect(formattedRules).toContain('Feature branch rule');
     });
   });
 
@@ -285,14 +289,14 @@ os:
 Default any match rule.`
       );
 
-      const formatted = await readAndFormatRules(toRules([rulePath]), {
+      const { formattedRules } = await readAndFormatRules(toRules([rulePath]), {
         modelID: 'claude-opus',
         agentType: 'reviewer',
         os: 'linux',
       });
 
-      expect(formatted).toContain('any-default.mdc');
-      expect(formatted).toContain('Default any match rule');
+      expect(formattedRules).toContain('any-default.mdc');
+      expect(formattedRules).toContain('Default any match rule');
     });
 
     it('should require all declared dimensions when match is all', async () => {
@@ -313,14 +317,14 @@ match: all
 All dimensions must match.`
       );
 
-      const formatted = await readAndFormatRules(toRules([rulePath]), {
+      const { formattedRules } = await readAndFormatRules(toRules([rulePath]), {
         modelID: 'claude-opus',
         agentType: 'programmer',
         os: 'linux',
       });
 
-      expect(formatted).toContain('all-match.mdc');
-      expect(formatted).toContain('All dimensions must match');
+      expect(formattedRules).toContain('all-match.mdc');
+      expect(formattedRules).toContain('All dimensions must match');
     });
 
     it('should exclude rule when match: all and one dimension fails', async () => {
@@ -341,13 +345,13 @@ match: all
 All dimensions must match.`
       );
 
-      const formatted = await readAndFormatRules(toRules([rulePath]), {
+      const { formattedRules } = await readAndFormatRules(toRules([rulePath]), {
         modelID: 'claude-opus',
         agentType: 'programmer',
         os: 'darwin',
       });
 
-      expect(formatted).toBe('');
+      expect(formattedRules).toBe('');
     });
   });
 
@@ -362,9 +366,9 @@ All dimensions must match.`
       const result1 = await readAndFormatRules(rules);
       const result2 = await readAndFormatRules(rules);
 
-      expect(result1).toContain('Cached Rule');
-      expect(result2).toContain('Cached Rule');
-      expect(result1).toBe(result2);
+      expect(result1.formattedRules).toContain('Cached Rule');
+      expect(result2.formattedRules).toContain('Cached Rule');
+      expect(result1.formattedRules).toBe(result2.formattedRules);
     });
 
     it('should invalidate cache when file is modified', async () => {
@@ -375,7 +379,7 @@ All dimensions must match.`
       const rules = toRules([rulePath]);
 
       const result1 = await readAndFormatRules(rules);
-      expect(result1).toContain('Original Content');
+      expect(result1.formattedRules).toContain('Original Content');
 
       // Write new content and explicitly set mtime to future to ensure cache invalidation
       // This avoids flaky timing issues on CI/different filesystems
@@ -385,8 +389,8 @@ All dimensions must match.`
 
       const result2 = await readAndFormatRules(rules);
 
-      expect(result2).toContain('Modified Content');
-      expect(result2).not.toContain('Original Content');
+      expect(result2.formattedRules).toContain('Modified Content');
+      expect(result2.formattedRules).not.toContain('Original Content');
     });
 
     it('should handle clearRuleCache correctly', async () => {
@@ -400,7 +404,7 @@ All dimensions must match.`
       clearRuleCache();
 
       const result = await readAndFormatRules(rules);
-      expect(result).toContain('Test Content');
+      expect(result.formattedRules).toContain('Test Content');
     });
   });
 });
@@ -473,8 +477,10 @@ Rule with explicit match any.`
         context
       );
 
-      expect(omittedResult).toContain('Rule with omitted match');
-      expect(explicitResult).toContain('Rule with explicit match any');
+      expect(omittedResult.formattedRules).toContain('Rule with omitted match');
+      expect(explicitResult.formattedRules).toContain(
+        'Rule with explicit match any'
+      );
     });
 
     it('should exclude rule with omitted match when no dimension matches', async () => {
@@ -493,12 +499,12 @@ agent:
 Rule that should not match.`
       );
 
-      const formatted = await readAndFormatRules(toRules([rulePath]), {
+      const { formattedRules } = await readAndFormatRules(toRules([rulePath]), {
         modelID: 'claude-opus',
         agentType: 'reviewer',
       });
 
-      expect(formatted).toBe('');
+      expect(formattedRules).toBe('');
     });
   });
 
@@ -525,7 +531,7 @@ agent:
 Mixed legacy and new filters rule.`
       );
 
-      const formatted = await readAndFormatRules(toRules([rulePath]), {
+      const { formattedRules } = await readAndFormatRules(toRules([rulePath]), {
         contextFilePaths: ['src/index.ts'],
         userPrompt: 'help with debugging',
         availableToolIDs: ['mcp_bash'],
@@ -533,7 +539,7 @@ Mixed legacy and new filters rule.`
         agentType: 'reviewer',
       });
 
-      expect(formatted).toContain('Mixed legacy and new filters rule');
+      expect(formattedRules).toContain('Mixed legacy and new filters rule');
     });
 
     it('should include rule when only new model filter matches (all legacy mismatch)', async () => {
@@ -558,7 +564,7 @@ agent:
 New model filter matches rule.`
       );
 
-      const formatted = await readAndFormatRules(toRules([rulePath]), {
+      const { formattedRules } = await readAndFormatRules(toRules([rulePath]), {
         contextFilePaths: ['src/index.ts'],
         userPrompt: 'help with typescript',
         availableToolIDs: ['mcp_bash'],
@@ -566,7 +572,7 @@ New model filter matches rule.`
         agentType: 'programmer',
       });
 
-      expect(formatted).toContain('New model filter matches rule');
+      expect(formattedRules).toContain('New model filter matches rule');
     });
   });
 
@@ -596,7 +602,7 @@ match: all
 All dimensions match rule.`
       );
 
-      const formatted = await readAndFormatRules(toRules([rulePath]), {
+      const { formattedRules } = await readAndFormatRules(toRules([rulePath]), {
         contextFilePaths: ['src/utils.ts'],
         userPrompt: 'help me refactor this code',
         availableToolIDs: ['mcp_bash', 'mcp_read'],
@@ -605,7 +611,7 @@ All dimensions match rule.`
         os: 'linux',
       });
 
-      expect(formatted).toContain('All dimensions match rule');
+      expect(formattedRules).toContain('All dimensions match rule');
     });
 
     it('should exclude rule when one legacy dimension fails (keywords mismatch)', async () => {
@@ -629,14 +635,14 @@ match: all
 Keywords fail rule.`
       );
 
-      const formatted = await readAndFormatRules(toRules([rulePath]), {
+      const { formattedRules } = await readAndFormatRules(toRules([rulePath]), {
         contextFilePaths: ['src/utils.ts'],
         userPrompt: 'help me refactor this code',
         availableToolIDs: ['mcp_bash'],
         modelID: 'claude-opus',
       });
 
-      expect(formatted).toBe('');
+      expect(formattedRules).toBe('');
     });
   });
 
@@ -660,13 +666,15 @@ model:
 Conditional rule for gpt-5 only.`
       );
 
-      const formatted = await readAndFormatRules(
+      const { formattedRules } = await readAndFormatRules(
         toRules([unconditionalPath, conditionalPath]),
         { modelID: 'claude-opus' }
       );
 
-      expect(formatted).toContain('This rule always applies unconditionally');
-      expect(formatted).not.toContain('Conditional rule for gpt-5 only');
+      expect(formattedRules).toContain(
+        'This rule always applies unconditionally'
+      );
+      expect(formattedRules).not.toContain('Conditional rule for gpt-5 only');
     });
 
     it('should include unconditional rules even when filter context is empty', async () => {
@@ -690,13 +698,13 @@ keywords:
 Only for special files.`
       );
 
-      const formatted = await readAndFormatRules(
+      const { formattedRules } = await readAndFormatRules(
         toRules([unconditionalPath, conditionalPath]),
         {}
       );
 
-      expect(formatted).toContain('No metadata means always apply');
-      expect(formatted).not.toContain('Only for special files');
+      expect(formattedRules).toContain('No metadata means always apply');
+      expect(formattedRules).not.toContain('Only for special files');
     });
 
     it('should include unconditional rules when called with no context at all', async () => {
@@ -708,9 +716,109 @@ Only for special files.`
         '# Bare Rule\nShould always be included.'
       );
 
-      const formatted = await readAndFormatRules(toRules([unconditionalPath]));
+      const { formattedRules } = await readAndFormatRules(
+        toRules([unconditionalPath])
+      );
 
-      expect(formatted).toContain('Should always be included');
+      expect(formattedRules).toContain('Should always be included');
+    });
+  });
+
+  describe('matchedPaths tracking', () => {
+    it('should return matchedPaths with file paths of included rules', async () => {
+      const { globalRulesDir } = getTestDirs();
+      const rule1Path = path.join(globalRulesDir, 'rule1.md');
+      const rule2Path = path.join(globalRulesDir, 'rule2.md');
+      writeFileSync(rule1Path, '# Rule 1\nContent');
+      writeFileSync(rule2Path, '# Rule 2\nContent');
+
+      const { formattedRules, matchedPaths } = await readAndFormatRules(
+        toRules([rule1Path, rule2Path])
+      );
+
+      expect(formattedRules).toContain('Rule 1');
+      expect(matchedPaths).toHaveLength(2);
+      expect(matchedPaths).toContain(rule1Path);
+      expect(matchedPaths).toContain(rule2Path);
+    });
+
+    it('should return empty matchedPaths when no rules match', async () => {
+      const { globalRulesDir } = getTestDirs();
+      const rulePath = path.join(globalRulesDir, 'conditional.mdc');
+      writeFileSync(
+        rulePath,
+        `---
+model:
+  - gpt-5
+---
+
+Conditional rule.`
+      );
+
+      const { formattedRules, matchedPaths } = await readAndFormatRules(
+        toRules([rulePath]),
+        { modelID: 'claude-opus' }
+      );
+
+      expect(formattedRules).toBe('');
+      expect(matchedPaths).toHaveLength(0);
+    });
+
+    it('should return empty matchedPaths when files array is empty', async () => {
+      const { formattedRules, matchedPaths } = await readAndFormatRules([]);
+
+      expect(formattedRules).toBe('');
+      expect(matchedPaths).toHaveLength(0);
+    });
+
+    it('should only include matching rules in matchedPaths (not filtered-out rules)', async () => {
+      const { globalRulesDir } = getTestDirs();
+      const includedPath = path.join(globalRulesDir, 'included.mdc');
+      const excludedPath = path.join(globalRulesDir, 'excluded.mdc');
+
+      writeFileSync(
+        includedPath,
+        `---
+model:
+  - claude-opus
+---
+
+Included rule.`
+      );
+      writeFileSync(
+        excludedPath,
+        `---
+model:
+  - gpt-5
+---
+
+Excluded rule.`
+      );
+
+      const { formattedRules, matchedPaths } = await readAndFormatRules(
+        toRules([includedPath, excludedPath]),
+        { modelID: 'claude-opus' }
+      );
+
+      expect(formattedRules).toContain('Included rule');
+      expect(formattedRules).not.toContain('Excluded rule');
+      expect(matchedPaths).toHaveLength(1);
+      expect(matchedPaths).toContain(includedPath);
+      expect(matchedPaths).not.toContain(excludedPath);
+    });
+
+    it('should include unconditional rules in matchedPaths', async () => {
+      const { globalRulesDir } = getTestDirs();
+      const unconditionalPath = path.join(globalRulesDir, 'always.md');
+
+      writeFileSync(unconditionalPath, '# Always\nUnconditional rule.');
+
+      const { matchedPaths } = await readAndFormatRules(
+        toRules([unconditionalPath])
+      );
+
+      expect(matchedPaths).toHaveLength(1);
+      expect(matchedPaths).toContain(unconditionalPath);
     });
   });
 });
@@ -748,7 +856,9 @@ Use React best practices for components.`
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
 
     const hooks = await plugin(
@@ -807,7 +917,9 @@ Use React best practices for components.`
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
 
     const hooks = await plugin(
@@ -870,7 +982,9 @@ Special rule content.`
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
 
     const hooks = await plugin(
@@ -940,7 +1054,10 @@ describe('Session compacting behavior', () => {
     const { testDir } = getTestDirs();
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin, __testOnly } = await import('./index.js');
+    const {
+      default: { server: plugin },
+      __testOnly,
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
     const hooks = await plugin(
       mockInput as unknown as Parameters<typeof plugin>[0]
@@ -970,7 +1087,10 @@ describe('Session compacting behavior', () => {
     const { testDir } = getTestDirs();
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin, __testOnly } = await import('./index.js');
+    const {
+      default: { server: plugin },
+      __testOnly,
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
     const hooks = await plugin(
       mockInput as unknown as Parameters<typeof plugin>[0]
@@ -1007,7 +1127,10 @@ describe('Session compacting behavior', () => {
     const { testDir } = getTestDirs();
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin, __testOnly } = await import('./index.js');
+    const {
+      default: { server: plugin },
+      __testOnly,
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
     const hooks = await plugin(
       mockInput as unknown as Parameters<typeof plugin>[0]
@@ -1039,7 +1162,10 @@ describe('Session compacting behavior', () => {
     const { testDir } = getTestDirs();
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin, __testOnly } = await import('./index.js');
+    const {
+      default: { server: plugin },
+      __testOnly,
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
     const hooks = await plugin(
       mockInput as unknown as Parameters<typeof plugin>[0]
@@ -1080,7 +1206,9 @@ MCP Context7 rule content`;
     writeFileSync(path.join(globalRulesDir, 'context7.md'), ruleContent);
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { default: plugin } = await import('./index.js');
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
     const mockInput = createMockPluginInput({
       testDir,
       mcpStatus: { context7: { status: 'connected' } },
