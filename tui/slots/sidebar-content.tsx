@@ -65,19 +65,21 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
   return (
     <box flexDirection="column">
       <Show when={status() === 'loading'}>
-        <text>Loading rules...</text>
+        <text content="Loading rules..." />
       </Show>
 
       <Show when={status() === 'error'}>
-        <text>Failed to load rules</text>
+        <text content="Failed to load rules" />
       </Show>
 
       <Show when={status() === 'loaded'}>
-        <Show when={rules().length > 0} fallback={<text>No rules found</text>}>
-          <text>
-            {rules().length} rules loaded
-            {skippedCount() > 0 ? ` (${skippedCount()} skipped)` : ''}
-          </text>
+        <Show
+          when={rules().length > 0}
+          fallback={<text content="No rules found" />}
+        >
+          <text
+            content={`${rules().length} rules loaded${skippedCount() > 0 ? ` (${skippedCount()} skipped)` : ''}`}
+          />
 
           <For each={rules()}>
             {(rule, index) => (
@@ -85,67 +87,86 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
                 flexDirection="column"
                 onMouseDown={() => toggleExpand(index())}
               >
-                <text>
-                  <text fg="gray">
-                    [{rule.source === 'project' ? 'P' : 'G'}]
-                  </text>{' '}
-                  {rule.name} — {rule.conditionSummary}
-                </text>
+                <box flexDirection="row">
+                  <text
+                    fg="gray"
+                    content={`[${rule.source === 'project' ? 'P' : 'G'}]`}
+                  />
+                  <text content={` ${rule.name} — ${rule.conditionSummary}`} />
+                </box>
 
                 <Show when={expandedIndex() === index()}>
                   <box flexDirection="column" paddingLeft={2}>
-                    <text fg="gray">Path: {rule.path}</text>
-                    <text fg="gray">
-                      Source: {rule.source === 'project' ? 'project' : 'global'}
-                    </text>
+                    <text fg="gray" content={`Path: ${rule.path}`} />
+                    <text
+                      fg="gray"
+                      content={`Source: ${rule.source === 'project' ? 'project' : 'global'}`}
+                    />
                     <Show when={(rule.metadata.globs?.length ?? 0) > 0}>
-                      <text fg="gray">
-                        Globs: {rule.metadata.globs!.join(', ')}
-                      </text>
+                      <text
+                        fg="gray"
+                        content={`Globs: ${rule.metadata.globs!.join(', ')}`}
+                      />
                     </Show>
                     <Show when={(rule.metadata.keywords?.length ?? 0) > 0}>
-                      <text fg="gray">
-                        Keywords: {rule.metadata.keywords!.join(', ')}
-                      </text>
+                      <text
+                        fg="gray"
+                        content={`Keywords: ${rule.metadata.keywords!.join(', ')}`}
+                      />
                     </Show>
                     <Show when={(rule.metadata.tools?.length ?? 0) > 0}>
-                      <text fg="gray">
-                        Tools: {rule.metadata.tools!.join(', ')}
-                      </text>
+                      <text
+                        fg="gray"
+                        content={`Tools: ${rule.metadata.tools!.join(', ')}`}
+                      />
                     </Show>
                     <Show when={(rule.metadata.model?.length ?? 0) > 0}>
-                      <text fg="gray">
-                        Model: {rule.metadata.model!.join(', ')}
-                      </text>
+                      <text
+                        fg="gray"
+                        content={`Model: ${rule.metadata.model!.join(', ')}`}
+                      />
                     </Show>
                     <Show when={(rule.metadata.agent?.length ?? 0) > 0}>
-                      <text fg="gray">
-                        Agent: {rule.metadata.agent!.join(', ')}
-                      </text>
+                      <text
+                        fg="gray"
+                        content={`Agent: ${rule.metadata.agent!.join(', ')}`}
+                      />
                     </Show>
                     <Show when={(rule.metadata.command?.length ?? 0) > 0}>
-                      <text fg="gray">
-                        Command: {rule.metadata.command!.join(', ')}
-                      </text>
+                      <text
+                        fg="gray"
+                        content={`Command: ${rule.metadata.command!.join(', ')}`}
+                      />
                     </Show>
                     <Show when={(rule.metadata.project?.length ?? 0) > 0}>
-                      <text fg="gray">
-                        Project: {rule.metadata.project!.join(', ')}
-                      </text>
+                      <text
+                        fg="gray"
+                        content={`Project: ${rule.metadata.project!.join(', ')}`}
+                      />
                     </Show>
                     <Show when={(rule.metadata.branch?.length ?? 0) > 0}>
-                      <text fg="gray">
-                        Branch: {rule.metadata.branch!.join(', ')}
-                      </text>
+                      <text
+                        fg="gray"
+                        content={`Branch: ${rule.metadata.branch!.join(', ')}`}
+                      />
                     </Show>
                     <Show when={(rule.metadata.os?.length ?? 0) > 0}>
-                      <text fg="gray">OS: {rule.metadata.os!.join(', ')}</text>
+                      <text
+                        fg="gray"
+                        content={`OS: ${rule.metadata.os!.join(', ')}`}
+                      />
                     </Show>
                     <Show when={rule.metadata.ci !== undefined}>
-                      <text fg="gray">CI: {String(rule.metadata.ci)}</text>
+                      <text
+                        fg="gray"
+                        content={`CI: ${String(rule.metadata.ci)}`}
+                      />
                     </Show>
                     <Show when={rule.metadata.match}>
-                      <text fg="gray">Match: {rule.metadata.match}</text>
+                      <text
+                        fg="gray"
+                        content={`Match: ${rule.metadata.match}`}
+                      />
                     </Show>
                   </box>
                 </Show>
