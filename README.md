@@ -33,6 +33,7 @@ approach.
 - **Zero-configuration**: Works out of the box with XDG Base Directory specification
 - **TypeScript-first**: Built with TypeScript for type safety and developer experience
 - **Performance optimized**: Efficient file discovery and minimal startup overhead
+- **TUI sidebar**: Real-time sidebar in the OpenCode TUI showing rule status with active/inactive indicators
 
 ## Quick Start
 
@@ -417,6 +418,7 @@ opencode-rules/
 │   ├── project-fingerprint.ts # Project type detection (Node.js, Python, etc.)
 │   ├── mcp-tools.ts          # MCP tool ID extraction
 │   ├── git-branch.ts         # Git branch detection
+│   ├── active-rules-state.ts # Persists matched rules per session for TUI
 │   ├── debug.ts              # Debug logging utilities
 │   ├── utils.ts              # Re-export facade for backwards compatibility
 │   ├── test-fixtures.ts      # Shared test fixtures and builders
@@ -445,28 +447,35 @@ The following highlights the primary runtime modules:
 - **runtime-chat.ts** - Extracts text from chat message parts for keyword matching
 - **rule-discovery.ts** - Recursively scans directories for `.md`/`.mdc` rule files
 - **rule-metadata.ts** - Parses YAML frontmatter into typed `RuleMetadata`
-- **rule-filter.ts** - Evaluates rules against context (globs, keywords, tools, runtime filters)
+- **rule-filter.ts** - Evaluates rules against context (globs, keywords, tools, runtime filters); returns `FilterResult` with `formattedRules` and `matchedPaths`
 - **message-paths.ts** - Extracts file paths from tool invocation arguments and message text
 - **message-context.ts** - Extracts user prompt text, slash commands, and session IDs from message parts
 - **session-store.ts** - Manages per-session state with LRU eviction
 - **project-fingerprint.ts** - Detects project type from marker files (e.g., `package.json`)
 - **mcp-tools.ts** - Maps connected MCP clients to tool IDs for `tools` condition matching
 - **git-branch.ts** - Resolves current git branch for `branch` condition matching
+- **active-rules-state.ts** - Persists which rules matched per session to `~/.opencode/state/opencode-rules/{sessionId}.json` for TUI consumption (atomic writes, per-session queuing)
 - **utils.ts** - Thin facade re-exporting from decomposed modules
 
 ### TUI Sidebar
 
-The plugin registers a `sidebar_content` slot in the OpenCode TUI, displaying all discovered rules (global and project-local) with their metadata.
+The plugin registers a `sidebar_content` slot in the OpenCode TUI, displaying all discovered rules (global and project-local) with their active state and metadata.
 
 **Requirements:** `@opencode-ai/plugin` ^1.3.7 with TUI support.
 
 **What it shows:**
 
-- Rule name with `[P]` (project) or `[G]` (global) prefix
+- Collapsible "Project" and "Global" sections grouping rules by scope
+- Active/inactive status indicators (green bullet for active, muted for inactive) based on persisted state from the current session
 - Condition summary for conditional rules ("always active" for unconditional ones)
 - Expandable detail panel with all metadata fields (globs, keywords, tools, model, agent, command, project, branch, os, ci, match)
 - Loading, error, and empty states
-- Automatic reload on workspace change
+
+**Behavior:**
+
+- Active rules are sorted to the top within each section
+- Subscribes to `message.updated` and `session.status` events for real-time refresh (150ms debounce, filtered by session ID)
+- Active state is read from `~/.opencode/state/opencode-rules/{sessionId}.json`, written by the server plugin after each rule evaluation
 
 ### Build and Test
 
@@ -566,7 +575,8 @@ These APIs may change in future OpenCode versions. Check OpenCode release notes 
 4. **Message Flow**: `chat.message` hook updates user prompt as messages arrive
 5. **Initial Seeding**: `experimental.chat.messages.transform` extracts context from message history once
 6. **Rule Filtering**: `experimental.chat.system.transform` evaluates rules based on context and injects into system prompt
-7. **Compaction Persistence**: `experimental.session.compacting` preserves context during session compression
+7. **State Persistence**: After filtering, matched rule paths are written to `~/.opencode/state/opencode-rules/{sessionId}.json` for TUI consumption
+8. **Compaction Persistence**: `experimental.session.compacting` preserves context during session compression
 
 ## Performance
 
