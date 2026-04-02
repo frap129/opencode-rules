@@ -2,7 +2,7 @@
  * Rule metadata parsing and frontmatter extraction
  */
 
-import { parse as parseYaml } from 'yaml';
+const { parse: parseYaml } = await import('yaml');
 
 /**
  * Metadata extracted from .mdc file frontmatter
