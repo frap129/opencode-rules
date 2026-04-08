@@ -199,6 +199,7 @@ export class OpenCodeRulesRuntime {
       if (userPrompt) {
         this.sessionStore.upsert(sessionID, state => {
           state.lastUserPrompt = userPrompt;
+          state.rulesInjected = false;
         });
 
         this.debugLog(
@@ -231,6 +232,13 @@ export class OpenCodeRulesRuntime {
       }
     }
 
+    if (sessionState?.rulesInjected) {
+      this.debugLog(
+        `Session ${sessionID} already has rules injected - skipping to prevent loop`
+      );
+      return output ?? {};
+    }
+
     const contextPaths = sessionState
       ? Array.from(sessionState.contextPaths).sort()
       : [];
@@ -253,17 +261,29 @@ export class OpenCodeRulesRuntime {
     this.debugLog('Injecting rules into system prompt');
 
     if (!output) {
+      if (sessionID) {
+        this.sessionStore.upsert(sessionID, state => {
+          state.rulesInjected = true;
+          state.lastInjectedAt = this.now();
+        });
+      }
       return { system: formattedRules };
     }
 
     if (Array.isArray(output.system)) {
       output.system.push(formattedRules);
-      return output;
+    } else {
+      output.system = output.system
+        ? `${output.system}\n\n${formattedRules}`
+        : formattedRules;
     }
 
-    output.system = output.system
-      ? `${output.system}\n\n${formattedRules}`
-      : formattedRules;
+    if (sessionID) {
+      this.sessionStore.upsert(sessionID, state => {
+        state.rulesInjected = true;
+        state.lastInjectedAt = this.now();
+      });
+    }
 
     return output;
   }

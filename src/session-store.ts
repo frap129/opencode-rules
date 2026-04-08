@@ -6,6 +6,8 @@ export interface SessionState {
   compactingSince?: number;
   seededFromHistory: boolean;
   seedCount?: number;
+  rulesInjected?: boolean;
+  lastInjectedAt?: number;
 }
 
 export interface SessionStoreOptions {
