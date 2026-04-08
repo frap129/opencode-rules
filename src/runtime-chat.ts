@@ -51,6 +51,7 @@ export function handleChatMessage(
   sessionStore.upsert(sessionID, state => {
     if (userPrompt) {
       state.lastUserPrompt = userPrompt;
+      state.rulesInjected = false;
     }
 
     if (input.model?.modelID) {
