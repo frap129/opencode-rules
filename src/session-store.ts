@@ -8,6 +8,8 @@ export interface SessionState {
   seedCount?: number;
   lastModelID?: string;
   lastAgentType?: string;
+  rulesInjected?: boolean;
+  lastInjectedAt?: number;
 }
 
 interface SessionStoreOptions {

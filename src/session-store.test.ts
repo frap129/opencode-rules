@@ -43,4 +43,43 @@ describe('SessionStore', () => {
 
     expect(store.shouldSkipInjection('ses_missing', 1234, 30_000)).toBe(true);
   });
+
+  it('tracks rulesInjected state', () => {
+    const store = new SessionStore({ max: 100 });
+
+    store.upsert('ses_1', s => void (s.rulesInjected = true));
+
+    expect(store.get('ses_1')?.rulesInjected).toBe(true);
+
+    store.upsert('ses_1', s => void (s.rulesInjected = false));
+
+    expect(store.get('ses_1')?.rulesInjected).toBe(false);
+  });
+
+  it('tracks lastInjectedAt timestamp', () => {
+    const store = new SessionStore({ max: 100 });
+    const now = Date.now();
+
+    store.upsert('ses_1', s => void (s.lastInjectedAt = now));
+
+    expect(store.get('ses_1')?.lastInjectedAt).toBe(now);
+  });
+
+  it('allows rules to be re-injected after new user prompt', () => {
+    const store = new SessionStore({ max: 100 });
+
+    store.upsert('ses_1', s => {
+      s.rulesInjected = true;
+      s.lastInjectedAt = 1000;
+    });
+
+    store.upsert('ses_1', s => {
+      s.lastUserPrompt = 'new message';
+      s.rulesInjected = false;
+    });
+
+    const state = store.get('ses_1');
+    expect(state?.rulesInjected).toBe(false);
+    expect(state?.lastUserPrompt).toBe('new message');
+  });
 });
