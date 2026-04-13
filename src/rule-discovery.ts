@@ -5,12 +5,12 @@
 import { stat, readFile, readdir } from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import { createDebugLog } from './debug.js';
+import { createDebugLog } from './debug';
 import {
   parseRuleMetadata,
   stripFrontmatter,
   type RuleMetadata,
-} from './rule-metadata.js';
+} from './rule-metadata';
 
 const debugLog = createDebugLog();
 

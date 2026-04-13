@@ -10,7 +10,7 @@ import {
   type JSX,
 } from 'solid-js';
 import type { TuiPluginApi, TuiTheme } from '@opencode-ai/plugin/tui';
-import { loadSidebarRules, type SidebarRuleEntry } from '../data/rules.js';
+import { loadSidebarRules, type SidebarRuleEntry } from '../data/rules';
 
 interface SidebarContentProps {
   sessionId: string;
