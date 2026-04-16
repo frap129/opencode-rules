@@ -19,7 +19,8 @@ This approach allows you to dynamically include rules automatically like style g
 guidance on specific actions, etc. Unlike skills, which are called on by the agent, rules use a simple matching
 approach.
 
-> _Note:_ The name `opencode-rules` is to be concise about what this plugin does. It is in no way affiliated with Anomaly Co. or
+> [!NOTE]
+> The name `opencode-rules` is to be concise about what this plugin does. It is in no way affiliated with Anomaly Co. or
 > the official OpenCode project.
 
 ## Features
@@ -199,7 +200,8 @@ match: any
   - `any` (default): Rule applies if ANY declared condition matches
   - `all`: Rule applies only if ALL declared conditions match
 
-**Note:** When a runtime context value is unavailable (e.g., not in a git repository), that dimension is treated as a non-match.
+> [!NOTE] 
+> When a runtime context value is unavailable (e.g., not in a git repository), that dimension is treated as a non-match.
 
 ### Matching Behavior
 
