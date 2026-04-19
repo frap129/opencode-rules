@@ -324,7 +324,10 @@ export class OpenCodeRulesRuntime {
     }
 
     if (Array.isArray(output.system)) {
-      output.system.push(combinedSystem);
+      output.system =
+        output.system.join('\n\n') +
+        (output.system.length > 0 ? '\n\n' : '') +
+        combinedSystem;
     } else {
       output.system = output.system
         ? `${output.system}\n\n${combinedSystem}`
