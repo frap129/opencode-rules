@@ -30,7 +30,21 @@ describe('rule-hooks', () => {
       expect(result[0].tool).toBe('bash');
     });
 
-    it('does not match PostToolUse when evaluating PreToolUse', () => {
+    it('excludes PostToolUse hooks when evaluating PreToolUse', () => {
+      const hooksWithBoth: RuleHook[] = [
+        { type: 'PreToolUse', tool: 'bash', match: 'grep' },
+        { type: 'PostToolUse', tool: 'bash', match: 'grep' },
+      ];
+      const result = evaluateHooks(hooksWithBoth, {
+        toolName: 'bash',
+        serializedArgs: '{"command":"grep foo"}',
+        hookType: 'PreToolUse',
+      });
+      expect(result).toHaveLength(1);
+      expect(result[0].type).toBe('PreToolUse');
+    });
+
+    it('returns empty when no PostToolUse hooks match', () => {
       const result = evaluateHooks(hooks, {
         toolName: 'bash',
         serializedArgs: '{"command":"grep foo"}',
