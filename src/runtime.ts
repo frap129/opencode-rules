@@ -414,8 +414,10 @@ export class OpenCodeRulesRuntime {
         hookType,
       });
 
-      for (const hook of matched) {
-        if (hookType === 'PreToolUse' && hook.block) {
+      // Pre-scan: if any hook has block: true, throw before any side-effects
+      if (hookType === 'PreToolUse') {
+        const blocker = matched.find(h => h.block);
+        if (blocker) {
           this.debugLog(
             `PreToolUse block fired for rule ${relativePath}, tool ${toolName}`
           );
@@ -424,7 +426,9 @@ export class OpenCodeRulesRuntime {
               `tool "${toolName}" matched blocked pattern`
           );
         }
+      }
 
+      for (const hook of matched) {
         this.sessionStore.upsert(sessionID, state => {
           if (!state.pendingHookInjections) {
             state.pendingHookInjections = [];
