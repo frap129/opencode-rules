@@ -256,6 +256,92 @@ The plugin uses OpenCode's hook system to track context and inject rules:
    - `experimental.session.compacting` hook preserves context paths during session compression
    - This ensures rules remain applicable after session compaction
 
+## Hook-Based Rule Triggers
+
+In addition to static conditions (`globs`, `keywords`, etc.), rules can declare **hooks** that fire reactively when the agent invokes tools. This enables corrective guidance at the point of use — for example, warning about insecure server bindings or steering the agent away from outdated tools.
+
+### Hook Types
+
+Two hook types are supported:
+
+- **`PreToolUse`** — fires **before** the tool executes. Can optionally `block: true` to prevent execution entirely.
+- **`PostToolUse`** — fires **after** the tool executes. Delivers a corrective message on the agent's next turn.
+
+### Hook Frontmatter
+
+```markdown
+---
+hooks:
+  - type: PostToolUse
+    tool: bash
+    match: "\\bgrep\\b"
+    run: "canon remember 'use rg instead of grep' --type pattern"
+---
+
+# Use ripgrep (rg) instead of grep
+
+Do not use `grep`. Use `rg` (ripgrep) instead. It is significantly faster,
+respects `.gitignore` by default, and produces better formatted output.
+```
+
+#### Fields
+
+| Field   | Required | Description                                                                    |
+| ------- | -------- | ------------------------------------------------------------------------------ |
+| `type`  | Yes      | `PreToolUse` or `PostToolUse`                                                  |
+| `tool`  | Yes      | Tool name to intercept. Use `*` for all tools.                                 |
+| `match` | Yes      | Regex pattern matched against the **serialized tool arguments** (JSON string). |
+| `block` | No       | If `true` and `type: PreToolUse`, throws an error to prevent tool execution.   |
+| `run`   | No       | Shell command to execute when the hook fires (fire-and-forget).                |
+
+### How Hook Injections Work
+
+1. When a tool call matches a hook's `tool` and `match`, the rule's body is queued as a **pending hook injection** in the session state.
+2. On the next `experimental.chat.system.transform`, pending injections are flushed and prepended to the system prompt.
+3. The agent sees the corrective guidance on its next turn and can self-correct.
+4. Pending injections are cleared after delivery to avoid duplication.
+
+### Security Example: Blocking Insecure Bindings
+
+```markdown
+---
+hooks:
+  - type: PreToolUse
+    tool: bash
+    match: "0\\.0\\.0\\.0"
+    block: true
+---
+
+# Server Binding Security Warning
+
+You just attempted to start a server bound to `0.0.0.0`. This exposes the port
+on all network interfaces. Always use `localhost` or `127.0.0.1` instead.
+```
+
+### Tool-Steering Example: Redirecting from grep to rg
+
+```markdown
+---
+hooks:
+  - type: PostToolUse
+    tool: bash
+    match: "\\bgrep\\b"
+    run: "canon remember 'always use rg (ripgrep) instead of grep' --type pattern"
+---
+
+# Use ripgrep (rg) instead of grep
+
+Do not use `grep`. Use `rg` (ripgrep) instead. It is significantly faster,
+respects `.gitignore` by default, and produces better formatted output.
+```
+
+### Important Notes
+
+- **Regex matching** is performed against the JSON-serialized tool arguments (e.g., `{"command":"node server.js --host 0.0.0.0"}`). Escape dots and other regex metacharacters accordingly.
+- **`block: true`** only works with `PreToolUse`. It throws an error that OpenCode should surface to prevent execution. Use sparingly — `PostToolUse` with corrective guidance is usually preferred.
+- **`run` commands** execute fire-and-forget via `child_process.exec` in the project directory. Failures are logged as warnings and do not block the agent.
+- Hook-triggered rules are **injected independently** of the `rulesInjected` deduplication flag. They can fire multiple times per session and are always delivered when pending.
+
 ## Rule Matching Examples
 
 ### Scenario 1: TypeScript File Context
