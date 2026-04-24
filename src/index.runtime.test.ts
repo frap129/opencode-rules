@@ -543,6 +543,53 @@ describe('OpenCodeRulesPlugin', () => {
       )
     ).rejects.toThrow('[opencode-rules] Blocked by rule');
   });
+
+  it('executes run side-effect when PostToolUse hook fires', async () => {
+    clearRuleCache();
+    const { testDir, globalRulesDir } = getTestDirs();
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+    const markerFile = path.join(testDir, 'side-effect-marker.txt');
+
+    writeFileSync(
+      path.join(globalRulesDir, 'side-effect.mdc'),
+      `---\nhooks:\n  - type: PostToolUse\n    tool: bash\n    match: "grep"\n    run: "echo fired > ${markerFile}"\n---\n\nSide effect rule.`
+    );
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+
+    const after = hooks['tool.execute.after'] as (
+      input: {
+        tool: string;
+        sessionID: string;
+        callID: string;
+        args: Record<string, unknown>;
+      },
+      output: { title: string; output: string; metadata: unknown }
+    ) => Promise<void>;
+
+    await after(
+      {
+        tool: 'bash',
+        sessionID: 'ses_run',
+        callID: 'call_1',
+        args: { command: 'grep foo' },
+      },
+      { title: '', output: '', metadata: {} }
+    );
+
+    // Allow async side-effect to complete
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    const { readFileSync } = await import('fs');
+    const marker = readFileSync(markerFile, 'utf-8').trim();
+    expect(marker).toBe('fired');
+  });
 });
 
 describe('SessionState', () => {
