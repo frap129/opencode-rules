@@ -41,10 +41,14 @@ export class SessionStore {
   snapshot(sessionID: string): SessionState | undefined {
     const s = this.stateMap.get(sessionID);
     if (!s) return undefined;
-    return {
+    const snapshot: SessionState = {
       ...s,
       contextPaths: new Set(s.contextPaths),
     };
+    if (s.pendingHookInjections) {
+      snapshot.pendingHookInjections = [...s.pendingHookInjections];
+    }
+    return snapshot;
   }
 
   reset(): void {
