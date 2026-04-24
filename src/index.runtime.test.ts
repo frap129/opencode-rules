@@ -30,6 +30,7 @@ import {
   _setStateDirForTesting,
   readActiveRulesState,
 } from './active-rules-state.js';
+import { clearRuleCache } from './utils.js';
 
 describe('module boundary tests', () => {
   it('should re-export discoverRuleFiles from rule-discovery module', () => {
@@ -421,6 +422,51 @@ describe('OpenCodeRulesPlugin', () => {
     expect(snapshot?.pendingHookInjections?.[0]).toContain(
       'Do not bind to 0.0.0.0'
     );
+  });
+
+  it('registers tool.execute.after hook and queues PostToolUse injection', async () => {
+    clearRuleCache();
+    const { testDir, globalRulesDir } = getTestDirs();
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    writeFileSync(
+      path.join(globalRulesDir, 'steering.mdc'),
+      `---\nhooks:\n  - type: PostToolUse\n    tool: bash\n    match: "grep"\n---\n\nUse ripgrep (rg) instead of grep.`
+    );
+
+    const {
+      default: { server: plugin },
+      __testOnly,
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+
+    const after = hooks['tool.execute.after'] as (
+      input: {
+        tool: string;
+        sessionID: string;
+        callID: string;
+        args: Record<string, unknown>;
+      },
+      output: { title: string; output: string; metadata: unknown }
+    ) => Promise<void>;
+    expect(after).toBeDefined();
+
+    await after(
+      {
+        tool: 'bash',
+        sessionID: 'ses_post',
+        callID: 'call_1',
+        args: { command: 'grep foo' },
+      },
+      { title: '', output: '', metadata: {} }
+    );
+
+    const snapshot = __testOnly.getSessionStateSnapshot('ses_post');
+    expect(snapshot?.pendingHookInjections).toHaveLength(1);
+    expect(snapshot?.pendingHookInjections?.[0]).toContain('Use ripgrep');
   });
 });
 

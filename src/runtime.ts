@@ -72,6 +72,7 @@ export class OpenCodeRulesRuntime {
   createHooks(): Record<string, unknown> {
     return {
       'tool.execute.before': this.onToolExecuteBefore.bind(this),
+      'tool.execute.after': this.onToolExecuteAfter.bind(this),
       'experimental.chat.messages.transform':
         this.onMessagesTransform.bind(this),
       'chat.message': this.onChatMessage.bind(this),
@@ -124,6 +125,26 @@ export class OpenCodeRulesRuntime {
 
     // Evaluate PreToolUse hooks
     await this.evaluateAndQueueHooks('PreToolUse', sessionID, toolName, args);
+  }
+
+  private async onToolExecuteAfter(
+    input: {
+      tool?: string;
+      sessionID?: string;
+      callID?: string;
+      args?: Record<string, unknown>;
+    },
+    _output: { title?: string; output?: string; metadata?: unknown }
+  ): Promise<void> {
+    const sessionID = input?.sessionID;
+    const toolName = input?.tool;
+    const args = input?.args;
+
+    if (!sessionID || !toolName || !args) {
+      return;
+    }
+
+    await this.evaluateAndQueueHooks('PostToolUse', sessionID, toolName, args);
   }
 
   private async onMessagesTransform(
