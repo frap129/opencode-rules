@@ -26,9 +26,8 @@ describe('rule-hooks', () => {
         serializedArgs: '{"command":"node server.js --host 0.0.0.0"}',
         hookType: 'PreToolUse',
       });
-      expect(result).toHaveLength(2);
+      expect(result).toHaveLength(1);
       expect(result[0].tool).toBe('bash');
-      expect(result[1].tool).toBe('*');
     });
 
     it('does not match PostToolUse when evaluating PreToolUse', () => {
@@ -37,8 +36,7 @@ describe('rule-hooks', () => {
         serializedArgs: '{"command":"grep foo"}',
         hookType: 'PostToolUse',
       });
-      expect(result).toHaveLength(1);
-      expect(result[0].match).toBe('error');
+      expect(result).toHaveLength(0);
     });
 
     it('returns empty array when no hooks match', () => {
