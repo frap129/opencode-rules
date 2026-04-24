@@ -212,6 +212,8 @@ export class OpenCodeRulesRuntime {
       ? this.sessionStore.get(sessionID)
       : undefined;
 
+    // 1. Check compaction gate (must happen before flushing hook injections —
+    //    otherwise injections cleared during a compacting window are silently lost).
     if (sessionID) {
       const skip = this.sessionStore.shouldSkipInjection(
         sessionID,
@@ -226,49 +228,89 @@ export class OpenCodeRulesRuntime {
       }
     }
 
-    if (sessionState?.rulesInjected) {
+    // 2. Flush pending hook injections (always — even when rulesInjected is true).
+    //    Hook-triggered content bypasses the static rulesInjected deduplication gate.
+    //    Flushing here (after compaction check) ensures injections are never silently
+    //    dropped: if compaction was active, they remain queued for the next turn.
+    let hookInjectionsText: string | undefined;
+    if (
+      sessionState?.pendingHookInjections &&
+      sessionState.pendingHookInjections.length > 0
+    ) {
+      const uniqueInjections = [...new Set(sessionState.pendingHookInjections)];
+      hookInjectionsText = uniqueInjections.join('\n\n---\n\n');
+
+      this.sessionStore.upsert(sessionID, state => {
+        state.pendingHookInjections = [];
+      });
+
       this.debugLog(
-        `Session ${sessionID} already has rules injected - skipping to prevent loop`
+        `Flushing ${uniqueInjections.length} pending hook injection(s) for session ${sessionID}`
+      );
+    }
+
+    // 3. Decide whether to process static rules.
+    //    hook injections ALWAYS proceed (flushed above); static rules are gated.
+    const skipStaticRules = sessionState?.rulesInjected ?? false;
+
+    let formattedRules: string | undefined;
+
+    if (!skipStaticRules) {
+      const contextPaths = sessionState
+        ? Array.from(sessionState.contextPaths).sort((a, b) =>
+            a.localeCompare(b)
+          )
+        : [];
+      const userPrompt = sessionState?.lastUserPrompt;
+
+      const availableToolIDs = await this.queryAvailableToolIDs();
+
+      const filterContextOpts: BuildFilterContextOptions = {
+        contextFilePaths: contextPaths,
+        userPrompt,
+        availableToolIDs,
+        modelID: sessionState?.lastModelID,
+        agentType: sessionState?.lastAgentType,
+      };
+
+      const filterContext: RuleFilterContext = await buildFilterContext(
+        filterContextOpts,
+        this.projectDirectory,
+        this.debugLog
+      );
+
+      const result = await readAndFormatRules(this.ruleFiles, filterContext);
+      formattedRules = result.formattedRules;
+
+      if (sessionID) {
+        writeActiveRulesState(sessionID, result.matchedPaths);
+      }
+    } else {
+      this.debugLog(
+        `Session ${sessionID} already has rules injected - skipping static rule injection`
+      );
+    }
+
+    // 4. Build combined system content from hook injections + static rules
+    const systemParts: string[] = [];
+
+    if (hookInjectionsText) {
+      systemParts.push(hookInjectionsText);
+    }
+
+    if (formattedRules) {
+      systemParts.push(formattedRules);
+    }
+
+    if (systemParts.length === 0) {
+      this.debugLog(
+        'No applicable rules or hook injections for current context'
       );
       return output ?? {};
     }
 
-    const contextPaths = sessionState
-      ? Array.from(sessionState.contextPaths).sort((a, b) => a.localeCompare(b))
-      : [];
-    const userPrompt = sessionState?.lastUserPrompt;
-
-    const availableToolIDs = await this.queryAvailableToolIDs();
-
-    const filterContextOpts: BuildFilterContextOptions = {
-      contextFilePaths: contextPaths,
-      userPrompt,
-      availableToolIDs,
-      modelID: sessionState?.lastModelID,
-      agentType: sessionState?.lastAgentType,
-    };
-
-    const filterContext: RuleFilterContext = await buildFilterContext(
-      filterContextOpts,
-      this.projectDirectory,
-      this.debugLog
-    );
-
-    const { formattedRules, matchedPaths } = await readAndFormatRules(
-      this.ruleFiles,
-      filterContext
-    );
-
-    if (sessionID) {
-      writeActiveRulesState(sessionID, matchedPaths);
-    }
-
-    if (!formattedRules) {
-      this.debugLog('No applicable rules for current context');
-      return output ?? {};
-    }
-
     this.debugLog('Injecting rules into system prompt');
+    const combinedSystem = systemParts.join('\n\n---\n\n');
 
     if (!output) {
       if (sessionID) {
@@ -277,15 +319,15 @@ export class OpenCodeRulesRuntime {
           state.lastInjectedAt = this.now();
         });
       }
-      return { system: formattedRules };
+      return { system: combinedSystem };
     }
 
     if (Array.isArray(output.system)) {
-      output.system.push(formattedRules);
+      output.system.push(combinedSystem);
     } else {
       output.system = output.system
-        ? `${output.system}\n\n${formattedRules}`
-        : formattedRules;
+        ? `${output.system}\n\n${combinedSystem}`
+        : combinedSystem;
     }
 
     if (sessionID) {

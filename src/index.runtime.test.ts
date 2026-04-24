@@ -468,6 +468,50 @@ describe('OpenCodeRulesPlugin', () => {
     expect(snapshot?.pendingHookInjections).toHaveLength(1);
     expect(snapshot?.pendingHookInjections?.[0]).toContain('Use ripgrep');
   });
+
+  it('delivers pending PreToolUse injection in system transform', async () => {
+    clearRuleCache();
+    const { testDir, globalRulesDir } = getTestDirs();
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    writeFileSync(
+      path.join(globalRulesDir, 'security.mdc'),
+      `---\nhooks:\n  - type: PreToolUse\n    tool: bash\n    match: "0\\\\.0\\\\.0\\\\.0"\n---\n\nDo not bind to 0.0.0.0.`
+    );
+
+    const {
+      default: { server: plugin },
+      __testOnly,
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+
+    const before = hooks['tool.execute.before'] as (
+      input: { tool: string; sessionID: string; callID: string },
+      output: { args: Record<string, unknown> }
+    ) => Promise<void>;
+    await before(
+      { tool: 'bash', sessionID: 'ses_deliver', callID: 'call_1' },
+      { args: { command: 'node server.js --host 0.0.0.0' } }
+    );
+
+    const systemTransform = hooks['experimental.chat.system.transform'] as (
+      input: { sessionID?: string },
+      output: { system: string }
+    ) => Promise<{ system: string }>;
+    const result = await systemTransform(
+      { sessionID: 'ses_deliver' },
+      { system: 'Base prompt.' }
+    );
+
+    expect(result.system).toContain('Do not bind to 0.0.0.0');
+
+    // Pending injections should be cleared after delivery
+    const snapshot = __testOnly.getSessionStateSnapshot('ses_deliver');
+    expect(snapshot?.pendingHookInjections).toHaveLength(0);
+  });
 });
 
 describe('SessionState', () => {
