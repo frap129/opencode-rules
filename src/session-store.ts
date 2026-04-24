@@ -10,6 +10,7 @@ export interface SessionState {
   lastAgentType?: string;
   rulesInjected?: boolean;
   lastInjectedAt?: number;
+  pendingHookInjections?: string[];
 }
 
 interface SessionStoreOptions {
