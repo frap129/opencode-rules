@@ -385,6 +385,43 @@ describe('OpenCodeRulesPlugin', () => {
 
     expect(__testOnly.getSeedCount('ses_seed')).toBe(1);
   });
+  it('queues PreToolUse hook injection when bash command matches', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    // Clear rule cache to ensure fresh reads
+    utilsModule.clearRuleCache();
+
+    writeFileSync(
+      path.join(globalRulesDir, 'security.mdc'),
+      `---\nhooks:\n  - type: PreToolUse\n    tool: bash\n    match: "0\\\\.0\\\\.0\\\\.0"\n---\n\nDo not bind to 0.0.0.0.`
+    );
+
+    const {
+      default: { server: plugin },
+      __testOnly,
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+
+    const before = hooks['tool.execute.before'] as (
+      input: { tool: string; sessionID: string; callID: string },
+      output: { args: Record<string, unknown> }
+    ) => Promise<void>;
+
+    await before(
+      { tool: 'bash', sessionID: 'ses_pre', callID: 'call_1' },
+      { args: { command: 'node server.js --host 0.0.0.0' } }
+    );
+
+    const snapshot = __testOnly.getSessionStateSnapshot('ses_pre');
+    expect(snapshot?.pendingHookInjections).toHaveLength(1);
+    expect(snapshot?.pendingHookInjections?.[0]).toContain(
+      'Do not bind to 0.0.0.0'
+    );
+  });
 });
 
 describe('SessionState', () => {

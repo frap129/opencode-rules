@@ -1,6 +1,6 @@
 import { readAndFormatRules, type RuleFilterContext } from './rule-filter.js';
 import { extractFilePathsFromMessages } from './message-paths.js';
-import { type DiscoveredRule } from './rule-discovery.js';
+import { type DiscoveredRule, getCachedRule } from './rule-discovery.js';
 import {
   extractLatestUserPrompt,
   extractSessionID,
@@ -22,6 +22,11 @@ import {
   type ChatMessageOutput,
 } from './runtime-chat.js';
 import { writeActiveRulesState } from './active-rules-state.js';
+import { evaluateHooks, serializeToolArgs } from './rule-hooks.js';
+import { exec } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execAsync = promisify(exec);
 
 interface MessagesTransformOutput {
   messages: MessageWithInfo[];
@@ -116,6 +121,9 @@ export class OpenCodeRulesRuntime {
         `Recorded context path from tool ${toolName}: ${normalized}`
       );
     }
+
+    // Evaluate PreToolUse hooks
+    await this.evaluateAndQueueHooks('PreToolUse', sessionID, toolName, args);
   }
 
   private async onMessagesTransform(
@@ -365,5 +373,73 @@ export class OpenCodeRulesRuntime {
     this.debugLog(
       `Added ${pathsToInclude.length} context path(s) to compaction for session ${sessionID}`
     );
+  }
+
+  private async executeHookSideEffect(
+    command: string,
+    sessionID: string
+  ): Promise<void> {
+    try {
+      this.debugLog(
+        `Executing hook side-effect for session ${sessionID}: ${command}`
+      );
+      await execAsync(command, { cwd: this.projectDirectory });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `[opencode-rules] Warning: Hook side-effect failed: ${message}`
+      );
+    }
+  }
+
+  private async evaluateAndQueueHooks(
+    hookType: 'PreToolUse' | 'PostToolUse',
+    sessionID: string,
+    toolName: string,
+    args: Record<string, unknown>
+  ): Promise<void> {
+    const serializedArgs = serializeToolArgs(args);
+    for (const { filePath: rulePath, relativePath } of this.ruleFiles) {
+      const cachedRule = await getCachedRule(rulePath);
+      if (!cachedRule?.metadata?.hooks) continue;
+
+      const typeFiltered = cachedRule.metadata.hooks.filter(
+        h => h.type === hookType
+      );
+      if (typeFiltered.length === 0) continue;
+
+      const matched = evaluateHooks(typeFiltered, {
+        toolName,
+        serializedArgs,
+        hookType,
+      });
+
+      for (const hook of matched) {
+        if (hookType === 'PreToolUse' && hook.block) {
+          this.debugLog(
+            `PreToolUse block fired for rule ${relativePath}, tool ${toolName}`
+          );
+          throw new Error(
+            `[opencode-rules] Blocked by rule "${relativePath}": ` +
+              `tool "${toolName}" matched blocked pattern`
+          );
+        }
+
+        this.sessionStore.upsert(sessionID, state => {
+          if (!state.pendingHookInjections) {
+            state.pendingHookInjections = [];
+          }
+          state.pendingHookInjections.push(cachedRule.strippedContent);
+        });
+
+        this.debugLog(
+          `${hookType} hook fired for rule ${relativePath}, tool ${toolName}`
+        );
+
+        if (hook.run) {
+          await this.executeHookSideEffect(hook.run, sessionID);
+        }
+      }
+    }
   }
 }
