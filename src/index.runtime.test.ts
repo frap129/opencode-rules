@@ -25,6 +25,7 @@ import * as utilsModule from './utils.js';
 import * as sessionStoreModule from './session-store.js';
 import * as runtimeContextModule from './runtime-context.js';
 import * as runtimeChatModule from './runtime-chat.js';
+import * as ruleHooksModule from './rule-hooks.js';
 import { __testOnly } from './index.js';
 import {
   _setStateDirForTesting,
@@ -162,6 +163,17 @@ describe('module boundary tests', () => {
   it('should return empty string for undefined parts in runtime-chat module', () => {
     const result = runtimeChatModule.extractUserPromptFromParts(undefined);
     expect(result).toBe('');
+  });
+
+  it('should re-export evaluateHooks and serializeToolArgs from rule-hooks module', () => {
+    expect(ruleHooksModule.evaluateHooks).toBeDefined();
+    expect(ruleHooksModule.serializeToolArgs).toBeDefined();
+    expect(typeof ruleHooksModule.evaluateHooks).toBe('function');
+    expect(typeof ruleHooksModule.serializeToolArgs).toBe('function');
+    expect(utilsModule.evaluateHooks).toBe(ruleHooksModule.evaluateHooks);
+    expect(utilsModule.serializeToolArgs).toBe(
+      ruleHooksModule.serializeToolArgs
+    );
   });
 });
 
@@ -1102,10 +1114,12 @@ describe('utils runtime exports', () => {
     expect(exportedKeys).toEqual([
       'clearRuleCache',
       'discoverRuleFiles',
+      'evaluateHooks',
       'extractFilePathsFromMessages',
       'parseRuleMetadata',
       'promptMatchesKeywords',
       'readAndFormatRules',
+      'serializeToolArgs',
       'toolsMatchAvailable',
     ]);
   });
