@@ -399,6 +399,14 @@ export class OpenCodeRulesRuntime {
     args: Record<string, unknown>
   ): Promise<void> {
     const serializedArgs = serializeToolArgs(args);
+
+    // First pass: collect all matched hooks across all rules
+    const allMatches: Array<{
+      hook: { type: string; run?: string };
+      relativePath: string;
+      strippedContent: string;
+    }> = [];
+
     for (const { filePath: rulePath, relativePath } of this.ruleFiles) {
       const cachedRule = await getCachedRule(rulePath);
       if (!cachedRule?.metadata?.hooks) continue;
@@ -414,35 +422,54 @@ export class OpenCodeRulesRuntime {
         hookType,
       });
 
-      // Pre-scan: if any hook has block: true, throw before any side-effects
-      if (hookType === 'PreToolUse') {
-        const blocker = matched.find(h => h.block);
-        if (blocker) {
-          this.debugLog(
-            `PreToolUse block fired for rule ${relativePath}, tool ${toolName}`
-          );
-          throw new Error(
-            `[opencode-rules] Blocked by rule "${relativePath}": ` +
-              `tool "${toolName}" matched blocked pattern`
-          );
-        }
-      }
-
       for (const hook of matched) {
+        allMatches.push({
+          hook,
+          relativePath,
+          strippedContent: cachedRule.strippedContent,
+        });
+      }
+    }
+
+    if (allMatches.length === 0) return;
+
+    // Check for blockers globally before any queuing or side-effects
+    if (hookType === 'PreToolUse') {
+      const blocker = allMatches.find(
+        m =>
+          m.hook.type === 'PreToolUse' && (m.hook as { block?: boolean }).block
+      );
+      if (blocker) {
+        this.debugLog(
+          `PreToolUse block fired for rule ${blocker.relativePath}, tool ${toolName}`
+        );
+        throw new Error(
+          `[opencode-rules] Blocked by rule "${blocker.relativePath}": ` +
+            `tool "${toolName}" matched blocked pattern`
+        );
+      }
+    }
+
+    // No blockers: queue content and run side-effects
+    // Deduplicate content per rule (one injection per rule, regardless of how many hooks matched)
+    const seenContent = new Set<string>();
+    for (const { hook, relativePath, strippedContent } of allMatches) {
+      if (!seenContent.has(strippedContent)) {
+        seenContent.add(strippedContent);
         this.sessionStore.upsert(sessionID, state => {
           if (!state.pendingHookInjections) {
             state.pendingHookInjections = [];
           }
-          state.pendingHookInjections.push(cachedRule.strippedContent);
+          state.pendingHookInjections.push(strippedContent);
         });
 
         this.debugLog(
           `${hookType} hook fired for rule ${relativePath}, tool ${toolName}`
         );
+      }
 
-        if (hook.run) {
-          await this.executeHookSideEffect(hook.run, sessionID);
-        }
+      if (hook.run) {
+        await this.executeHookSideEffect(hook.run, sessionID);
       }
     }
   }
