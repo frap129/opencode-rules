@@ -512,6 +512,37 @@ describe('OpenCodeRulesPlugin', () => {
     const snapshot = __testOnly.getSessionStateSnapshot('ses_deliver');
     expect(snapshot?.pendingHookInjections).toHaveLength(0);
   });
+
+  it('throws when PreToolUse hook has block: true', async () => {
+    clearRuleCache();
+    const { testDir, globalRulesDir } = getTestDirs();
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    writeFileSync(
+      path.join(globalRulesDir, 'blocker.mdc'),
+      `---\nhooks:\n  - type: PreToolUse\n    tool: bash\n    match: "0\\\\.0\\\\.0\\\\.0"\n    block: true\n---\n\nBlocked.`
+    );
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+
+    const before = hooks['tool.execute.before'] as (
+      input: { tool: string; sessionID: string; callID: string },
+      output: { args: Record<string, unknown> }
+    ) => Promise<void>;
+
+    await expect(
+      before(
+        { tool: 'bash', sessionID: 'ses_block', callID: 'call_1' },
+        { args: { command: 'node server.js --host 0.0.0.0' } }
+      )
+    ).rejects.toThrow('[opencode-rules] Blocked by rule');
+  });
 });
 
 describe('SessionState', () => {
