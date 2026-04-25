@@ -12,10 +12,7 @@ import {
 import { extractConnectedMcpCapabilityIDs } from './mcp-tools.js';
 import { createDebugLog, logWarning, type DebugLog } from './debug.js';
 import type { SessionStore } from './session-store.js';
-import {
-  buildFilterContext,
-  type BuildFilterContextOptions,
-} from './runtime-context.js';
+import { buildFilterContext } from './runtime-context.js';
 import {
   handleChatMessage,
   type ChatMessageInput,
@@ -266,19 +263,15 @@ export class OpenCodeRulesRuntime {
 
       const availableToolIDs = await this.queryAvailableToolIDs();
 
-      const filterContextOpts: BuildFilterContextOptions = {
+      const filterContext: RuleFilterContext = await buildFilterContext({
         contextFilePaths: contextPaths,
         userPrompt,
         availableToolIDs,
         modelID: sessionState?.lastModelID,
         agentType: sessionState?.lastAgentType,
-      };
-
-      const filterContext: RuleFilterContext = await buildFilterContext(
-        filterContextOpts,
-        this.projectDirectory,
-        this.debugLog
-      );
+        projectDirectory: this.projectDirectory,
+        debugLog: this.debugLog,
+      });
 
       const result = await readAndFormatRules(this.ruleFiles, filterContext);
       formattedRules = result.formattedRules;
