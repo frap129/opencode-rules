@@ -21,8 +21,8 @@ export {
   type DiscoveredRule,
 } from './rule-discovery.js';
 
-// Re-export from rule-metadata (RuleMetadata is internal, not re-exported)
-export { parseRuleMetadata } from './rule-metadata.js';
+// Re-export from rule-metadata
+export { parseRuleMetadata, hasConditions } from './rule-metadata.js';
 
 // Re-export from rule-filter
 export {

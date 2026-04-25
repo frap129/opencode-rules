@@ -5,6 +5,7 @@
 import { minimatch } from 'minimatch';
 import { createDebugLog } from './debug.js';
 import { getCachedRule, type DiscoveredRule } from './rule-discovery.js';
+import { hasConditions } from './utils.js';
 
 const debugLog = createDebugLog();
 
@@ -120,20 +121,9 @@ export async function readAndFormatRules(
     const { metadata, strippedContent } = cachedRule;
 
     // Check if rule has any conditional filters
-    const hasConditions = Boolean(
-      metadata?.globs ||
-      metadata?.keywords ||
-      metadata?.tools ||
-      metadata?.model ||
-      metadata?.agent ||
-      metadata?.command ||
-      metadata?.project ||
-      metadata?.branch ||
-      metadata?.os ||
-      metadata?.ci !== undefined
-    );
+    const ruleHasConditions = hasConditions(metadata);
 
-    if (hasConditions && metadata) {
+    if (ruleHasConditions && metadata) {
       // Compute per-dimension match booleans (only for declared conditions)
       const declaredChecks: boolean[] = [];
 

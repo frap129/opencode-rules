@@ -188,3 +188,22 @@ export function stripFrontmatter(content: string): string {
   // Return content after the closing marker, trimming leading newline
   return content.substring(endIndex + 3).trimStart();
 }
+
+/**
+ * Check if metadata has any conditional fields set.
+ */
+export function hasConditions(meta: RuleMetadata | null | undefined): boolean {
+  if (!meta) return false;
+  return !!(
+    meta.globs ||
+    meta.keywords ||
+    meta.tools ||
+    meta.model ||
+    meta.agent ||
+    meta.command ||
+    meta.project ||
+    meta.branch ||
+    meta.os ||
+    meta.ci !== undefined
+  );
+}
