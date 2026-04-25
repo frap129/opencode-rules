@@ -44,7 +44,7 @@ export function getTestDirs(): TestDirs {
 }
 
 // ============================================================================
-// Environment Snapshot Helpers
+// Rule Helpers
 // ============================================================================
 
 /**
@@ -101,7 +101,7 @@ export function restoreCiEnvVars(saved: CiEnvSnapshot): void {
 }
 
 // ============================================================================
-// Environment Snapshot Helpers
+// Mock Plugin Input Helpers
 // ============================================================================
 
 interface MockPluginInput {
@@ -152,7 +152,7 @@ export function createMockPluginInput(opts: MockPluginInput): {
 }
 
 // ============================================================================
-// Environment Snapshot Helpers
+// Generic Environment Snapshot Helpers
 // ============================================================================
 
 /**
