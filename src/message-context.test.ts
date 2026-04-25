@@ -23,9 +23,11 @@ describe('message-context', () => {
   it('extracts latest non-synthetic user prompt', () => {
     const prompt = extractLatestUserPrompt([
       {
+        role: 'user',
         parts: [{ type: 'text', text: 'older', synthetic: true }],
       },
       {
+        role: 'user',
         parts: [{ type: 'text', text: 'hello world' }],
       },
     ]);
