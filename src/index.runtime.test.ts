@@ -25,11 +25,13 @@ import * as utilsModule from './utils.js';
 import * as sessionStoreModule from './session-store.js';
 import * as runtimeContextModule from './runtime-context.js';
 import * as runtimeChatModule from './runtime-chat.js';
+import * as ruleHooksModule from './rule-hooks.js';
 import { __testOnly } from './index.js';
 import {
   _setStateDirForTesting,
   readActiveRulesState,
 } from './active-rules-state.js';
+import { clearRuleCache } from './utils.js';
 
 describe('module boundary tests', () => {
   it('should re-export discoverRuleFiles from rule-discovery module', () => {
@@ -161,6 +163,17 @@ describe('module boundary tests', () => {
   it('should return empty string for undefined parts in runtime-chat module', () => {
     const result = runtimeChatModule.extractUserPromptFromParts(undefined);
     expect(result).toBe('');
+  });
+
+  it('should re-export evaluateHooks and serializeToolArgs from rule-hooks module', () => {
+    expect(ruleHooksModule.evaluateHooks).toBeDefined();
+    expect(ruleHooksModule.serializeToolArgs).toBeDefined();
+    expect(typeof ruleHooksModule.evaluateHooks).toBe('function');
+    expect(typeof ruleHooksModule.serializeToolArgs).toBe('function');
+    expect(utilsModule.evaluateHooks).toBe(ruleHooksModule.evaluateHooks);
+    expect(utilsModule.serializeToolArgs).toBe(
+      ruleHooksModule.serializeToolArgs
+    );
   });
 });
 
@@ -384,6 +397,210 @@ describe('OpenCodeRulesPlugin', () => {
     await transform({}, messages);
 
     expect(__testOnly.getSeedCount('ses_seed')).toBe(1);
+  });
+  it('queues PreToolUse hook injection when bash command matches', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    // Clear rule cache to ensure fresh reads
+    utilsModule.clearRuleCache();
+
+    writeFileSync(
+      path.join(globalRulesDir, 'security.mdc'),
+      `---\nhooks:\n  - type: PreToolUse\n    tool: bash\n    match: "0\\\\.0\\\\.0\\\\.0"\n---\n\nDo not bind to 0.0.0.0.`
+    );
+
+    const {
+      default: { server: plugin },
+      __testOnly,
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+
+    const before = hooks['tool.execute.before'] as (
+      input: { tool: string; sessionID: string; callID: string },
+      output: { args: Record<string, unknown> }
+    ) => Promise<void>;
+
+    await before(
+      { tool: 'bash', sessionID: 'ses_pre', callID: 'call_1' },
+      { args: { command: 'node server.js --host 0.0.0.0' } }
+    );
+
+    const snapshot = __testOnly.getSessionStateSnapshot('ses_pre');
+    expect(snapshot?.pendingHookInjections).toHaveLength(1);
+    expect(snapshot?.pendingHookInjections?.[0]).toContain(
+      'Do not bind to 0.0.0.0'
+    );
+  });
+
+  it('registers tool.execute.after hook and queues PostToolUse injection', async () => {
+    clearRuleCache();
+    const { testDir, globalRulesDir } = getTestDirs();
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    writeFileSync(
+      path.join(globalRulesDir, 'steering.mdc'),
+      `---\nhooks:\n  - type: PostToolUse\n    tool: bash\n    match: "grep"\n---\n\nUse ripgrep (rg) instead of grep.`
+    );
+
+    const {
+      default: { server: plugin },
+      __testOnly,
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+
+    const after = hooks['tool.execute.after'] as (
+      input: {
+        tool: string;
+        sessionID: string;
+        callID: string;
+        args: Record<string, unknown>;
+      },
+      output: { title: string; output: string; metadata: unknown }
+    ) => Promise<void>;
+    expect(after).toBeDefined();
+
+    await after(
+      {
+        tool: 'bash',
+        sessionID: 'ses_post',
+        callID: 'call_1',
+        args: { command: 'grep foo' },
+      },
+      { title: '', output: '', metadata: {} }
+    );
+
+    const snapshot = __testOnly.getSessionStateSnapshot('ses_post');
+    expect(snapshot?.pendingHookInjections).toHaveLength(1);
+    expect(snapshot?.pendingHookInjections?.[0]).toContain('Use ripgrep');
+  });
+
+  it('delivers pending PreToolUse injection in system transform', async () => {
+    clearRuleCache();
+    const { testDir, globalRulesDir } = getTestDirs();
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    writeFileSync(
+      path.join(globalRulesDir, 'security.mdc'),
+      `---\nhooks:\n  - type: PreToolUse\n    tool: bash\n    match: "0\\\\.0\\\\.0\\\\.0"\n---\n\nDo not bind to 0.0.0.0.`
+    );
+
+    const {
+      default: { server: plugin },
+      __testOnly,
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+
+    const before = hooks['tool.execute.before'] as (
+      input: { tool: string; sessionID: string; callID: string },
+      output: { args: Record<string, unknown> }
+    ) => Promise<void>;
+    await before(
+      { tool: 'bash', sessionID: 'ses_deliver', callID: 'call_1' },
+      { args: { command: 'node server.js --host 0.0.0.0' } }
+    );
+
+    const systemTransform = hooks['experimental.chat.system.transform'] as (
+      input: { sessionID?: string },
+      output: { system: string }
+    ) => Promise<{ system: string }>;
+    const result = await systemTransform(
+      { sessionID: 'ses_deliver' },
+      { system: 'Base prompt.' }
+    );
+
+    expect(result.system).toContain('Do not bind to 0.0.0.0');
+
+    // Pending injections should be cleared after delivery
+    const snapshot = __testOnly.getSessionStateSnapshot('ses_deliver');
+    expect(snapshot?.pendingHookInjections).toHaveLength(0);
+  });
+
+  it('throws when PreToolUse hook has block: true', async () => {
+    clearRuleCache();
+    const { testDir, globalRulesDir } = getTestDirs();
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    writeFileSync(
+      path.join(globalRulesDir, 'blocker.mdc'),
+      `---\nhooks:\n  - type: PreToolUse\n    tool: bash\n    match: "0\\\\.0\\\\.0\\\\.0"\n    block: true\n---\n\nBlocked.`
+    );
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+
+    const before = hooks['tool.execute.before'] as (
+      input: { tool: string; sessionID: string; callID: string },
+      output: { args: Record<string, unknown> }
+    ) => Promise<void>;
+
+    await expect(
+      before(
+        { tool: 'bash', sessionID: 'ses_block', callID: 'call_1' },
+        { args: { command: 'node server.js --host 0.0.0.0' } }
+      )
+    ).rejects.toThrow('[opencode-rules] Blocked by rule');
+  });
+
+  it('executes run side-effect when PostToolUse hook fires', async () => {
+    clearRuleCache();
+    const { testDir, globalRulesDir } = getTestDirs();
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+    const markerFile = path.join(testDir, 'side-effect-marker.txt');
+
+    writeFileSync(
+      path.join(globalRulesDir, 'side-effect.mdc'),
+      `---\nhooks:\n  - type: PostToolUse\n    tool: bash\n    match: "grep"\n    run: "echo fired > ${markerFile}"\n---\n\nSide effect rule.`
+    );
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+
+    const after = hooks['tool.execute.after'] as (
+      input: {
+        tool: string;
+        sessionID: string;
+        callID: string;
+        args: Record<string, unknown>;
+      },
+      output: { title: string; output: string; metadata: unknown }
+    ) => Promise<void>;
+
+    await after(
+      {
+        tool: 'bash',
+        sessionID: 'ses_run',
+        callID: 'call_1',
+        args: { command: 'grep foo' },
+      },
+      { title: '', output: '', metadata: {} }
+    );
+
+    // Allow async side-effect to complete
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    const { readFileSync } = await import('fs');
+    const marker = readFileSync(markerFile, 'utf-8').trim();
+    expect(marker).toBe('fired');
   });
 });
 
@@ -897,10 +1114,12 @@ describe('utils runtime exports', () => {
     expect(exportedKeys).toEqual([
       'clearRuleCache',
       'discoverRuleFiles',
+      'evaluateHooks',
       'extractFilePathsFromMessages',
       'parseRuleMetadata',
       'promptMatchesKeywords',
       'readAndFormatRules',
+      'serializeToolArgs',
       'toolsMatchAvailable',
     ]);
   });

@@ -19,6 +19,15 @@ export interface RuleMetadata {
   os?: string[];
   ci?: boolean;
   match?: 'any' | 'all';
+  hooks?: RuleHook[];
+}
+
+export interface RuleHook {
+  type: 'PreToolUse' | 'PostToolUse';
+  tool: string;
+  match: string;
+  block?: boolean;
+  run?: string;
 }
 
 /**
@@ -36,6 +45,7 @@ interface ParsedFrontmatter {
   os?: unknown;
   ci?: unknown;
   match?: unknown;
+  hooks?: unknown;
 }
 
 /** Field names in ParsedFrontmatter that are string arrays */
@@ -127,6 +137,34 @@ export function parseRuleMetadata(content: string): RuleMetadata | undefined {
     // Extract match (normalize to 'any' | 'all' only)
     if (parsed.match === 'any' || parsed.match === 'all') {
       metadata.match = parsed.match;
+    }
+
+    // Extract hooks
+    if (Array.isArray(parsed.hooks)) {
+      const hooks: RuleHook[] = [];
+      for (const h of parsed.hooks) {
+        if (typeof h !== 'object' || h === null) continue;
+        const hook = h as Record<string, unknown>;
+        if (
+          (hook.type === 'PreToolUse' || hook.type === 'PostToolUse') &&
+          typeof hook.tool === 'string' &&
+          hook.tool.length > 0 &&
+          typeof hook.match === 'string' &&
+          hook.match.length > 0
+        ) {
+          hooks.push({
+            type: hook.type,
+            tool: hook.tool,
+            match: hook.match,
+            ...(typeof hook.block === 'boolean' && { block: hook.block }),
+            ...(typeof hook.run === 'string' &&
+              hook.run.length > 0 && { run: hook.run }),
+          });
+        }
+      }
+      if (hooks.length > 0) {
+        metadata.hooks = hooks;
+      }
     }
 
     // Return metadata only if it has content

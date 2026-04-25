@@ -34,6 +34,7 @@ approach.
 - **Tool-based rules**: Apply rules only when specific MCP tools are available
 - **Global and project-level rules**: Define rules at both system and project scopes
 - **Context-aware injection**: Rules filtered by extracted file paths and user prompts
+- **Hook-based triggers**: Reactively fire rules when tools are invoked via `PreToolUse` (before execution, optionally blocking) and `PostToolUse` (after execution, delivering corrective guidance on the next turn)
 - **Zero-configuration**: Works out of the box with XDG Base Directory specification
 - **TypeScript-first**: Built with TypeScript for type safety and developer experience
 - **Performance optimized**: Efficient file discovery and minimal startup overhead
@@ -554,9 +555,11 @@ This plugin uses OpenCode's hook system for incremental, stateful rule injection
 
 ### Hook-Based Approach
 
-1. **`tool.execute.before`** - Authoritative path capture from tool execution
+1. **`tool.execute.before`** - Authoritative path capture and reactive hook evaluation
    - Fires before each tool runs (read, edit, write, glob, grep, etc.)
    - Captures `filePath` or `path` arguments authoritative from the tool definition
+   - Evaluates `PreToolUse` hooks: rules with `block: true` can prevent execution
+   - Queues matched rule content as pending hook injections for the next system prompt
    - Updates session state with normalized, verified context paths
    - Provides real-time context as tools are executed
 
@@ -586,6 +589,12 @@ This plugin uses OpenCode's hook system for incremental, stateful rule injection
    - Fires when a session is compacted (summarized)
    - Injects current context paths into the compaction context
    - Prevents rules from being lost during session compression
+
+6. **`tool.execute.after`** - Post-execution corrective guidance
+   - Fires after each tool completes
+   - Evaluates `PostToolUse` hooks for reactive rule triggering
+   - Queues corrective rule content into pending hook injections
+   - Content is delivered on the next `experimental.chat.system.transform`
 
 ### Experimental API Notice
 

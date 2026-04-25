@@ -1,7 +1,5 @@
 import { describe, it, expect } from 'vitest';
-
-// Module does not exist yet; this test should fail first.
-import { SessionStore } from './session-store.js';
+import { createSessionStore, SessionStore } from './session-store.js';
 
 describe('SessionStore', () => {
   it('prunes oldest sessions when over max', () => {
@@ -81,5 +79,19 @@ describe('SessionStore', () => {
     const state = store.get('ses_1');
     expect(state?.rulesInjected).toBe(false);
     expect(state?.lastUserPrompt).toBe('new message');
+  });
+});
+
+describe('pending hook injections', () => {
+  it('stores and retrieves pending hook injections', () => {
+    const store = createSessionStore();
+    store.upsert('ses_hooks', state => {
+      state.pendingHookInjections = ['Injection A', 'Injection B'];
+    });
+    const snapshot = store.snapshot('ses_hooks');
+    expect(snapshot?.pendingHookInjections).toEqual([
+      'Injection A',
+      'Injection B',
+    ]);
   });
 });

@@ -34,3 +34,10 @@ export {
   type Message,
   type MessagePart,
 } from './message-paths.js';
+
+// Re-export from rule-hooks
+export {
+  evaluateHooks,
+  serializeToolArgs,
+  type HookEvaluationContext,
+} from './rule-hooks.js';
