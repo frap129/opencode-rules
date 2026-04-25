@@ -128,13 +128,6 @@ describe('module boundary tests', () => {
     expect(typeof runtimeChatModule.handleChatMessage).toBe('function');
   });
 
-  it('should export extractUserPromptFromParts from runtime-chat module', () => {
-    expect(runtimeChatModule.extractUserPromptFromParts).toBeDefined();
-    expect(typeof runtimeChatModule.extractUserPromptFromParts).toBe(
-      'function'
-    );
-  });
-
   it('should detect CI environment correctly via runtime-context module', () => {
     const originalCI = process.env.CI;
 
@@ -149,20 +142,6 @@ describe('module boundary tests', () => {
     } else {
       process.env.CI = originalCI;
     }
-  });
-
-  it('should extract user prompt from parts via runtime-chat module', () => {
-    const parts = [
-      { type: 'text', text: 'Hello ' },
-      { type: 'text', text: 'world' },
-    ];
-    const result = runtimeChatModule.extractUserPromptFromParts(parts);
-    expect(result).toBe('Hello world');
-  });
-
-  it('should return empty string for undefined parts in runtime-chat module', () => {
-    const result = runtimeChatModule.extractUserPromptFromParts(undefined);
-    expect(result).toBe('');
   });
 
   it('should re-export evaluateHooks and serializeToolArgs from rule-hooks module', () => {
@@ -1126,9 +1105,9 @@ describe('utils runtime exports', () => {
 });
 
 describe('session-store runtime exports', () => {
-  it('exports only SessionStore and createSessionStore at runtime', () => {
+  it('exports only SessionStore at runtime', () => {
     const exportedKeys = Object.keys(sessionStoreModule).sort();
-    expect(exportedKeys).toEqual(['SessionStore', 'createSessionStore']);
+    expect(exportedKeys).toEqual(['SessionStore']);
   });
 });
 

@@ -14,19 +14,6 @@ export interface ChatMessageOutput {
 }
 
 /**
- * Extract user prompt text from chat message parts.
- * Returns empty string if no text parts found.
- */
-export function extractUserPromptFromParts(
-  parts:
-    | Array<{ type?: string; text?: string; synthetic?: boolean }>
-    | undefined
-): string {
-  if (!parts) return '';
-  return extractTextFromParts(parts);
-}
-
-/**
  * Handle incoming chat messages to update session state.
  * Captures user prompts, model IDs, and agent types.
  */
@@ -46,7 +33,7 @@ export function handleChatMessage(
     return;
   }
 
-  const userPrompt = extractUserPromptFromParts(output.parts);
+  const userPrompt = output.parts ? extractTextFromParts(output.parts) : '';
 
   sessionStore.upsert(sessionID, state => {
     if (userPrompt) {

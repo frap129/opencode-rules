@@ -7,9 +7,9 @@
 import type { Plugin, PluginInput } from '@opencode-ai/plugin';
 import { discoverRuleFiles } from './utils.js';
 import { OpenCodeRulesRuntime } from './runtime.js';
-import { createSessionStore, type SessionState } from './session-store.js';
+import { SessionStore, type SessionState } from './session-store.js';
 
-const sessionStore = createSessionStore();
+const sessionStore = new SessionStore();
 import { createDebugLog } from './debug.js';
 
 const debugLog = createDebugLog();

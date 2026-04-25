@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createSessionStore, SessionStore } from './session-store.js';
+import { SessionStore } from './session-store.js';
 
 describe('SessionStore', () => {
   it('prunes oldest sessions when over max', () => {
@@ -84,7 +84,7 @@ describe('SessionStore', () => {
 
 describe('pending hook injections', () => {
   it('stores and retrieves pending hook injections', () => {
-    const store = createSessionStore();
+    const store = new SessionStore();
     store.upsert('ses_hooks', state => {
       state.pendingHookInjections = ['Injection A', 'Injection B'];
     });
