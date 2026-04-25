@@ -2,6 +2,7 @@
 import { discoverRuleFiles, getCachedRule } from '../../src/rule-discovery.js';
 import type { RuleMetadata } from '../../src/rule-metadata.js';
 import { readActiveRulesState } from '../../src/active-rules-state.js';
+import { hasConditions } from '../../src/utils.js';
 import path from 'path';
 
 /** Represents a rule as displayed in the sidebar */
@@ -128,25 +129,7 @@ export function ruleSource(
 }
 
 /**
- * Check if metadata has any conditional fields set.
- */
-export function hasConditions(meta: RuleMetadata | null | undefined): boolean {
-  if (!meta) return false;
-  return !!(
-    meta.globs ||
-    meta.keywords ||
-    meta.tools ||
-    meta.model ||
-    meta.agent ||
-    meta.command ||
-    meta.project ||
-    meta.branch ||
-    meta.os ||
-    meta.ci !== undefined
-  );
-}
-
-/**
+ * Format a concise summary of which conditions a rule has.
  * Build a human-readable, comma-separated summary of active conditions.
  * E.g., "globs: src/*.ts, keywords: auth, security"
  */
