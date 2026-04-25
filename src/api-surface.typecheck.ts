@@ -20,12 +20,7 @@ import type { OpenCodeRulesRuntimeOptions } from './runtime.js';
 // @ts-expect-error SessionStoreOptions is internal and should not be exported
 import type { SessionStoreOptions } from './session-store.js';
 
-// --- utils.ts: RuleMetadata should NOT be exported ---
-// @ts-expect-error RuleMetadata is internal and should not be exported
-import type { RuleMetadata } from './utils.js';
-
 // Suppress unused variable warnings for the type imports above
 void (0 as unknown as McpStatusMap);
 void (0 as unknown as OpenCodeRulesRuntimeOptions);
 void (0 as unknown as SessionStoreOptions);
-void (0 as unknown as RuleMetadata);

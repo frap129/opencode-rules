@@ -7,7 +7,6 @@
  * a single import point for the plugin's public surface.
  *
  * Modules intentionally NOT re-exported (internal implementation):
- * - active-rules-state.ts: internal state persistence
  * - debug.ts: internal logging utilities
  * - message-context.ts: internal message helpers
  * - mcp-tools.ts: internal MCP integration
@@ -27,12 +26,17 @@
 // Re-export from rule-discovery
 export {
   discoverRuleFiles,
+  getCachedRule,
   clearRuleCache,
   type DiscoveredRule,
 } from './rule-discovery.js';
 
 // Re-export from rule-metadata
-export { parseRuleMetadata, hasConditions } from './rule-metadata.js';
+export {
+  parseRuleMetadata,
+  hasConditions,
+  type RuleMetadata,
+} from './rule-metadata.js';
 
 // Re-export from rule-filter
 export {
@@ -49,6 +53,9 @@ export {
   type Message,
   type MessagePart,
 } from './message-paths.js';
+
+// Re-export from active-rules-state (needed by TUI and external consumers)
+export { readActiveRulesState } from './active-rules-state.js';
 
 // Re-export from rule-hooks
 export {
