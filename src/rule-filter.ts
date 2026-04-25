@@ -58,6 +58,115 @@ export function toolsMatchAvailable(
 }
 
 /**
+ * Evaluate all declared condition checks for a rule against runtime context.
+ * Returns an array of boolean match results (one per declared condition).
+ */
+function evaluateConditionChecks(
+  metadata: {
+    globs?: string[];
+    keywords?: string[];
+    tools?: string[];
+    model?: string[];
+    agent?: string[];
+    command?: string[];
+    project?: string[];
+    branch?: string[];
+    os?: string[];
+    ci?: boolean;
+  },
+  context: RuleFilterContext,
+  availableToolSet?: Set<string>
+): boolean[] {
+  const checks: boolean[] = [];
+
+  if (metadata.globs) {
+    checks.push(
+      Boolean(
+        context.contextFilePaths &&
+        context.contextFilePaths.length > 0 &&
+        context.contextFilePaths.some(contextPath =>
+          fileMatchesGlobs(contextPath, metadata.globs!)
+        )
+      )
+    );
+  }
+
+  if (metadata.keywords) {
+    checks.push(
+      Boolean(
+        context.userPrompt &&
+        promptMatchesKeywords(context.userPrompt, metadata.keywords)
+      )
+    );
+  }
+
+  if (metadata.tools) {
+    checks.push(
+      Boolean(
+        availableToolSet &&
+        metadata.tools.some(tool => availableToolSet.has(tool))
+      )
+    );
+  }
+
+  if (metadata.model) {
+    checks.push(
+      Boolean(context.modelID && metadata.model.includes(context.modelID))
+    );
+  }
+
+  if (metadata.agent) {
+    checks.push(
+      Boolean(context.agentType && metadata.agent.includes(context.agentType))
+    );
+  }
+
+  if (metadata.command) {
+    checks.push(
+      Boolean(context.command && metadata.command.includes(context.command))
+    );
+  }
+
+  if (metadata.project) {
+    const projectTags = context.projectTags;
+    checks.push(
+      Boolean(
+        projectTags &&
+        projectTags.length > 0 &&
+        metadata.project.some(tag => projectTags.includes(tag))
+      )
+    );
+  }
+
+  if (metadata.branch) {
+    const gitBranch = context.gitBranch;
+    checks.push(
+      Boolean(
+        gitBranch &&
+        metadata.branch.some(pattern => {
+          if (pattern === gitBranch) return true;
+          const hasGlobChars = /[*?\[{]/.test(pattern);
+          if (hasGlobChars) {
+            return minimatch(gitBranch, pattern);
+          }
+          return false;
+        })
+      )
+    );
+  }
+
+  if (metadata.os) {
+    checks.push(Boolean(context.os && metadata.os.includes(context.os)));
+  }
+
+  if (metadata.ci !== undefined) {
+    checks.push(context.ci === metadata.ci);
+  }
+
+  return checks;
+}
+
+/**
  * Result of reading and formatting rules
  */
 export interface FilterResult {
@@ -124,101 +233,12 @@ export async function readAndFormatRules(
     const ruleHasConditions = hasConditions(metadata);
 
     if (ruleHasConditions && metadata) {
-      // Compute per-dimension match booleans (only for declared conditions)
-      const declaredChecks: boolean[] = [];
+      const declaredChecks = evaluateConditionChecks(
+        metadata,
+        context,
+        availableToolSet
+      );
 
-      // Legacy: globs
-      if (metadata.globs) {
-        const globs = metadata.globs;
-        const globsMatch =
-          context.contextFilePaths &&
-          context.contextFilePaths.length > 0 &&
-          context.contextFilePaths.some(contextPath =>
-            fileMatchesGlobs(contextPath, globs)
-          );
-        declaredChecks.push(Boolean(globsMatch));
-      }
-
-      // Legacy: keywords
-      if (metadata.keywords) {
-        const keywordsMatch =
-          context.userPrompt &&
-          promptMatchesKeywords(context.userPrompt, metadata.keywords);
-        declaredChecks.push(Boolean(keywordsMatch));
-      }
-
-      // Legacy: tools
-      if (metadata.tools) {
-        const toolsMatch =
-          availableToolSet &&
-          metadata.tools.some(tool => availableToolSet.has(tool));
-        declaredChecks.push(Boolean(toolsMatch));
-      }
-
-      // New: model
-      if (metadata.model) {
-        const modelMatch =
-          context.modelID && metadata.model.includes(context.modelID);
-        declaredChecks.push(Boolean(modelMatch));
-      }
-
-      // New: agent
-      if (metadata.agent) {
-        const agentMatch =
-          context.agentType && metadata.agent.includes(context.agentType);
-        declaredChecks.push(Boolean(agentMatch));
-      }
-
-      // New: command
-      if (metadata.command) {
-        const commandMatch =
-          context.command && metadata.command.includes(context.command);
-        declaredChecks.push(Boolean(commandMatch));
-      }
-
-      // New: project
-      if (metadata.project) {
-        const projectTags = context.projectTags;
-        const projectMatch =
-          projectTags &&
-          projectTags.length > 0 &&
-          metadata.project.some(tag => projectTags.includes(tag));
-        declaredChecks.push(Boolean(projectMatch));
-      }
-
-      // New: branch (supports glob patterns)
-      if (metadata.branch) {
-        const gitBranch = context.gitBranch;
-        const branchMatch =
-          gitBranch &&
-          metadata.branch.some(pattern => {
-            // Exact match for non-glob patterns
-            if (pattern === gitBranch) {
-              return true;
-            }
-            // Only use glob matching if pattern contains glob characters
-            const hasGlobChars = /[*?\[{]/.test(pattern);
-            if (hasGlobChars) {
-              return minimatch(gitBranch, pattern);
-            }
-            return false;
-          });
-        declaredChecks.push(Boolean(branchMatch));
-      }
-
-      // New: os
-      if (metadata.os) {
-        const osMatch = context.os && metadata.os.includes(context.os);
-        declaredChecks.push(Boolean(osMatch));
-      }
-
-      // New: ci (strict boolean equality)
-      if (metadata.ci !== undefined) {
-        const ciMatch = context.ci === metadata.ci;
-        declaredChecks.push(ciMatch);
-      }
-
-      // Apply combinator: default 'any', or 'all' if specified
       const mode = metadata.match ?? 'any';
       const shouldInclude =
         mode === 'all'
