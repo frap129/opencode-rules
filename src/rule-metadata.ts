@@ -3,6 +3,7 @@
  */
 
 const { parse: parseYaml } = await import('yaml');
+import { logWarning } from './debug.js';
 
 /**
  * Metadata extracted from .mdc file frontmatter
@@ -83,25 +84,21 @@ function extractStringArray(value: unknown): string[] | undefined {
  * Extracts frontmatter (---) and returns metadata object.
  */
 export function parseRuleMetadata(content: string): RuleMetadata | undefined {
-  // Check if content starts with frontmatter
   if (!content.startsWith('---')) {
     return undefined;
   }
 
-  // Find the closing --- marker
   const endIndex = content.indexOf('---', 3);
   if (endIndex === -1) {
     return undefined;
   }
 
-  // Extract the YAML frontmatter
   const frontmatter = content.substring(3, endIndex).trim();
   if (!frontmatter) {
     return undefined;
   }
 
   try {
-    // Parse YAML using the yaml package
     const parsed = parseYaml(frontmatter) as ParsedFrontmatter | null;
     if (!parsed || typeof parsed !== 'object') {
       return undefined;
@@ -109,7 +106,6 @@ export function parseRuleMetadata(content: string): RuleMetadata | undefined {
 
     const metadata: RuleMetadata = {};
 
-    // Array fields to extract using shared helper
     const arrayFields: StringArrayField[] = [
       'globs',
       'keywords',
@@ -129,12 +125,10 @@ export function parseRuleMetadata(content: string): RuleMetadata | undefined {
       }
     }
 
-    // Extract ci boolean (only if strictly boolean)
     if (typeof parsed.ci === 'boolean') {
       metadata.ci = parsed.ci;
     }
 
-    // Extract match (normalize to 'any' | 'all' only)
     if (parsed.match === 'any' || parsed.match === 'all') {
       metadata.match = parsed.match;
     }
@@ -171,10 +165,7 @@ export function parseRuleMetadata(content: string): RuleMetadata | undefined {
     return Object.keys(metadata).length > 0 ? metadata : undefined;
   } catch (error) {
     // Log warning for YAML parsing errors
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn(
-      `[opencode-rules] Warning: Failed to parse YAML frontmatter: ${message}`
-    );
+    logWarning('Failed to parse YAML frontmatter', error);
     return undefined;
   }
 }

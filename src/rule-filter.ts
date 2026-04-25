@@ -51,9 +51,6 @@ export function toolsMatchAvailable(
   availableToolIDs: string[],
   requiredTools: string[]
 ): boolean {
-  if (requiredTools.length === 0) {
-    return false;
-  }
   // Create a Set for O(1) lookups
   const availableSet = new Set(availableToolIDs);
   return requiredTools.some(tool => availableSet.has(tool));
