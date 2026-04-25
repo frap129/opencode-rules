@@ -7,7 +7,7 @@ import {
   type RuleMetadata,
 } from '../../src/utils.js';
 export { hasConditions };
-import path from 'path';
+import path from 'node:path';
 
 /** Represents a rule as displayed in the sidebar */
 export interface SidebarRuleEntry {
@@ -73,7 +73,7 @@ export async function loadSidebarRules(
     }
 
     const meta = cached.metadata;
-    const source = ruleSource(rule.filePath, projectDir);
+    const source = classifyRuleScope(rule.filePath, projectDir);
     const isConditional = hasConditions(meta);
     const conditionSummary = isConditional
       ? formatConditionSummary(meta!)
@@ -103,11 +103,11 @@ export async function loadSidebarRules(
   disambiguateNames(entries);
 
   // Sort: project first, then global. Active rules to top, then alpha by name.
-  const activeOrder = (v: boolean | null): number =>
+  const sortPriority = (v: boolean | null): number =>
     v === true ? 0 : v === null ? 1 : 2;
   entries.sort((a, b) => {
     if (a.source !== b.source) return a.source === 'project' ? -1 : 1;
-    const activeCmp = activeOrder(a.isActive) - activeOrder(b.isActive);
+    const activeCmp = sortPriority(a.isActive) - sortPriority(b.isActive);
     if (activeCmp !== 0) return activeCmp;
     const nameCompare = a.name.localeCompare(b.name);
     if (nameCompare !== 0) return nameCompare;
@@ -122,7 +122,7 @@ export async function loadSidebarRules(
  * Uses path.sep boundary check to avoid matching partial prefixes
  * (e.g., /project/.opencode/rules-extra/ should not match).
  */
-export function ruleSource(
+export function classifyRuleScope(
   filePath: string,
   projectDir: string | null
 ): 'global' | 'project' {

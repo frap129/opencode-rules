@@ -23,9 +23,11 @@ describe('runtime module boundaries', () => {
     expect(typeof runtimeContextModule.detectCiEnvironment).toBe('function');
   });
 
-  it('exports handleChatMessage from runtime-chat module', () => {
-    expect(runtimeChatModule.handleChatMessage).toBeDefined();
-    expect(typeof runtimeChatModule.handleChatMessage).toBe('function');
+  it('exports updateSessionFromChatMessage from runtime-chat module', () => {
+    expect(runtimeChatModule.updateSessionFromChatMessage).toBeDefined();
+    expect(typeof runtimeChatModule.updateSessionFromChatMessage).toBe(
+      'function'
+    );
   });
 });
 

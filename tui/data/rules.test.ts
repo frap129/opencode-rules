@@ -1,15 +1,21 @@
 // tui/data/rules.test.ts
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import path from 'path';
-import os from 'os';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, chmodSync } from 'fs';
+import path from 'node:path';
+import os from 'node:os';
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+  chmodSync,
+} from 'node:fs';
 import { clearRuleCache } from '../../src/rule-discovery.js';
 import {
   _setStateDirForTesting,
   writeActiveRulesState,
 } from '../../src/active-rules-state.js';
 import {
-  ruleSource,
+  classifyRuleScope,
   hasConditions,
   formatConditionSummary,
   disambiguateNames,
@@ -18,38 +24,38 @@ import {
 } from './rules.js';
 
 // ──────────────────────────────────────────────
-// ruleSource
+// classifyRuleScope
 // ──────────────────────────────────────────────
 
-describe('ruleSource', () => {
+describe('classifyRuleScope', () => {
   it('returns "global" when projectDir is null', () => {
-    expect(ruleSource('/home/user/.config/opencode/rules/foo.md', null)).toBe(
-      'global'
-    );
+    expect(
+      classifyRuleScope('/home/user/.config/opencode/rules/foo.md', null)
+    ).toBe('global');
   });
 
   it('returns "project" for files under projectDir/.opencode/rules/', () => {
-    expect(ruleSource('/project/.opencode/rules/foo.md', '/project')).toBe(
-      'project'
-    );
+    expect(
+      classifyRuleScope('/project/.opencode/rules/foo.md', '/project')
+    ).toBe('project');
   });
 
   it('returns "project" for files in subdirectories under project rules', () => {
-    expect(ruleSource('/project/.opencode/rules/sub/deep.md', '/project')).toBe(
-      'project'
-    );
+    expect(
+      classifyRuleScope('/project/.opencode/rules/sub/deep.md', '/project')
+    ).toBe('project');
   });
 
   it('returns "global" for files not under projectDir/.opencode/rules/', () => {
     expect(
-      ruleSource('/home/user/.config/opencode/rules/foo.md', '/project')
+      classifyRuleScope('/home/user/.config/opencode/rules/foo.md', '/project')
     ).toBe('global');
   });
 
   it('does not match partial path prefixes', () => {
     // /project/.opencode/rules-extra/ should NOT match /project/.opencode/rules/
     expect(
-      ruleSource('/project/.opencode/rules-extra/foo.md', '/project')
+      classifyRuleScope('/project/.opencode/rules-extra/foo.md', '/project')
     ).toBe('global');
   });
 });

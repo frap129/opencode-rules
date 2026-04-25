@@ -26,23 +26,7 @@ function parseEnvBoolean(value: string | undefined): boolean | undefined {
   return true;
 }
 
-/**
- * Check if a string value represents a truthy CI environment variable.
- * Treats 'false', '0', and empty strings as falsy; other non-empty values as truthy.
- */
-function isTruthyEnvValue(value: string | undefined): boolean {
-  return parseEnvBoolean(value) === true;
-}
-
-/**
- * Detect if running in a CI environment by checking common CI environment variables.
- *
- * If process.env.CI is explicitly set, it is treated as authoritative:
- * - CI='false' or CI='0' or CI='' => return false (no provider var fallback)
- * - CI='true' or CI='1' or any truthy value => return true
- *
- * If process.env.CI is not set (undefined), fall back to provider-specific detection.
- */
+/** Detect if running in a CI environment by checking common CI environment variables. */
 export function detectCiEnvironment(): boolean {
   const env = process.env;
 
@@ -52,15 +36,15 @@ export function detectCiEnvironment(): boolean {
   }
 
   return (
-    isTruthyEnvValue(env.CONTINUOUS_INTEGRATION) ||
-    isTruthyEnvValue(env.BUILD_NUMBER) ||
-    isTruthyEnvValue(env.GITHUB_ACTIONS) ||
-    isTruthyEnvValue(env.GITLAB_CI) ||
-    isTruthyEnvValue(env.CIRCLECI) ||
-    isTruthyEnvValue(env.TRAVIS) ||
-    isTruthyEnvValue(env.JENKINS_URL) ||
-    isTruthyEnvValue(env.BUILDKITE) ||
-    isTruthyEnvValue(env.TEAMCITY_VERSION)
+    parseEnvBoolean(env.CONTINUOUS_INTEGRATION) === true ||
+    parseEnvBoolean(env.BUILD_NUMBER) === true ||
+    parseEnvBoolean(env.GITHUB_ACTIONS) === true ||
+    parseEnvBoolean(env.GITLAB_CI) === true ||
+    parseEnvBoolean(env.CIRCLECI) === true ||
+    parseEnvBoolean(env.TRAVIS) === true ||
+    parseEnvBoolean(env.JENKINS_URL) === true ||
+    parseEnvBoolean(env.BUILDKITE) === true ||
+    parseEnvBoolean(env.TEAMCITY_VERSION) === true
   );
 }
 

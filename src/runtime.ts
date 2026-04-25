@@ -6,7 +6,7 @@ import {
   extractSessionID,
   normalizeContextPath,
   sanitizePathForContext,
-  toExtractableMessages,
+  filterValidMessages,
   type MessageWithInfo,
 } from './message-context.js';
 import { extractConnectedMcpCapabilityIDs } from './mcp-tools.js';
@@ -14,7 +14,7 @@ import { createDebugLog, logWarning, type DebugLog } from './debug.js';
 import type { SessionStore } from './session-store.js';
 import { buildFilterContext } from './runtime-context.js';
 import {
-  handleChatMessage,
+  updateSessionFromChatMessage,
   type ChatMessageInput,
   type ChatMessageOutput,
 } from './runtime-chat.js';
@@ -133,7 +133,6 @@ export class OpenCodeRulesRuntime {
       );
     }
 
-    // Evaluate PreToolUse hooks
     await this.evaluateAndQueueHooks('PreToolUse', sessionID, toolName, args);
   }
 
@@ -174,7 +173,7 @@ export class OpenCodeRulesRuntime {
     }
 
     const contextPaths = extractFilePathsFromMessages(
-      toExtractableMessages(output.messages)
+      filterValidMessages(output.messages)
     );
     const userPrompt = extractLatestUserPrompt(output.messages);
 
@@ -210,7 +209,12 @@ export class OpenCodeRulesRuntime {
     input: ChatMessageInput,
     output: ChatMessageOutput
   ): Promise<void> {
-    handleChatMessage(input, output, this.sessionStore, this.debugLog);
+    updateSessionFromChatMessage(
+      input,
+      output,
+      this.sessionStore,
+      this.debugLog
+    );
   }
 
   private async onSystemTransform(
@@ -359,6 +363,17 @@ export class OpenCodeRulesRuntime {
       mcpPromise,
     ] as const);
 
+    const logSettledError = (
+      label: string,
+      result: PromiseRejectedResult
+    ): void => {
+      const message =
+        result.reason instanceof Error
+          ? result.reason.message
+          : String(result.reason);
+      logWarning(`Failed to query ${label}`, message);
+    };
+
     if (
       toolResult.status === 'fulfilled' &&
       Array.isArray(toolResult.value?.data)
@@ -370,13 +385,7 @@ export class OpenCodeRulesRuntime {
         `Built-in tools: ${toolResult.value.data.slice(0, 10).join(', ')}${toolResult.value.data.length > 10 ? '...' : ''} (${toolResult.value.data.length} total)`
       );
     } else if (toolResult.status === 'rejected') {
-      const message =
-        toolResult.reason instanceof Error
-          ? toolResult.reason.message
-          : String(toolResult.reason);
-      console.warn(
-        `[opencode-rules] Warning: Failed to query tool IDs: ${message}`
-      );
+      logSettledError('tool IDs', toolResult);
     }
 
     if (
@@ -394,13 +403,7 @@ export class OpenCodeRulesRuntime {
         this.debugLog(`MCP capability IDs: ${mcpIds.join(', ')}`);
       }
     } else if (mcpResult.status === 'rejected') {
-      const message =
-        mcpResult.reason instanceof Error
-          ? mcpResult.reason.message
-          : String(mcpResult.reason);
-      console.warn(
-        `[opencode-rules] Warning: Failed to query MCP status: ${message}`
-      );
+      logSettledError('MCP status', mcpResult);
     }
 
     return Array.from(ids);

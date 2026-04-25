@@ -10,8 +10,8 @@ import {
   type JSX,
 } from 'solid-js';
 import type { TuiPluginApi, TuiTheme } from '@opencode-ai/plugin/tui';
-import { loadSidebarRules, type SidebarRuleEntry } from '../data/rules';
-import type { RuleMetadata } from '../../src/rule-metadata.js';
+import { loadSidebarRules, type SidebarRuleEntry } from '../data/rules.js';
+import type { RuleMetadata } from '../../src/utils.js';
 
 const metadataFieldDescriptors: Array<{
   key: keyof RuleMetadata;

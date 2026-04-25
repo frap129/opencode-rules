@@ -45,7 +45,7 @@ export function clearRuleCache(): void {
  * Uses mtime-based invalidation to detect file changes.
  *
  * @param filePath - Absolute path to the rule file
- * @returns Cached rule data or undefined if file cannot be read
+ * @returns Cached rule data or null if file cannot be read
  */
 export async function getCachedRule(
   filePath: string
