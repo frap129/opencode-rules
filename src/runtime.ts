@@ -37,6 +37,19 @@ interface SystemTransformOutput {
   system?: string | string[];
 }
 
+interface OpenCodeClient {
+  tool?: {
+    ids?: (args: {
+      query: { directory: string };
+    }) => Promise<{ data: string[] }>;
+  };
+  mcp?: {
+    status?: (args: {
+      query: { directory: string };
+    }) => Promise<{ connected?: Array<{ id: string }> }>;
+  };
+}
+
 interface OpenCodeRulesRuntimeOptions {
   client: unknown;
   directory: string;
@@ -48,7 +61,7 @@ interface OpenCodeRulesRuntimeOptions {
 }
 
 export class OpenCodeRulesRuntime {
-  private client: unknown;
+  private client: OpenCodeClient;
   private directory: string;
   private projectDirectory: string;
   private ruleFiles: DiscoveredRule[];
@@ -57,7 +70,7 @@ export class OpenCodeRulesRuntime {
   private now: () => number;
 
   constructor(opts: OpenCodeRulesRuntimeOptions) {
-    this.client = opts.client;
+    this.client = opts.client as OpenCodeClient;
     this.directory = opts.directory;
     this.projectDirectory = opts.projectDirectory;
     this.ruleFiles = opts.ruleFiles;
@@ -336,14 +349,15 @@ export class OpenCodeRulesRuntime {
 
   private async queryAvailableToolIDs(): Promise<string[]> {
     const ids = new Set<string>();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const client = this.client as any;
     const query = { directory: this.directory };
 
+    const toolPromise = this.client.tool?.ids?.({ query });
+    const mcpPromise = this.client.mcp?.status?.({ query });
+
     const [toolResult, mcpResult] = await Promise.allSettled([
-      client.tool?.ids?.({ query }),
-      client.mcp?.status?.({ query }),
-    ]);
+      toolPromise,
+      mcpPromise,
+    ] as const);
 
     if (
       toolResult.status === 'fulfilled' &&
@@ -365,8 +379,14 @@ export class OpenCodeRulesRuntime {
       );
     }
 
-    if (mcpResult.status === 'fulfilled' && mcpResult.value?.data) {
-      const mcpIds = extractConnectedMcpCapabilityIDs(mcpResult.value.data);
+    if (
+      mcpResult.status === 'fulfilled' &&
+      mcpResult.value &&
+      'data' in mcpResult.value
+    ) {
+      const mcpIds = extractConnectedMcpCapabilityIDs(
+        mcpResult.value.data as Record<string, { status?: string }>
+      );
       for (const id of mcpIds) {
         ids.add(id);
       }
