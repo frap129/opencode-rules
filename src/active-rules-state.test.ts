@@ -63,30 +63,30 @@ describe('active-rules-state', () => {
       expect(filePath).toBe(path.join(testStateDir, 'ses_123.json'));
     });
 
-    it('throws for sessionId with path traversal', () => {
-      expect(() => getStateFilePath('../escape')).toThrow('Invalid sessionId');
-      expect(() => getStateFilePath('foo/bar')).toThrow('Invalid sessionId');
-      expect(() => getStateFilePath('/absolute')).toThrow('Invalid sessionId');
+    it('throws for sessionID with path traversal', () => {
+      expect(() => getStateFilePath('../escape')).toThrow('Invalid sessionID');
+      expect(() => getStateFilePath('foo/bar')).toThrow('Invalid sessionID');
+      expect(() => getStateFilePath('/absolute')).toThrow('Invalid sessionID');
     });
 
-    it('throws for sessionId with special characters', () => {
-      expect(() => getStateFilePath('ses.123')).toThrow('Invalid sessionId');
-      expect(() => getStateFilePath('ses 123')).toThrow('Invalid sessionId');
-      expect(() => getStateFilePath('')).toThrow('Invalid sessionId');
+    it('throws for sessionID with special characters', () => {
+      expect(() => getStateFilePath('ses.123')).toThrow('Invalid sessionID');
+      expect(() => getStateFilePath('ses 123')).toThrow('Invalid sessionID');
+      expect(() => getStateFilePath('')).toThrow('Invalid sessionID');
     });
   });
 
   describe('writeActiveRulesState and readActiveRulesState', () => {
     it('write/read round-trip preserves data', async () => {
-      const sessionId = 'ses_roundtrip';
+      const sessionID = 'ses_roundtrip';
       const matchedPaths = ['/path/to/rule1.md', '/path/to/rule2.md'];
 
-      await writeActiveRulesState(sessionId, matchedPaths);
+      await writeActiveRulesState(sessionID, matchedPaths);
 
-      const state = await readActiveRulesState(sessionId);
+      const state = await readActiveRulesState(sessionID);
 
       expect(state).not.toBeNull();
-      expect(state!.sessionId).toBe(sessionId);
+      expect(state!.sessionID).toBe(sessionID);
       expect(state!.matchedRulePaths).toEqual(matchedPaths);
       expect(typeof state!.evaluatedAt).toBe('number');
       expect(state!.evaluatedAt).toBeLessThanOrEqual(Date.now());
@@ -124,7 +124,7 @@ describe('active-rules-state', () => {
       await fs.writeFile(
         filePath,
         JSON.stringify({
-          sessionId: 123,
+          sessionID: 123,
           matchedRulePaths: 'not-an-array',
           evaluatedAt: 'not-a-number',
         }),
@@ -142,7 +142,7 @@ describe('active-rules-state', () => {
       await fs.writeFile(
         filePath,
         JSON.stringify({
-          sessionId: 'ses_badarray',
+          sessionID: 'ses_badarray',
           matchedRulePaths: ['/valid.md', 123, null],
           evaluatedAt: Date.now(),
         }),
@@ -153,25 +153,25 @@ describe('active-rules-state', () => {
       expect(state).toBeNull();
     });
 
-    it('throws on write with invalid sessionId', () => {
+    it('throws on write with invalid sessionID', () => {
       expect(() => writeActiveRulesState('../escape', ['/rule.md'])).toThrow(
-        'Invalid sessionId'
+        'Invalid sessionID'
       );
       expect(() => writeActiveRulesState('foo/bar', ['/rule.md'])).toThrow(
-        'Invalid sessionId'
+        'Invalid sessionID'
       );
     });
 
-    it('returns null for read with invalid sessionId', async () => {
+    it('returns null for read with invalid sessionID', async () => {
       const state = await readActiveRulesState('../escape');
       expect(state).toBeNull();
     });
 
     it('no temp file remains after write', async () => {
-      const sessionId = 'ses_no_temp';
+      const sessionID = 'ses_no_temp';
       const matchedPaths = ['/rule.md'];
 
-      await writeActiveRulesState(sessionId, matchedPaths);
+      await writeActiveRulesState(sessionID, matchedPaths);
 
       // Check that no temp files remain
       const files = await fs.readdir(testStateDir);
@@ -181,29 +181,29 @@ describe('active-rules-state', () => {
     });
 
     it('serializes concurrent writes for same session', async () => {
-      const sessionId = 'ses_concurrent';
+      const sessionID = 'ses_concurrent';
 
       // Fire multiple writes concurrently
-      const first = writeActiveRulesState(sessionId, ['path1']);
-      const second = writeActiveRulesState(sessionId, ['path2']);
-      const third = writeActiveRulesState(sessionId, ['path3']);
+      const first = writeActiveRulesState(sessionID, ['path1']);
+      const second = writeActiveRulesState(sessionID, ['path2']);
+      const third = writeActiveRulesState(sessionID, ['path3']);
 
       await Promise.all([first, second, third]);
 
       // The final state should reflect the last write
-      const state = await readActiveRulesState(sessionId);
+      const state = await readActiveRulesState(sessionID);
       expect(state).not.toBeNull();
       expect(state!.matchedRulePaths).toEqual(['path3']);
     });
 
     it('creates state directory when it does not exist', async () => {
-      const sessionId = 'ses_newdir';
+      const sessionID = 'ses_newdir';
       const matchedPaths = ['/rule.md'];
 
       // Verify directory doesn't exist yet
       await expect(fs.access(testStateDir)).rejects.toThrow();
 
-      await writeActiveRulesState(sessionId, matchedPaths);
+      await writeActiveRulesState(sessionID, matchedPaths);
 
       // Verify directory now exists
       await expect(fs.access(testStateDir)).resolves.toBeUndefined();
