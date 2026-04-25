@@ -1,12 +1,17 @@
 /**
- * Utility functions for OpenCode Rules Plugin
+ * Stable public API surface for OpenCode Rules Plugin.
  *
- * This module serves as a compatibility facade that re-exports
- * from focused modules:
+ * This barrel file intentionally re-exports the subset of modules
+ * that external consumers (plugins, TUI, tests) should depend on.
+ * It isolates consumers from internal module restructuring and
+ * provides a single import point for the plugin's public surface.
+ *
+ * Re-exported modules:
  * - rule-discovery.ts: File discovery and caching
  * - rule-metadata.ts: Frontmatter parsing
  * - rule-filter.ts: Rule filtering and formatting
  * - message-paths.ts: Message path extraction
+ * - rule-hooks.ts: Hook evaluation and serialization
  */
 
 // Re-export from rule-discovery
