@@ -10,6 +10,8 @@ export interface BuildFilterContextOptions {
   availableToolIDs: string[];
   modelID: string | undefined;
   agentType: string | undefined;
+  projectDirectory: string;
+  debugLog: DebugLog;
 }
 
 /**
@@ -67,12 +69,17 @@ export function detectCiEnvironment(): boolean {
  * Assembles runtime information from various sources.
  */
 export async function buildFilterContext(
-  opts: BuildFilterContextOptions,
-  projectDirectory: string,
-  debugLog: DebugLog
+  opts: BuildFilterContextOptions
 ): Promise<RuleFilterContext> {
-  const { contextFilePaths, userPrompt, availableToolIDs, modelID, agentType } =
-    opts;
+  const {
+    contextFilePaths,
+    userPrompt,
+    availableToolIDs,
+    modelID,
+    agentType,
+    projectDirectory,
+    debugLog,
+  } = opts;
 
   const command = extractSlashCommand(userPrompt);
 
