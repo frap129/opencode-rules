@@ -67,7 +67,17 @@
   },
   "peerDependencies": {
     "@opencode-ai/plugin": "^1.3.7",
-    "@opencode-ai/sdk": "^1.3.7"
+    "@opencode-ai/sdk": "^1.3.7",
+    "@opentui/core": "^0.1.93",
+    "@opentui/solid": "^0.1.93"
+  },
+  "peerDependenciesMeta": {
+    "@opentui/core": {
+      "optional": true
+    },
+    "@opentui/solid": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@opencode-ai/plugin": "^1.3.9",
