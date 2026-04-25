@@ -1,4 +1,4 @@
-import path from 'path';
+import path from 'node:path';
 import type { Message, MessagePart } from './message-paths.js';
 
 export interface MessagePartWithSession {

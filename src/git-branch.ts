@@ -1,4 +1,4 @@
-import { execFile, type ExecFileOptions } from 'child_process';
+import { execFile, type ExecFileOptions } from 'node:child_process';
 
 const GIT_TIMEOUT_MS = 5000;
 

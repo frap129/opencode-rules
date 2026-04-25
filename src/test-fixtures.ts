@@ -2,9 +2,9 @@
  * Shared test fixtures, builders, and helpers for opencode-rules tests.
  * Extracted to reduce duplication and tighten typing across test files.
  */
-import path from 'path';
-import os from 'os';
-import { mkdirSync, mkdtempSync, rmSync } from 'fs';
+import path from 'node:path';
+import os from 'node:os';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import type { DiscoveredRule } from './utils.js';
 
 // ============================================================================

@@ -3,8 +3,8 @@
  * Split from index.test.ts for maintainability.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import path from 'path';
-import { writeFileSync, mkdirSync, rmSync } from 'fs';
+import path from 'node:path';
+import { writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import {
   discoverRuleFiles,
   parseRuleMetadata,

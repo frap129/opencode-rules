@@ -2,9 +2,9 @@
  * Rule file discovery utilities
  */
 
-import { stat, readFile, readdir } from 'fs/promises';
-import path from 'path';
-import os from 'os';
+import { stat, readFile, readdir } from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
 import { createDebugLog, logWarning } from './debug.js';
 import {
   parseRuleMetadata,

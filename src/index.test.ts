@@ -13,8 +13,8 @@
  * focused test file above.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import path from 'path';
-import { writeFileSync, mkdirSync } from 'fs';
+import path from 'node:path';
+import { writeFileSync, mkdirSync } from 'node:fs';
 import { readAndFormatRules, clearRuleCache } from './utils.js';
 import { __testOnly } from './index.js';
 import {
