@@ -71,6 +71,17 @@ To enable the TUI sidebar, add the same plugin entry to your TUI config:
 
 </details>
 
+### Beta Channel
+
+Pre-release versions from the `dev` branch are published under the `beta` npm dist-tag. These include upcoming features and fixes but may be unstable.
+
+```bash
+opencode plugin opencode-rules@beta --global
+```
+
+> [!WARNING]
+> Beta releases track the `dev` branch and may contain breaking changes or bugs. Test thoroughly in non-critical workflows before using.
+
 ### Create Your First Rule
 
 1. Create the global rules directory:
@@ -201,7 +212,7 @@ match: any
   - `any` (default): Rule applies if ANY declared condition matches
   - `all`: Rule applies only if ALL declared conditions match
 
-> [!NOTE] 
+> [!NOTE]
 > When a runtime context value is unavailable (e.g., not in a git repository), that dimension is treated as a non-match.
 
 ### Matching Behavior
@@ -653,6 +664,22 @@ We welcome contributions! Please:
 - Add comprehensive tests for new features
 - Update documentation for API changes
 - Use TypeScript for all new code
+
+### Publishing a Beta Release
+
+Beta releases are published from the `dev` branch. To cut a beta:
+
+1. Ensure all checks pass on `dev`
+2. Bump the version in `package.json` using a semver prerelease suffix (e.g., `0.7.0-beta.1`)
+3. Commit: `chore: bump to 0.7.0-beta.1`
+4. Tag: `git tag v0.7.0-beta.1`
+5. Push: `git push origin dev --tags`
+
+The `release-beta.yml` workflow publishes to npm with `--tag beta` and creates a prerelease GitHub Release.
+
+### Publishing a Stable Release
+
+Stable releases are published from `main`. Same process as beta but use a plain semver version (e.g., `0.7.0`). The `release.yml` workflow publishes to npm with the `latest` dist-tag.
 
 ## See Also
 

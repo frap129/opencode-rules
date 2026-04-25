@@ -1,17 +1,26 @@
-name: Release
+name: Release Beta
 
 on:
   push:
-    tags: ['v*']
+    tags: ['v*-beta*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
-  release:
-    if: ${{ !contains(github.ref, '-beta') && !contains(github.ref, '-alpha') }}
+  release-beta:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Verify dev branch
+        run: |
+          if ! git branch -r --contains $GITHUB_SHA | grep -q 'origin/dev'; then
+            echo "ERROR: Beta releases must be tagged on the dev branch"
+            exit 1
+          fi
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
@@ -34,12 +43,13 @@ jobs:
       - name: Verify package contents
         run: bun pm pack --dry-run
 
-      - name: Publish to npm
-        run: bun publish --access public
+      - name: Publish to npm (beta)
+        run: bun publish --access public --tag beta
         env:
           NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@26e8ad27a09a225049a7075d7ec1caa2df6ff332 # v2
         with:
+          prerelease: true
           generate_release_notes: true
