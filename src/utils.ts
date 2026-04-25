@@ -1,12 +1,22 @@
 /**
  * Stable public API surface for OpenCode Rules Plugin.
  *
- * This barrel file intentionally re-exports the subset of modules
+ * This barrel file intentionally re-exports a focused subset of modules
  * that external consumers (plugins, TUI, tests) should depend on.
- * It isolates consumers from internal module restructuring and
- * provides a single import point for the plugin's public surface.
+ * It isolates consumers from internal module restructuring and provides
+ * a single import point for the plugin's public surface.
  *
- * Re-exported modules:
+ * Modules intentionally NOT re-exported (internal implementation):
+ * - active-rules-state.ts: internal state persistence
+ * - debug.ts: internal logging utilities
+ * - message-context.ts: internal message helpers
+ * - mcp-tools.ts: internal MCP integration
+ * - runtime.ts: internal orchestration (entry point is index.ts)
+ * - runtime-chat.ts: internal chat hook handler
+ * - runtime-context.ts: internal filter context builder
+ * - session-store.ts: internal session state
+ *
+ * Re-exported public modules:
  * - rule-discovery.ts: File discovery and caching
  * - rule-metadata.ts: Frontmatter parsing
  * - rule-filter.ts: Rule filtering and formatting
