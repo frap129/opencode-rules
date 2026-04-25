@@ -93,14 +93,10 @@ async function doAtomicWrite(
   );
 
   try {
-    // Ensure directory exists
+    // Atomic write: temp file + rename ensures crash safety
     await fs.mkdir(stateDir, { recursive: true });
-
-    // Write to temp file
     const content = JSON.stringify(state);
     await fs.writeFile(tempPath, content, 'utf-8');
-
-    // Atomic rename
     await fs.rename(tempPath, finalPath);
   } catch (error) {
     debugLog(
