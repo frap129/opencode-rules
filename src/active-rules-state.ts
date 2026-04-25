@@ -73,11 +73,6 @@ export function writeActiveRulesState(
 
   writeQueues.set(sessionId, currentWrite);
 
-  // Prevent unhandled rejection for callers that ignore the return value.
-  currentWrite.catch(() => {
-    // Errors already logged in doAtomicWrite
-  });
-
   return currentWrite;
 }
 
