@@ -11,6 +11,22 @@ import {
 } from 'solid-js';
 import type { TuiPluginApi, TuiTheme } from '@opencode-ai/plugin/tui';
 import { loadSidebarRules, type SidebarRuleEntry } from '../data/rules';
+import type { RuleMetadata } from '../../src/rule-metadata.js';
+
+const metadataFieldDescriptors: Array<{
+  key: keyof RuleMetadata;
+  label: string;
+}> = [
+  { key: 'globs', label: 'Globs' },
+  { key: 'keywords', label: 'Keywords' },
+  { key: 'tools', label: 'Tools' },
+  { key: 'model', label: 'Model' },
+  { key: 'agent', label: 'Agent' },
+  { key: 'command', label: 'Command' },
+  { key: 'project', label: 'Project' },
+  { key: 'branch', label: 'Branch' },
+  { key: 'os', label: 'OS' },
+];
 
 interface SidebarContentProps {
   sessionId: string;
@@ -86,51 +102,19 @@ function RuleSection(props: RuleSectionProps): JSX.Element {
                   <Show when={props.expandedIndex === globalIndex()}>
                     <box flexDirection="column" paddingLeft={4}>
                       <text fg={props.theme.textMuted}>{rule.path}</text>
-                      <Show when={(rule.metadata.globs?.length ?? 0) > 0}>
-                        <text fg={props.theme.textMuted}>
-                          Globs: {rule.metadata.globs!.join(', ')}
-                        </text>
-                      </Show>
-                      <Show when={(rule.metadata.keywords?.length ?? 0) > 0}>
-                        <text fg={props.theme.textMuted}>
-                          Keywords: {rule.metadata.keywords!.join(', ')}
-                        </text>
-                      </Show>
-                      <Show when={(rule.metadata.tools?.length ?? 0) > 0}>
-                        <text fg={props.theme.textMuted}>
-                          Tools: {rule.metadata.tools!.join(', ')}
-                        </text>
-                      </Show>
-                      <Show when={(rule.metadata.model?.length ?? 0) > 0}>
-                        <text fg={props.theme.textMuted}>
-                          Model: {rule.metadata.model!.join(', ')}
-                        </text>
-                      </Show>
-                      <Show when={(rule.metadata.agent?.length ?? 0) > 0}>
-                        <text fg={props.theme.textMuted}>
-                          Agent: {rule.metadata.agent!.join(', ')}
-                        </text>
-                      </Show>
-                      <Show when={(rule.metadata.command?.length ?? 0) > 0}>
-                        <text fg={props.theme.textMuted}>
-                          Command: {rule.metadata.command!.join(', ')}
-                        </text>
-                      </Show>
-                      <Show when={(rule.metadata.project?.length ?? 0) > 0}>
-                        <text fg={props.theme.textMuted}>
-                          Project: {rule.metadata.project!.join(', ')}
-                        </text>
-                      </Show>
-                      <Show when={(rule.metadata.branch?.length ?? 0) > 0}>
-                        <text fg={props.theme.textMuted}>
-                          Branch: {rule.metadata.branch!.join(', ')}
-                        </text>
-                      </Show>
-                      <Show when={(rule.metadata.os?.length ?? 0) > 0}>
-                        <text fg={props.theme.textMuted}>
-                          OS: {rule.metadata.os!.join(', ')}
-                        </text>
-                      </Show>
+                      <For each={metadataFieldDescriptors}>
+                        {({ key, label }) => {
+                          const value = rule.metadata[key];
+                          if (Array.isArray(value) && value.length > 0) {
+                            return (
+                              <text fg={props.theme.textMuted}>
+                                {label}: {value.join(', ')}
+                              </text>
+                            );
+                          }
+                          return null;
+                        }}
+                      </For>
                       <Show when={rule.metadata.ci !== undefined}>
                         <text fg={props.theme.textMuted}>
                           CI: {String(rule.metadata.ci)}
@@ -182,15 +166,19 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
   // Debounce timer for event-driven refresh
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
-  // Initial load: triggered by session/directory change, resets all UI state
-  const loadRulesInitial = async (): Promise<void> => {
+  async function loadRules(options: { resetUi?: boolean } = {}): Promise<void> {
     const thisRequest = ++requestId;
     const dir = resolveProjectDir();
     const sessionId = props.sessionId;
 
-    setLastDir(dir);
-    setLastSessionId(sessionId);
-    setStatus('loading');
+    if (options.resetUi) {
+      setLastDir(dir);
+      setLastSessionId(sessionId);
+      setStatus('loading');
+    } else if (status() === 'loading') {
+      // Skip refresh if initial load is still in flight
+      return;
+    }
 
     try {
       const result = await loadSidebarRules(dir, sessionId);
@@ -204,33 +192,11 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
       // Discard if a newer request started
       if (requestId !== thisRequest) return;
       console.error('[opencode-rules] Failed to load rules:', err);
-      setStatus('error');
+      if (options.resetUi) {
+        setStatus('error');
+      }
     }
-  };
-
-  // Refresh load: triggered by events, only updates rule data (no UI state reset)
-  const loadRulesRefresh = async (): Promise<void> => {
-    // Skip refresh if initial load is still in flight
-    if (status() === 'loading') return;
-
-    const thisRequest = ++requestId;
-    const dir = resolveProjectDir();
-    const sessionId = props.sessionId;
-
-    try {
-      const result = await loadSidebarRules(dir, sessionId);
-      // Discard if a newer request started
-      if (requestId !== thisRequest) return;
-      setRules(result.rules);
-      setSkippedCount(result.skippedCount);
-      setHasEvaluationState(result.hasEvaluationState);
-      setStatus('loaded');
-    } catch (err) {
-      // Discard if a newer request started
-      if (requestId !== thisRequest) return;
-      console.error('[opencode-rules] Failed to refresh rules:', err);
-    }
-  };
+  }
 
   // Effect 1: Initial load on session/directory change
   createEffect(() => {
@@ -248,7 +214,7 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
       setExpandedIndex(null);
       setProjectOpen(false);
       setGlobalOpen(false);
-      void loadRulesInitial();
+      void loadRules({ resetUi: true });
     }
   });
 
@@ -256,7 +222,7 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
   createEffect(() => {
     const counter = refreshCounter();
     if (counter > 0) {
-      void loadRulesRefresh();
+      void loadRules();
     }
   });
 
