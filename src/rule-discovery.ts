@@ -21,7 +21,7 @@ interface CachedRule {
   /** Raw file content */
   content: string;
   /** Parsed metadata from frontmatter */
-  metadata: RuleMetadata | undefined;
+  metadata: RuleMetadata | null;
   /** Content with frontmatter stripped */
   strippedContent: string;
   /** File modification time for cache invalidation */
@@ -49,7 +49,7 @@ export function clearRuleCache(): void {
  */
 export async function getCachedRule(
   filePath: string
-): Promise<CachedRule | undefined> {
+): Promise<CachedRule | null> {
   try {
     const stats = await stat(filePath);
     const mtime = stats.mtimeMs;
@@ -78,7 +78,7 @@ export async function getCachedRule(
     // Remove stale cache entry if file no longer exists
     ruleCache.delete(filePath);
     logWarning(`Failed to read rule file ${filePath}`, error);
-    return undefined;
+    return null;
   }
 }
 

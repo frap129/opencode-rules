@@ -83,25 +83,25 @@ function extractStringArray(value: unknown): string[] | undefined {
  * Parse YAML metadata from rule file content using the yaml package.
  * Extracts frontmatter (---) and returns metadata object.
  */
-export function parseRuleMetadata(content: string): RuleMetadata | undefined {
+export function parseRuleMetadata(content: string): RuleMetadata | null {
   if (!content.startsWith('---')) {
-    return undefined;
+    return null;
   }
 
   const endIndex = content.indexOf('---', 3);
   if (endIndex === -1) {
-    return undefined;
+    return null;
   }
 
   const frontmatter = content.substring(3, endIndex).trim();
   if (!frontmatter) {
-    return undefined;
+    return null;
   }
 
   try {
     const parsed = parseYaml(frontmatter) as ParsedFrontmatter | null;
     if (!parsed || typeof parsed !== 'object') {
-      return undefined;
+      return null;
     }
 
     const metadata: RuleMetadata = {};
@@ -162,11 +162,11 @@ export function parseRuleMetadata(content: string): RuleMetadata | undefined {
     }
 
     // Return metadata only if it has content
-    return Object.keys(metadata).length > 0 ? metadata : undefined;
+    return Object.keys(metadata).length > 0 ? metadata : null;
   } catch (error) {
     // Log warning for YAML parsing errors
     logWarning('Failed to parse YAML frontmatter', error);
-    return undefined;
+    return null;
   }
 }
 

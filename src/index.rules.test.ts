@@ -622,7 +622,7 @@ This is a rule for TypeScript components.`;
   it('should return undefined for files without metadata', () => {
     const content = 'This rule should always apply.';
     const metadata = parseRuleMetadata(content);
-    expect(metadata).toBeUndefined();
+    expect(metadata).toBeNull();
   });
 
   it('should extract rule content without metadata', () => {
@@ -1347,13 +1347,13 @@ describe('YAML Parsing Edge Cases', () => {
   it('should handle empty frontmatter', () => {
     const content = '---\n---\nRule content here';
     const metadata = parseRuleMetadata(content);
-    expect(metadata).toBeUndefined();
+    expect(metadata).toBeNull();
   });
 
   it('should handle frontmatter with only whitespace', () => {
     const content = '---\n   \n---\nRule content here';
     const metadata = parseRuleMetadata(content);
-    expect(metadata).toBeUndefined();
+    expect(metadata).toBeNull();
   });
 
   it('should handle complex YAML structures', () => {

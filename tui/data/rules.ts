@@ -130,7 +130,7 @@ export function ruleSource(
 /**
  * Check if metadata has any conditional fields set.
  */
-export function hasConditions(meta: RuleMetadata | undefined): boolean {
+export function hasConditions(meta: RuleMetadata | null | undefined): boolean {
   if (!meta) return false;
   return !!(
     meta.globs ||
