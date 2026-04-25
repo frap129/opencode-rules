@@ -8,6 +8,7 @@ import {
   writeActiveRulesState,
   readActiveRulesState,
   _setStateDirForTesting,
+  _resetWriteQueues,
 } from './active-rules-state.js';
 
 describe('active-rules-state', () => {
@@ -27,6 +28,7 @@ describe('active-rules-state', () => {
   afterEach(async () => {
     // Reset the override
     _setStateDirForTesting(null);
+    _resetWriteQueues();
 
     // Clean up test directory
     if (testStateDir) {
@@ -79,10 +81,7 @@ describe('active-rules-state', () => {
       const sessionId = 'ses_roundtrip';
       const matchedPaths = ['/path/to/rule1.md', '/path/to/rule2.md'];
 
-      writeActiveRulesState(sessionId, matchedPaths);
-
-      // Wait for the fire-and-forget write to complete
-      await waitForFile(getStateFilePath(sessionId));
+      await writeActiveRulesState(sessionId, matchedPaths);
 
       const state = await readActiveRulesState(sessionId);
 
@@ -155,11 +154,8 @@ describe('active-rules-state', () => {
     });
 
     it('silently ignores write with invalid sessionId', async () => {
-      writeActiveRulesState('../escape', ['/rule.md']);
-      writeActiveRulesState('foo/bar', ['/rule.md']);
-
-      // Give time for any writes to occur
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await writeActiveRulesState('../escape', ['/rule.md']);
+      await writeActiveRulesState('foo/bar', ['/rule.md']);
 
       // Verify no files were created
       try {
@@ -180,10 +176,7 @@ describe('active-rules-state', () => {
       const sessionId = 'ses_no_temp';
       const matchedPaths = ['/rule.md'];
 
-      writeActiveRulesState(sessionId, matchedPaths);
-
-      // Wait for write to complete
-      await waitForFile(getStateFilePath(sessionId));
+      await writeActiveRulesState(sessionId, matchedPaths);
 
       // Check that no temp files remain
       const files = await fs.readdir(testStateDir);
@@ -196,15 +189,11 @@ describe('active-rules-state', () => {
       const sessionId = 'ses_concurrent';
 
       // Fire multiple writes concurrently
-      writeActiveRulesState(sessionId, ['path1']);
-      writeActiveRulesState(sessionId, ['path2']);
-      writeActiveRulesState(sessionId, ['path3']);
+      const first = writeActiveRulesState(sessionId, ['path1']);
+      const second = writeActiveRulesState(sessionId, ['path2']);
+      const third = writeActiveRulesState(sessionId, ['path3']);
 
-      // Wait for all writes to complete
-      await waitForFile(getStateFilePath(sessionId));
-
-      // Give a bit more time for all queued writes to finish
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await Promise.all([first, second, third]);
 
       // The final state should reflect the last write
       const state = await readActiveRulesState(sessionId);
@@ -219,23 +208,16 @@ describe('active-rules-state', () => {
       // Verify directory doesn't exist yet
       await expect(fs.access(testStateDir)).rejects.toThrow();
 
-      writeActiveRulesState(sessionId, matchedPaths);
-
-      // Wait for write to complete
-      await waitForFile(getStateFilePath(sessionId));
+      await writeActiveRulesState(sessionId, matchedPaths);
 
       // Verify directory now exists
       await expect(fs.access(testStateDir)).resolves.toBeUndefined();
     });
 
     it('handles writes to different sessions independently', async () => {
-      writeActiveRulesState('ses_a', ['ruleA']);
-      writeActiveRulesState('ses_b', ['ruleB']);
-
-      // Wait for both writes
       await Promise.all([
-        waitForFile(getStateFilePath('ses_a')),
-        waitForFile(getStateFilePath('ses_b')),
+        writeActiveRulesState('ses_a', ['ruleA']),
+        writeActiveRulesState('ses_b', ['ruleB']),
       ]);
 
       const stateA = await readActiveRulesState('ses_a');
@@ -246,17 +228,3 @@ describe('active-rules-state', () => {
     });
   });
 });
-
-// Helper to wait for a file to exist
-async function waitForFile(filePath: string, timeoutMs = 1000): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      await fs.access(filePath);
-      return;
-    } catch {
-      await new Promise(resolve => setTimeout(resolve, 10));
-    }
-  }
-  throw new Error(`Timed out waiting for file: ${filePath}`);
-}

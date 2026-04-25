@@ -30,6 +30,11 @@ export function _setStateDirForTesting(dir: string | null): void {
   stateDirOverride = dir;
 }
 
+/** @internal Test-only: clear queued writes between tests */
+export function _resetWriteQueues(): void {
+  writeQueues.clear();
+}
+
 export function resolveStateDir(): string {
   if (stateDirOverride !== null) {
     return stateDirOverride;
@@ -47,10 +52,10 @@ export function getStateFilePath(sessionId: string): string {
 export function writeActiveRulesState(
   sessionId: string,
   matchedPaths: string[]
-): void {
+): Promise<void> {
   if (!isValidSessionId(sessionId)) {
     debugLog(`Invalid sessionId rejected: ${sessionId}`);
-    return;
+    return Promise.resolve();
   }
 
   const state: ActiveRulesState = {
@@ -68,10 +73,12 @@ export function writeActiveRulesState(
 
   writeQueues.set(sessionId, currentWrite);
 
-  // Fire-and-forget: catch errors to prevent unhandled rejection
+  // Prevent unhandled rejection for callers that ignore the return value.
   currentWrite.catch(() => {
     // Errors already logged in doAtomicWrite
   });
+
+  return currentWrite;
 }
 
 async function doAtomicWrite(
