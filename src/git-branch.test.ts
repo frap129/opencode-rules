@@ -65,7 +65,7 @@ describe('getGitBranch', () => {
     });
 
     const branch = await getGitBranch('/not-a-repo');
-    expect(branch).toBeUndefined();
+    expect(branch).toBeNull();
   });
 
   it('returns undefined if command fails', async () => {
@@ -76,7 +76,7 @@ describe('getGitBranch', () => {
     });
 
     const branch = await getGitBranch('/project');
-    expect(branch).toBeUndefined();
+    expect(branch).toBeNull();
   });
 
   it('returns undefined for detached HEAD state', async () => {
@@ -86,7 +86,7 @@ describe('getGitBranch', () => {
     });
 
     const branch = await getGitBranch('/project');
-    expect(branch).toBeUndefined();
+    expect(branch).toBeNull();
   });
 
   it('trims stdout whitespace', async () => {
@@ -116,7 +116,7 @@ describe('getGitBranch', () => {
     });
 
     const branch = await getGitBranch('/project');
-    expect(branch).toBeUndefined();
+    expect(branch).toBeNull();
   });
 
   it('returns undefined when stdout is only whitespace', async () => {
@@ -126,7 +126,7 @@ describe('getGitBranch', () => {
     });
 
     const branch = await getGitBranch('/project');
-    expect(branch).toBeUndefined();
+    expect(branch).toBeNull();
   });
 
   it('never throws on unexpected errors', async () => {
@@ -135,6 +135,6 @@ describe('getGitBranch', () => {
     });
 
     const branch = await getGitBranch('/project');
-    expect(branch).toBeUndefined();
+    expect(branch).toBeNull();
   });
 });

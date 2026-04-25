@@ -93,11 +93,11 @@ export async function buildFilterContext(
     projectTags = undefined;
   }
 
-  let gitBranch: string | undefined;
+  let gitBranch: string | null = null;
   try {
     gitBranch = await getGitBranch(projectDirectory);
   } catch {
-    gitBranch = undefined;
+    gitBranch = null;
   }
 
   const os = process.platform;
@@ -129,7 +129,7 @@ export async function buildFilterContext(
   if (projectTags !== undefined) {
     context.projectTags = projectTags;
   }
-  if (gitBranch !== undefined) {
+  if (gitBranch !== null) {
     context.gitBranch = gitBranch;
   }
 

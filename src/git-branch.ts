@@ -2,11 +2,9 @@ import { execFile, type ExecFileOptions } from 'child_process';
 
 const GIT_TIMEOUT_MS = 5000;
 
-export async function getGitBranch(
-  projectDir: string
-): Promise<string | undefined> {
+export async function getGitBranch(projectDir: string): Promise<string | null> {
   try {
-    const branch = await new Promise<string | undefined>(resolve => {
+    const branch = await new Promise<string | null>(resolve => {
       const opts: ExecFileOptions = {
         cwd: projectDir,
         timeout: GIT_TIMEOUT_MS,
@@ -18,12 +16,12 @@ export async function getGitBranch(
         opts,
         (error, stdout) => {
           if (error) {
-            resolve(undefined);
+            resolve(null);
             return;
           }
           const trimmed = String(stdout).trim();
           if (!trimmed || trimmed === 'HEAD') {
-            resolve(undefined);
+            resolve(null);
             return;
           }
           resolve(trimmed);
@@ -32,6 +30,6 @@ export async function getGitBranch(
     });
     return branch;
   } catch {
-    return undefined;
+    return null;
   }
 }
