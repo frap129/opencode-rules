@@ -10,7 +10,7 @@ import {
   type MessageWithInfo,
 } from './message-context.js';
 import { extractConnectedMcpCapabilityIDs } from './mcp-tools.js';
-import { createDebugLog, type DebugLog } from './debug.js';
+import { createDebugLog, logWarning, type DebugLog } from './debug.js';
 import type { SessionStore } from './session-store.js';
 import {
   buildFilterContext,
@@ -449,10 +449,7 @@ export class OpenCodeRulesRuntime {
       );
       await execAsync(command, { cwd: this.projectDirectory });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.warn(
-        `[opencode-rules] Warning: Hook side-effect failed: ${message}`
-      );
+      logWarning('Hook side-effect failed', error);
     }
   }
 

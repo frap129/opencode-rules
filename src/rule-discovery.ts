@@ -5,7 +5,7 @@
 import { stat, readFile, readdir } from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import { createDebugLog } from './debug';
+import { createDebugLog, logWarning } from './debug';
 import {
   parseRuleMetadata,
   stripFrontmatter,
@@ -54,14 +54,12 @@ export async function getCachedRule(
     const stats = await stat(filePath);
     const mtime = stats.mtimeMs;
 
-    // Check if we have a valid cached entry
     const cached = ruleCache.get(filePath);
     if (cached && cached.mtime === mtime) {
       debugLog(`Cache hit: ${filePath}`);
       return cached;
     }
 
-    // Read and cache the file
     debugLog(`Cache miss: ${filePath}`);
     const content = await readFile(filePath, 'utf-8');
     const metadata = parseRuleMetadata(content);
@@ -79,10 +77,7 @@ export async function getCachedRule(
   } catch (error) {
     // Remove stale cache entry if file no longer exists
     ruleCache.delete(filePath);
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn(
-      `[opencode-rules] Warning: Failed to read rule file ${filePath}: ${message}`
-    );
+    logWarning(`Failed to read rule file ${filePath}`, error);
     return undefined;
   }
 }
@@ -121,7 +116,6 @@ async function scanDirectoryRecursively(
   try {
     const entries = await readdir(dir, { withFileTypes: true });
     for (const entry of entries) {
-      // Skip hidden files and directories
       if (entry.name.startsWith('.')) {
         continue;
       }
@@ -129,10 +123,8 @@ async function scanDirectoryRecursively(
       const fullPath = path.join(dir, entry.name);
 
       if (entry.isDirectory()) {
-        // Recurse into subdirectory
         results.push(...(await scanDirectoryRecursively(fullPath, baseDir)));
       } else if (entry.name.endsWith('.md') || entry.name.endsWith('.mdc')) {
-        // Add markdown file
         const relativePath = path.relative(baseDir, fullPath);
         results.push({ filePath: fullPath, relativePath });
       }
@@ -143,10 +135,7 @@ async function scanDirectoryRecursively(
       return results;
     }
     // Log non-ENOENT directory read errors
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn(
-      `[opencode-rules] Warning: Failed to read directory ${dir}: ${message}`
-    );
+    logWarning(`Failed to read directory ${dir}`, error);
   }
 
   return results;
