@@ -21,7 +21,7 @@ let stateDirOverride: string | null = null;
 // Strict pattern for safe sessionID: alphanumeric, underscore, hyphen only
 const SAFE_SESSION_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 
-function isValidSessionId(sessionID: string): boolean {
+function isValidSessionID(sessionID: string): boolean {
   return SAFE_SESSION_ID_PATTERN.test(sessionID);
 }
 
@@ -42,18 +42,20 @@ export function resolveStateDir(): string {
   return path.join(os.homedir(), '.opencode', 'state', 'opencode-rules');
 }
 
+/** @throws {Error} If sessionID fails validation. */
 export function getStateFilePath(sessionID: string): string {
-  if (!isValidSessionId(sessionID)) {
+  if (!isValidSessionID(sessionID)) {
     throw new Error(`Invalid sessionID: ${sessionID}`);
   }
   return path.join(resolveStateDir(), `${sessionID}.json`);
 }
 
+/** Write matched rule paths to state. @throws {Error} If sessionID fails validation. */
 export function writeActiveRulesState(
   sessionID: string,
   matchedPaths: string[]
 ): Promise<void> {
-  if (!isValidSessionId(sessionID)) {
+  if (!isValidSessionID(sessionID)) {
     throw new Error(`Invalid sessionID: ${sessionID}`);
   }
 
@@ -107,10 +109,11 @@ async function doAtomicWrite(
   }
 }
 
+/** Read active rules state. @throws {Error} If sessionID fails validation. */
 export async function readActiveRulesState(
   sessionID: string
 ): Promise<ActiveRulesState | null> {
-  if (!isValidSessionId(sessionID)) {
+  if (!isValidSessionID(sessionID)) {
     throw new Error(`Invalid sessionID: ${sessionID}`);
   }
 

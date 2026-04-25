@@ -14,10 +14,10 @@ export interface ChatMessageOutput {
 }
 
 /**
- * Handle incoming chat messages to update session state.
+ * Update session state from incoming chat message data.
  * Captures user prompts, model IDs, and agent types.
  */
-export function handleChatMessage(
+export function updateSessionFromChatMessage(
   input: ChatMessageInput,
   output: ChatMessageOutput,
   sessionStore: SessionStore,

@@ -40,19 +40,11 @@ export function promptMatchesKeywords(
   });
 }
 
-/**
- * Check if any of the required tools are available.
- * Uses exact string matching (OR logic: any match returns true).
- *
- * @param availableToolIDs - Array of tool IDs currently available
- * @param requiredTools - Array of tool IDs from rule metadata
- * @returns true if any required tool is available
- */
+/** Check if any required tool is in the available set. */
 export function toolsMatchAvailable(
   availableToolIDs: string[],
   requiredTools: string[]
 ): boolean {
-  // Create a Set for O(1) lookups
   const availableSet = new Set(availableToolIDs);
   return requiredTools.some(tool => availableSet.has(tool));
 }
@@ -229,7 +221,6 @@ export async function readAndFormatRules(
 
     const { metadata, strippedContent } = cachedRule;
 
-    // Check if rule has any conditional filters
     const ruleHasConditions = hasConditions(metadata);
 
     if (ruleHasConditions && metadata) {
@@ -257,8 +248,6 @@ export async function readAndFormatRules(
       );
     }
 
-    // Use cached stripped content for output
-    // Use relativePath for unique headings instead of just filename
     ruleContents.push(`## ${relativePath}\n\n${strippedContent}`);
     matchedPaths.push(filePath);
   }

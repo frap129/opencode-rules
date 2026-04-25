@@ -47,18 +47,20 @@ export function extractTextFromParts(
  * If path is absolute and under baseDir, convert to relative POSIX path.
  * Otherwise return path as-is.
  */
-export function normalizeContextPath(p: string, baseDir: string): string {
-  if (!path.isAbsolute(p)) return p;
-  const rel = path.relative(baseDir, p);
+export function normalizeContextPath(
+  filePath: string,
+  baseDir: string
+): string {
+  if (!path.isAbsolute(filePath)) return filePath;
+  const rel = path.relative(baseDir, filePath);
   return rel.split(path.sep).join('/');
 }
 
 /**
- * Sanitize a file path for safe inclusion in context strings.
- * Prevents prompt injection by removing control characters and limiting length.
+ * Strip control characters and limit length for safe inclusion in context strings.
  */
-export function sanitizePathForContext(p: string): string {
-  return p.replace(/[\r\n\t]/g, ' ').slice(0, 300);
+export function sanitizePathForContext(filePath: string): string {
+  return filePath.replace(/[\r\n\t]/g, ' ').slice(0, 300);
 }
 
 /**
@@ -106,7 +108,7 @@ export function extractLatestUserPrompt(
  * Convert MessageWithInfo[] to Message[] by filtering out messages
  * that lack required fields (role, non-empty parts array).
  */
-export function toExtractableMessages(messages: MessageWithInfo[]): Message[] {
+export function filterValidMessages(messages: MessageWithInfo[]): Message[] {
   const result: Message[] = [];
   for (const msg of messages) {
     if (

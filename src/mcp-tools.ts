@@ -11,14 +11,14 @@ export function extractConnectedMcpCapabilityIDs(
 ): string[] {
   if (!status || typeof status !== 'object' || Array.isArray(status)) return [];
 
-  const out: string[] = [];
+  const capabilityIDs: string[] = [];
   for (const [clientName, clientStatus] of Object.entries(status)) {
     if (clientStatus?.status === 'connected') {
       const sanitized = sanitizeMcpClientName(clientName);
       if (sanitized) {
-        out.push(`mcp_${sanitized}`);
+        capabilityIDs.push(`mcp_${sanitized}`);
       }
     }
   }
-  return out;
+  return capabilityIDs;
 }

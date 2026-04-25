@@ -123,9 +123,11 @@ describe('module boundary tests', () => {
     expect(typeof runtimeContextModule.detectCiEnvironment).toBe('function');
   });
 
-  it('should export handleChatMessage from runtime-chat module', () => {
-    expect(runtimeChatModule.handleChatMessage).toBeDefined();
-    expect(typeof runtimeChatModule.handleChatMessage).toBe('function');
+  it('should export updateSessionFromChatMessage from runtime-chat module', () => {
+    expect(runtimeChatModule.updateSessionFromChatMessage).toBeDefined();
+    expect(typeof runtimeChatModule.updateSessionFromChatMessage).toBe(
+      'function'
+    );
   });
 
   it('should detect CI environment correctly via runtime-context module', () => {

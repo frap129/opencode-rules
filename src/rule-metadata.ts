@@ -161,10 +161,8 @@ export function parseRuleMetadata(content: string): RuleMetadata | null {
       }
     }
 
-    // Return metadata only if it has content
     return Object.keys(metadata).length > 0 ? metadata : null;
   } catch (error) {
-    // Log warning for YAML parsing errors
     logWarning('Failed to parse YAML frontmatter', error);
     return null;
   }
@@ -174,18 +172,15 @@ export function parseRuleMetadata(content: string): RuleMetadata | null {
  * Strip YAML frontmatter from rule content
  */
 export function stripFrontmatter(content: string): string {
-  // Check if content starts with frontmatter
   if (!content.startsWith('---')) {
     return content;
   }
 
-  // Find the closing --- marker
   const endIndex = content.indexOf('---', 3);
   if (endIndex === -1) {
     return content;
   }
 
-  // Return content after the closing marker, trimming leading newline
   return content.substring(endIndex + 3).trimStart();
 }
 

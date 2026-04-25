@@ -4,7 +4,7 @@ import {
   sanitizePathForContext,
   extractLatestUserPrompt,
   extractSessionID,
-  toExtractableMessages,
+  filterValidMessages,
   extractSlashCommand,
   extractTextFromParts,
   MessageWithInfo,
@@ -35,12 +35,12 @@ describe('message-context', () => {
   });
 });
 
-describe('toExtractableMessages', () => {
+describe('filterValidMessages', () => {
   it('passes through messages with role and parts', () => {
     const messages: MessageWithInfo[] = [
       { role: 'user', parts: [{ type: 'text', text: 'hello' }] },
     ];
-    const result = toExtractableMessages(messages);
+    const result = filterValidMessages(messages);
     expect(result).toEqual([
       { role: 'user', parts: [{ type: 'text', text: 'hello' }] },
     ]);
@@ -50,17 +50,17 @@ describe('toExtractableMessages', () => {
     const messages: MessageWithInfo[] = [
       { parts: [{ type: 'text', text: 'hello' }] },
     ];
-    expect(toExtractableMessages(messages)).toEqual([]);
+    expect(filterValidMessages(messages)).toEqual([]);
   });
 
   it('filters out messages with missing parts', () => {
     const messages: MessageWithInfo[] = [{ role: 'user' }];
-    expect(toExtractableMessages(messages)).toEqual([]);
+    expect(filterValidMessages(messages)).toEqual([]);
   });
 
   it('filters out messages with empty parts array', () => {
     const messages: MessageWithInfo[] = [{ role: 'user', parts: [] }];
-    expect(toExtractableMessages(messages)).toEqual([]);
+    expect(filterValidMessages(messages)).toEqual([]);
   });
 
   it('handles mixed valid and invalid messages', () => {
@@ -70,14 +70,14 @@ describe('toExtractableMessages', () => {
       { parts: [{ type: 'text', text: 'x' }] },
       { role: 'user', parts: [{ type: 'text', text: 'bye' }] },
     ];
-    const result = toExtractableMessages(messages);
+    const result = filterValidMessages(messages);
     expect(result).toHaveLength(2);
     expect(result[0].role).toBe('user');
     expect(result[1].role).toBe('user');
   });
 
   it('returns empty array for empty input', () => {
-    expect(toExtractableMessages([])).toEqual([]);
+    expect(filterValidMessages([])).toEqual([]);
   });
 });
 
