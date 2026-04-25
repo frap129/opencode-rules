@@ -234,6 +234,7 @@ export class OpenCodeRulesRuntime {
     //    dropped: if compaction was active, they remain queued for the next turn.
     let hookInjectionsText: string | undefined;
     if (
+      sessionID &&
       sessionState?.pendingHookInjections &&
       sessionState.pendingHookInjections.length > 0
     ) {
