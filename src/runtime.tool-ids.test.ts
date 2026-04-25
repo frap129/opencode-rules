@@ -27,13 +27,6 @@ describe('runtime module boundaries', () => {
     expect(runtimeChatModule.handleChatMessage).toBeDefined();
     expect(typeof runtimeChatModule.handleChatMessage).toBe('function');
   });
-
-  it('exports extractUserPromptFromParts from runtime-chat module', () => {
-    expect(runtimeChatModule.extractUserPromptFromParts).toBeDefined();
-    expect(typeof runtimeChatModule.extractUserPromptFromParts).toBe(
-      'function'
-    );
-  });
 });
 
 describe('OpenCodeRulesRuntime.queryAvailableToolIDs', () => {

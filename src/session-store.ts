@@ -128,7 +128,3 @@ export class SessionStore {
     };
   }
 }
-
-export function createSessionStore(opts?: SessionStoreOptions): SessionStore {
-  return new SessionStore(opts ?? { max: 100 });
-}
