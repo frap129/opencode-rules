@@ -1,8 +1,11 @@
 // tui/data/rules.ts
-import { discoverRuleFiles, getCachedRule } from '../../src/rule-discovery.js';
-import type { RuleMetadata } from '../../src/rule-metadata.js';
-import { readActiveRulesState } from '../../src/active-rules-state.js';
-import { hasConditions } from '../../src/utils.js';
+import {
+  discoverRuleFiles,
+  getCachedRule,
+  readActiveRulesState,
+  hasConditions,
+  type RuleMetadata,
+} from '../../src/utils.js';
 import path from 'path';
 
 /** Represents a rule as displayed in the sidebar */
