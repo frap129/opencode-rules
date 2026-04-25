@@ -89,14 +89,16 @@ export async function buildFilterContext(
     if (projectTags.length === 0) {
       projectTags = undefined;
     }
-  } catch {
+  } catch (error) {
+    debugLog(`Failed to detect project tags: ${error}`);
     projectTags = undefined;
   }
 
   let gitBranch: string | null = null;
   try {
     gitBranch = await getGitBranch(projectDirectory);
-  } catch {
+  } catch (error) {
+    debugLog(`Failed to get git branch: ${error}`);
     gitBranch = null;
   }
 

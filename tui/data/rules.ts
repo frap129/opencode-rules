@@ -6,6 +6,7 @@ import {
   hasConditions,
   type RuleMetadata,
 } from '../../src/utils.js';
+export { hasConditions };
 import path from 'path';
 
 /** Represents a rule as displayed in the sidebar */

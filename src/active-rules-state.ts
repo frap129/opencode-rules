@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
-import { createDebugLog } from './debug.js';
+import { createDebugLog, logWarning } from './debug.js';
 
 const debugLog = createDebugLog();
 
@@ -93,8 +93,9 @@ async function doAtomicWrite(
     await fs.writeFile(tempPath, content, 'utf-8');
     await fs.rename(tempPath, finalPath);
   } catch (error) {
-    debugLog(
-      `Failed to write active rules state for session ${sessionID}: ${error}`
+    logWarning(
+      `Failed to write active rules state for session ${sessionID}`,
+      error
     );
 
     // Clean up temp file if it exists
@@ -110,8 +111,7 @@ export async function readActiveRulesState(
   sessionID: string
 ): Promise<ActiveRulesState | null> {
   if (!isValidSessionId(sessionID)) {
-    debugLog(`Invalid sessionID rejected: ${sessionID}`);
-    return null;
+    throw new Error(`Invalid sessionID: ${sessionID}`);
   }
 
   const filePath = getStateFilePath(sessionID);

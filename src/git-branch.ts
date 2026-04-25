@@ -1,5 +1,7 @@
 import { execFile, type ExecFileOptions } from 'node:child_process';
+import { createDebugLog } from './debug.js';
 
+const debugLog = createDebugLog();
 const GIT_TIMEOUT_MS = 5000;
 
 export async function getGitBranch(projectDir: string): Promise<string | null> {
@@ -29,7 +31,8 @@ export async function getGitBranch(projectDir: string): Promise<string | null> {
       );
     });
     return branch;
-  } catch {
+  } catch (err) {
+    debugLog(`Failed to get git branch: ${err}`);
     return null;
   }
 }
