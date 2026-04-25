@@ -153,18 +153,13 @@ describe('active-rules-state', () => {
       expect(state).toBeNull();
     });
 
-    it('silently ignores write with invalid sessionId', async () => {
-      await writeActiveRulesState('../escape', ['/rule.md']);
-      await writeActiveRulesState('foo/bar', ['/rule.md']);
-
-      // Verify no files were created
-      try {
-        await fs.access(testStateDir);
-        const files = await fs.readdir(testStateDir);
-        expect(files).toHaveLength(0);
-      } catch {
-        // Directory doesn't exist, which is expected
-      }
+    it('throws on write with invalid sessionId', () => {
+      expect(() => writeActiveRulesState('../escape', ['/rule.md'])).toThrow(
+        'Invalid sessionId'
+      );
+      expect(() => writeActiveRulesState('foo/bar', ['/rule.md'])).toThrow(
+        'Invalid sessionId'
+      );
     });
 
     it('returns null for read with invalid sessionId', async () => {

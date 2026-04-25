@@ -54,8 +54,7 @@ export function writeActiveRulesState(
   matchedPaths: string[]
 ): Promise<void> {
   if (!isValidSessionId(sessionId)) {
-    debugLog(`Invalid sessionId rejected: ${sessionId}`);
-    return Promise.resolve();
+    throw new Error(`Invalid sessionId: ${sessionId}`);
   }
 
   const state: ActiveRulesState = {
