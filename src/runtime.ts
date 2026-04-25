@@ -461,6 +461,9 @@ export class OpenCodeRulesRuntime {
         `Executing hook side-effect for session ${sessionID}: ${command}`
       );
       await execAsync(command, { cwd: this.projectDirectory });
+      this.debugLog(
+        `Hook side-effect completed for session ${sessionID}: ${command}`
+      );
     } catch (error) {
       logWarning('Hook side-effect failed', error);
     }
