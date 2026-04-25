@@ -5,8 +5,8 @@
  * Split from index.test.ts for maintainability.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import path from 'path';
-import { writeFileSync, utimesSync } from 'fs';
+import path from 'node:path';
+import { writeFileSync, utimesSync } from 'node:fs';
 import { readAndFormatRules, clearRuleCache } from './utils.js';
 import {
   setupTestDirs,

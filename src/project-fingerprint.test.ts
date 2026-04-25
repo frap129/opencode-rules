@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import * as fs from 'fs/promises';
+import * as fs from 'node:fs/promises';
 
 import { detectProjectTags } from './project-fingerprint.js';
 

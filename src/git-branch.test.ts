@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import * as childProcess from 'child_process';
+import * as childProcess from 'node:child_process';
 
 import { getGitBranch } from './git-branch.js';
 
