@@ -5,7 +5,7 @@
 import { minimatch } from 'minimatch';
 import { createDebugLog } from './debug.js';
 import { getCachedRule, type DiscoveredRule } from './rule-discovery.js';
-import { hasConditions } from './utils.js';
+import { hasConditions } from './rule-metadata.js';
 
 const debugLog = createDebugLog();
 

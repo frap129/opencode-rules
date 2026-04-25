@@ -1006,7 +1006,7 @@ describe('Active rules state persistence', () => {
 
     const state = await readActiveRulesState(sessionID);
     expect(state).not.toBeNull();
-    expect(state?.sessionId).toBe(sessionID);
+    expect(state?.sessionID).toBe(sessionID);
     expect(state?.matchedRulePaths).toHaveLength(1);
     expect(state?.matchedRulePaths[0]).toBe(rulePath);
   });
@@ -1052,7 +1052,7 @@ Conditional rule for gpt-5 only.`
 
     const state = await readActiveRulesState(sessionID);
     expect(state).not.toBeNull();
-    expect(state?.sessionId).toBe(sessionID);
+    expect(state?.sessionID).toBe(sessionID);
     expect(state?.matchedRulePaths).toHaveLength(0);
   });
 
@@ -1095,8 +1095,11 @@ describe('utils runtime exports', () => {
       'discoverRuleFiles',
       'evaluateHooks',
       'extractFilePathsFromMessages',
+      'getCachedRule',
+      'hasConditions',
       'parseRuleMetadata',
       'promptMatchesKeywords',
+      'readActiveRulesState',
       'readAndFormatRules',
       'serializeToolArgs',
       'toolsMatchAvailable',

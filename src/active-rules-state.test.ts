@@ -162,9 +162,10 @@ describe('active-rules-state', () => {
       );
     });
 
-    it('returns null for read with invalid sessionID', async () => {
-      const state = await readActiveRulesState('../escape');
-      expect(state).toBeNull();
+    it('throws for read with invalid sessionID', async () => {
+      await expect(readActiveRulesState('../escape')).rejects.toThrow(
+        'Invalid sessionID'
+      );
     });
 
     it('no temp file remains after write', async () => {
