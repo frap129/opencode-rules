@@ -6,6 +6,7 @@ import { minimatch } from 'minimatch';
 import { createDebugLog } from './debug.js';
 import { getCachedRule, type DiscoveredRule } from './rule-discovery.js';
 import { hasConditions } from './rule-metadata.js';
+import type { RuleMetadata } from './rule-metadata.js';
 
 const debugLog = createDebugLog();
 
@@ -54,18 +55,7 @@ export function toolsMatchAvailable(
  * Returns an array of boolean match results (one per declared condition).
  */
 function evaluateConditionChecks(
-  metadata: {
-    globs?: string[];
-    keywords?: string[];
-    tools?: string[];
-    model?: string[];
-    agent?: string[];
-    command?: string[];
-    project?: string[];
-    branch?: string[];
-    os?: string[];
-    ci?: boolean;
-  },
+  metadata: RuleMetadata,
   context: RuleFilterContext,
   availableToolSet?: Set<string>
 ): boolean[] {
