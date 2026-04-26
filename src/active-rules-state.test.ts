@@ -206,8 +206,12 @@ describe('active-rules-state', () => {
 
       await writeActiveRulesState(sessionID, matchedPaths);
 
-      // Verify directory now exists
-      await expect(fs.access(testStateDir)).resolves.toBeUndefined();
+      // Verify directory now exists — fs.access resolves to null on Bun, undefined on Node
+      const dirExists = await fs.access(testStateDir).then(
+        () => true,
+        () => false
+      );
+      expect(dirExists).toBe(true);
     });
 
     it('handles writes to different sessions independently', async () => {

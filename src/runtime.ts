@@ -294,7 +294,7 @@ export class OpenCodeRulesRuntime {
       formattedRules = result.formattedRules;
 
       if (sessionID) {
-        writeActiveRulesState(sessionID, result.matchedPaths);
+        await writeActiveRulesState(sessionID, result.matchedPaths);
       }
     } else {
       this.debugLog(
@@ -472,6 +472,8 @@ export class OpenCodeRulesRuntime {
     }
   }
 
+  /** Evaluate hooks for a tool invocation and queue matches.
+   * @throws {Error} When a PreToolUse hook with block:true matches the tool and arguments. */
   private async evaluateAndQueueHooks(
     hookType: 'PreToolUse' | 'PostToolUse',
     sessionID: string,
