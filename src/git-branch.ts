@@ -4,7 +4,10 @@ import { createDebugLog } from './debug.js';
 const debugLog = createDebugLog();
 const GIT_TIMEOUT_MS = 5000;
 
-export async function getGitBranch(projectDir: string): Promise<string | null> {
+export async function getGitBranch(
+  projectDir: string,
+  execFn: typeof execFile = execFile
+): Promise<string | null> {
   try {
     const branch = await new Promise<string | null>(resolve => {
       const opts: ExecFileOptions = {
@@ -12,7 +15,7 @@ export async function getGitBranch(projectDir: string): Promise<string | null> {
         timeout: GIT_TIMEOUT_MS,
         killSignal: 'SIGTERM',
       };
-      execFile(
+      execFn(
         'git',
         ['rev-parse', '--abbrev-ref', 'HEAD'],
         opts,

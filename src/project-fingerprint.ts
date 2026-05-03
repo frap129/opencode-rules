@@ -19,7 +19,25 @@ const BROWSER_EXTENSION_SIGNAL_KEYS = [
   'permissions',
 ];
 
-async function fileExists(filePath: string): Promise<boolean> {
+export interface ProjectTagFs {
+  access(filePath: string): Promise<void>;
+  readFile(filePath: string, encoding: string): Promise<string>;
+}
+
+const nodeFs: ProjectTagFs = {
+  access: path => fs.access(path),
+  readFile: (path, encoding) => fs.readFile(path, encoding as BufferEncoding),
+};
+
+export interface ProjectTagFs {
+  access(filePath: string): Promise<void>;
+  readFile(filePath: string, encoding: string): Promise<string>;
+}
+
+async function fileExists(
+  filePath: string,
+  fs: ProjectTagFs
+): Promise<boolean> {
   try {
     await fs.access(filePath);
     return true;
@@ -29,7 +47,8 @@ async function fileExists(filePath: string): Promise<boolean> {
 }
 
 async function isBrowserExtensionManifest(
-  manifestPath: string
+  manifestPath: string,
+  fs: ProjectTagFs
 ): Promise<boolean> {
   try {
     const content = await fs.readFile(manifestPath, 'utf-8');
@@ -44,12 +63,15 @@ async function isBrowserExtensionManifest(
   }
 }
 
-export async function detectProjectTags(projectDir: string): Promise<string[]> {
+export async function detectProjectTags(
+  projectDir: string,
+  fs: ProjectTagFs = nodeFs
+): Promise<string[]> {
   const tags = new Set<string>();
 
   const checks = SIMPLE_MARKERS.map(async ([marker, tag]) => {
     const markerPath = path.join(projectDir, marker);
-    if (await fileExists(markerPath)) {
+    if (await fileExists(markerPath, fs)) {
       tags.add(tag);
     }
   });
@@ -58,8 +80,8 @@ export async function detectProjectTags(projectDir: string): Promise<string[]> {
   checks.push(
     (async () => {
       if (
-        (await fileExists(manifestPath)) &&
-        (await isBrowserExtensionManifest(manifestPath))
+        (await fileExists(manifestPath, fs)) &&
+        (await isBrowserExtensionManifest(manifestPath, fs))
       ) {
         tags.add('browser-extension');
       }
