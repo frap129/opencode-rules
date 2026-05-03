@@ -37,7 +37,7 @@ interface SystemTransformInput {
 }
 
 interface SystemTransformOutput {
-  system?: string | string[];
+  system?: string;
 }
 
 interface OpenCodeRulesRuntimeOptions {

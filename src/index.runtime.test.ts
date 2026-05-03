@@ -359,6 +359,53 @@ describe('OpenCodeRulesPlugin', () => {
     expect(result.system).toContain('My Rule');
   });
 
+  it('should handle empty array system messages', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    writeFileSync(path.join(globalRulesDir, 'rule.md'), '# My Rule');
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+    const systemTransform = hooks['experimental.chat.system.transform'] as (
+      input: unknown,
+      output: { system: string[] }
+    ) => Promise<{ system: string }>;
+    const result = await systemTransform({}, { system: [] });
+
+    expect(typeof result.system).toBe('string');
+    expect(result.system).toContain('My Rule');
+  });
+
+  it('should handle single-element array system message', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    writeFileSync(path.join(globalRulesDir, 'rule.md'), '# My Rule');
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+    const systemTransform = hooks['experimental.chat.system.transform'] as (
+      input: unknown,
+      output: { system: string[] }
+    ) => Promise<{ system: string }>;
+    const result = await systemTransform({}, { system: ['Only message.'] });
+
+    expect(typeof result.system).toBe('string');
+    expect(result.system).toContain('Only message.');
+    expect(result.system).toContain('My Rule');
+  });
+
   it('should not modify messages in messages.transform hook', async () => {
     const { testDir, globalRulesDir } = getTestDirs();
     writeFileSync(path.join(globalRulesDir, 'rule.md'), '# Rule');
