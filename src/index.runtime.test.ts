@@ -208,11 +208,11 @@ describe('OpenCodeRulesPlugin', () => {
     const hooks = await plugin(
       mockInput as unknown as Parameters<typeof plugin>[0]
     );
-    expect(hooks).toHaveProperty('experimental.chat.messages.transform');
-    expect(hooks).toHaveProperty('experimental.chat.system.transform');
+    expect(hooks['experimental.chat.messages.transform']).toBeDefined();
     expect(typeof hooks['experimental.chat.messages.transform']).toBe(
       'function'
     );
+    expect(hooks['experimental.chat.system.transform']).toBeDefined();
     expect(typeof hooks['experimental.chat.system.transform']).toBe('function');
   });
 
@@ -229,8 +229,8 @@ describe('OpenCodeRulesPlugin', () => {
     const hooks = await plugin(
       mockInput as unknown as Parameters<typeof plugin>[0]
     );
-    expect(hooks).toHaveProperty('experimental.chat.messages.transform');
-    expect(hooks).toHaveProperty('experimental.chat.system.transform');
+    expect(hooks['experimental.chat.messages.transform']).toBeDefined();
+    expect(hooks['experimental.chat.system.transform']).toBeDefined();
   });
 
   it('should inject rules into system prompt via system.transform hook', async () => {
