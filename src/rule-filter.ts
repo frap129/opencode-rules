@@ -5,6 +5,7 @@
 import { minimatch } from 'minimatch';
 import { createDebugLog } from './debug.js';
 import { getCachedRule, type DiscoveredRule } from './rule-discovery.js';
+import { type InjectMode } from './rule-metadata.js';
 
 const debugLog = createDebugLog();
 
@@ -65,6 +66,7 @@ export function toolsMatchAvailable(
 export interface FilterResult {
   formattedRules: string;
   matchedPaths: string[];
+  individualContents: string[];
 }
 
 /**
@@ -94,20 +96,35 @@ export interface RuleFilterContext {
 }
 
 /**
- * Read and format rule files for system prompt injection
+ * Options for readAndFormatRules
+ */
+export interface ReadAndFormatOptions {
+  /** When true, omit all headers and separators — only concatenate raw rule content */
+  raw?: boolean;
+  /** Maximum characters for the formatted output. Excess rules are dropped from the end. */
+  maxChars?: number;
+}
+
+/**
+ * Read and format rule files for injection.
  * @param files - Array of discovered rule files with paths
  * @param context - Optional RuleFilterContext for conditional rule matching
+ * @param injectMode - Filter by injection mode (system, user, both)
+ * @param opts - Formatting options (raw mode, character limit)
  */
 export async function readAndFormatRules(
   files: DiscoveredRule[],
-  context: RuleFilterContext = {}
+  context: RuleFilterContext = {},
+  injectMode?: InjectMode,
+  opts?: ReadAndFormatOptions
 ): Promise<FilterResult> {
   if (files.length === 0) {
-    return { formattedRules: '', matchedPaths: [] };
+    return { formattedRules: '', matchedPaths: [], individualContents: [] };
   }
 
   const ruleContents: string[] = [];
   const matchedPaths: string[] = [];
+  const individualContents: string[] = [];
   const availableToolSet =
     context.availableToolIDs && context.availableToolIDs.length > 0
       ? new Set(context.availableToolIDs)
@@ -250,20 +267,58 @@ export async function readAndFormatRules(
       );
     }
 
+    // Filter by injection mode
+    if (injectMode) {
+      const ruleMode = metadata?.inject ?? 'system';
+      if (injectMode === 'system' && ruleMode === 'user') continue;
+      if (injectMode === 'user' && ruleMode === 'system') continue;
+    }
+
     // Use cached stripped content for output
-    // Use relativePath for unique headings instead of just filename
-    ruleContents.push(`## ${relativePath}\n\n${strippedContent}`);
+    const entry = opts?.raw
+      ? strippedContent
+      : `## ${relativePath}\n\n${strippedContent}`;
+    ruleContents.push(entry);
     matchedPaths.push(filePath);
+    individualContents.push(strippedContent);
   }
 
   if (ruleContents.length === 0) {
-    return { formattedRules: '', matchedPaths: [] };
+    return { formattedRules: '', matchedPaths: [], individualContents: [] };
+  }
+
+  let formattedRules: string;
+  if (opts?.raw) {
+    formattedRules = ruleContents.join('\n\n');
+  } else {
+    formattedRules =
+      `# OpenCode Rules\n\nPlease follow the following rules:\n\n` +
+      ruleContents.join('\n\n---\n\n');
+  }
+
+  // Truncate to respect maxChars by dropping rules from the end
+  if (opts?.maxChars && formattedRules.length > opts.maxChars) {
+    while (ruleContents.length > 1) {
+      ruleContents.pop();
+      matchedPaths.pop();
+      individualContents.pop();
+      formattedRules = opts?.raw
+        ? ruleContents.join('\n\n')
+        : `# OpenCode Rules\n\nPlease follow the following rules:\n\n` +
+          ruleContents.join('\n\n---\n\n');
+      if (formattedRules.length <= opts.maxChars) break;
+    }
+    // If even a single rule exceeds the limit, include it anyway (better than nothing)
+    if (formattedRules.length > opts.maxChars && ruleContents.length === 1) {
+      debugLog(
+        `Single rule exceeds maxChars limit (${formattedRules.length} > ${opts.maxChars})`
+      );
+    }
   }
 
   return {
-    formattedRules:
-      `# OpenCode Rules\n\nPlease follow the following rules:\n\n` +
-      ruleContents.join('\n\n---\n\n'),
+    formattedRules,
     matchedPaths,
+    individualContents,
   };
 }

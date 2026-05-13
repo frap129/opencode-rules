@@ -265,8 +265,8 @@ describe('OpenCodeRulesPlugin', () => {
     );
 
     expect(result.system).toContain('You are a helpful assistant.');
-    expect(result.system).toContain('OpenCode Rules');
-    expect(result.system).toContain('Test Rule');
+    expect(result.system).toContain('# Test Rule');
+    expect(result.system).toContain('Do this always');
   });
 
   it('should append rules to existing system prompt', async () => {
@@ -314,8 +314,7 @@ describe('OpenCodeRulesPlugin', () => {
     ) => Promise<{ system: string }>;
     const result = await systemTransform({}, { system: '' });
 
-    expect(result.system).toContain('OpenCode Rules');
-    expect(result.system).toContain('Rule Content');
+    expect(result.system).toContain('# Rule Content');
   });
 
   it('should not modify messages in messages.transform hook', async () => {

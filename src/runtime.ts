@@ -1,6 +1,7 @@
+import { minimatch } from 'minimatch';
 import { readAndFormatRules, type RuleFilterContext } from './rule-filter.js';
+import { type DiscoveredRule, getCachedRule } from './rule-discovery.js';
 import { extractFilePathsFromMessages } from './message-paths.js';
-import { type DiscoveredRule } from './rule-discovery.js';
 import {
   extractLatestUserPrompt,
   extractSessionID,
@@ -43,6 +44,35 @@ interface OpenCodeRulesRuntimeOptions {
   sessionStore: SessionStore;
   debugLog?: DebugLog;
   now?: () => number;
+}
+
+function resolveRepeatEvery(
+  config: number | Record<string, number> | undefined,
+  modelID: string | undefined
+): number {
+  if (config === undefined) return 1;
+  if (typeof config === 'number') return config;
+  if (modelID && typeof config === 'object') {
+    for (const [pattern, interval] of Object.entries(config)) {
+      if (pattern === 'default') continue;
+      if (minimatch(modelID, pattern)) return interval;
+    }
+  }
+  return config['default'] ?? 1;
+}
+
+/**
+ * Fast non-cryptographic hash for comparing rule content.
+ * Used to avoid re-injecting identical rules and preserve KV-cache.
+ */
+function hashString(s: string): string {
+  let hash = 0;
+  for (let i = 0; i < s.length; i++) {
+    const chr = s.charCodeAt(i);
+    hash = ((hash << 5) - hash) + chr;
+    hash |= 0;
+  }
+  return (hash >>> 0).toString(36);
 }
 
 export class OpenCodeRulesRuntime {
@@ -129,40 +159,42 @@ export class OpenCodeRulesRuntime {
     }
 
     const existingState = this.sessionStore.get(sessionID);
-    if (existingState && existingState.seededFromHistory) {
-      this.debugLog(`Session ${sessionID} already seeded, skipping rescan`);
+
+    if (!existingState || !existingState.seededFromHistory) {
+      const contextPaths = extractFilePathsFromMessages(
+        toExtractableMessages(output.messages)
+      );
+      const userPrompt = extractLatestUserPrompt(output.messages);
+
+      this.sessionStore.upsert(sessionID, state => {
+        for (const p of contextPaths) {
+          state.contextPaths.add(normalizeContextPath(p, this.projectDirectory));
+        }
+        if (userPrompt && !state.lastUserPrompt) {
+          state.lastUserPrompt = userPrompt;
+        }
+        state.seededFromHistory = true;
+        state.seedCount = (state.seedCount ?? 0) + 1;
+      });
+
+      if (contextPaths.length > 0) {
+        this.debugLog(
+          `Seeded ${contextPaths.length} context path(s) for session ${sessionID}: ${contextPaths
+            .slice(0, 5)
+            .join(', ')}${contextPaths.length > 5 ? '...' : ''}`
+        );
+      }
+
+      if (userPrompt) {
+        this.debugLog(
+          `Seeded user prompt for session ${sessionID} (len=${userPrompt.length})`
+        );
+      }
+
       return output;
     }
 
-    const contextPaths = extractFilePathsFromMessages(
-      toExtractableMessages(output.messages)
-    );
-    const userPrompt = extractLatestUserPrompt(output.messages);
-
-    this.sessionStore.upsert(sessionID, state => {
-      for (const p of contextPaths) {
-        state.contextPaths.add(normalizeContextPath(p, this.projectDirectory));
-      }
-      if (userPrompt && !state.lastUserPrompt) {
-        state.lastUserPrompt = userPrompt;
-      }
-      state.seededFromHistory = true;
-      state.seedCount = (state.seedCount ?? 0) + 1;
-    });
-
-    if (contextPaths.length > 0) {
-      this.debugLog(
-        `Seeded ${contextPaths.length} context path(s) for session ${sessionID}: ${contextPaths
-          .slice(0, 5)
-          .join(', ')}${contextPaths.length > 5 ? '...' : ''}`
-      );
-    }
-
-    if (userPrompt) {
-      this.debugLog(
-        `Seeded user prompt for session ${sessionID} (len=${userPrompt.length})`
-      );
-    }
+    await this.maybeInjectUserRules(output, sessionID);
 
     return output;
   }
@@ -172,6 +204,109 @@ export class OpenCodeRulesRuntime {
     output: ChatMessageOutput
   ): Promise<void> {
     handleChatMessage(input, output, this.sessionStore, this.debugLog);
+  }
+
+  private async buildCurrentFilterContext(
+    sessionID: string
+  ): Promise<RuleFilterContext> {
+    const sessionState = sessionID ? this.sessionStore.get(sessionID) : undefined;
+
+    const contextPaths = sessionState
+      ? Array.from(sessionState.contextPaths).sort((a, b) => a.localeCompare(b))
+      : [];
+
+    const filterContextOpts: BuildFilterContextOptions = {
+      contextFilePaths: contextPaths,
+      userPrompt: sessionState?.lastUserPrompt,
+      availableToolIDs: await this.queryAvailableToolIDs(),
+      modelID: sessionState?.lastModelID,
+      agentType: sessionState?.lastAgentType,
+    };
+
+    return buildFilterContext(
+      filterContextOpts,
+      this.projectDirectory,
+      this.debugLog
+    );
+  }
+
+  private async maybeInjectUserRules(
+    output: MessagesTransformOutput,
+    sessionID: string
+  ): Promise<void> {
+    const state = this.sessionStore.get(sessionID);
+    if (!state) return;
+
+    const turnCount = state.turnCount ?? 0;
+    if (turnCount === 0) return;
+
+    const filterContext = await this.buildCurrentFilterContext(sessionID);
+    const minInterval = await this.computeMinUserRepeatEvery(filterContext);
+    if (minInterval === undefined) return;
+
+    const lastInject = state.lastUserInjectTurn ?? 0;
+    if (turnCount - lastInject < minInterval) return;
+
+    const { formattedRules } = await readAndFormatRules(
+      this.ruleFiles,
+      filterContext,
+      'user',
+      { raw: true }
+    );
+
+    if (!formattedRules) return;
+
+    let lastUserIdx = -1;
+    for (let i = output.messages.length - 1; i >= 0; i--) {
+      if (output.messages[i]?.role === 'user') {
+        lastUserIdx = i;
+        break;
+      }
+    }
+
+    if (lastUserIdx >= 0) {
+      output.messages.splice(lastUserIdx, 0, {
+        role: 'user',
+        parts: [{
+          type: 'text',
+          text: formattedRules,
+          synthetic: true,
+        }],
+      });
+
+      this.sessionStore.upsert(sessionID, s => {
+        s.lastUserInjectTurn = turnCount;
+      });
+
+      this.debugLog(
+        `Injected user-prompt rules for session ${sessionID} at turn ${turnCount}`
+      );
+    }
+  }
+
+  private async computeMinUserRepeatEvery(
+    filterContext: RuleFilterContext
+  ): Promise<number | undefined> {
+    let minInterval: number | undefined;
+
+    for (const ruleFile of this.ruleFiles) {
+      const cached = await getCachedRule(ruleFile.filePath);
+      if (!cached?.metadata) continue;
+
+      const injectMode = cached.metadata.inject ?? 'system';
+      if (injectMode !== 'user' && injectMode !== 'both') continue;
+
+      const interval = resolveRepeatEvery(
+        cached.metadata.repeat_every,
+        filterContext.modelID
+      );
+      minInterval =
+        minInterval === undefined
+          ? interval
+          : Math.min(minInterval, interval);
+    }
+
+    return minInterval;
   }
 
   private async onSystemTransform(
@@ -197,45 +332,67 @@ export class OpenCodeRulesRuntime {
       }
     }
 
-    if (sessionState?.rulesInjected) {
-      this.debugLog(
-        `Session ${sessionID} already has rules injected - skipping to prevent loop`
-      );
+    const filterContext = await this.buildCurrentFilterContext(sessionID ?? '');
+    const result = await readAndFormatRules(
+          this.ruleFiles,
+          filterContext,
+          'system',
+          { raw: true }
+        );
+
+    let { formattedRules, matchedPaths, individualContents } = result;
+
+    if (!formattedRules) {
+      this.debugLog('No applicable rules for current context');
+      if (sessionID) {
+        writeActiveRulesState(sessionID, []);
+      }
       return output ?? {};
     }
 
-    const contextPaths = sessionState
-      ? Array.from(sessionState.contextPaths).sort((a, b) => a.localeCompare(b))
-      : [];
-    const userPrompt = sessionState?.lastUserPrompt;
+    // Dedup: skip individual rule contents already present in the current system prompt
+    const currentSystemText = output
+      ? Array.isArray(output.system)
+        ? output.system.join('\n')
+        : (output.system ?? '')
+      : '';
 
-    const availableToolIDs = await this.queryAvailableToolIDs();
+    const newContents: string[] = [];
+    const newPaths: string[] = [];
+    for (let i = 0; i < individualContents.length; i++) {
+      const ruleContent = individualContents[i];
+      if (currentSystemText.includes(ruleContent)) {
+        this.debugLog(
+          `Skipping duplicate rule content (already in system prompt): ${matchedPaths[i]}`
+        );
+      } else {
+        newContents.push(ruleContent);
+        newPaths.push(matchedPaths[i]);
+      }
+    }
 
-    const filterContextOpts: BuildFilterContextOptions = {
-      contextFilePaths: contextPaths,
-      userPrompt,
-      availableToolIDs,
-      modelID: sessionState?.lastModelID,
-      agentType: sessionState?.lastAgentType,
-    };
+    if (newContents.length === 0) {
+      this.debugLog('All rules already present in system prompt - skipping injection');
+      if (sessionID) {
+        writeActiveRulesState(sessionID, []);
+      }
+      return output ?? {};
+    }
 
-    const filterContext: RuleFilterContext = await buildFilterContext(
-      filterContextOpts,
-      this.projectDirectory,
-      this.debugLog
-    );
-
-    const { formattedRules, matchedPaths } = await readAndFormatRules(
-      this.ruleFiles,
-      filterContext
-    );
+    // Rebuild formattedRules from non-duplicate contents
+    formattedRules = newContents.join('\n\n');
+    matchedPaths = newPaths;
 
     if (sessionID) {
       writeActiveRulesState(sessionID, matchedPaths);
     }
 
-    if (!formattedRules) {
-      this.debugLog('No applicable rules for current context');
+    const rulesHash = hashString(formattedRules);
+
+    if (sessionState?.lastInjectedRulesHash === rulesHash) {
+      this.debugLog(
+        `Session ${sessionID} rules unchanged - skipping injection to preserve KV-cache`
+      );
       return output ?? {};
     }
 
@@ -246,6 +403,7 @@ export class OpenCodeRulesRuntime {
         this.sessionStore.upsert(sessionID, state => {
           state.rulesInjected = true;
           state.lastInjectedAt = this.now();
+          state.lastInjectedRulesHash = rulesHash;
         });
       }
       return { system: formattedRules };
@@ -263,6 +421,7 @@ export class OpenCodeRulesRuntime {
       this.sessionStore.upsert(sessionID, state => {
         state.rulesInjected = true;
         state.lastInjectedAt = this.now();
+        state.lastInjectedRulesHash = rulesHash;
       });
     }
 
@@ -340,6 +499,9 @@ export class OpenCodeRulesRuntime {
     }
 
     this.sessionStore.markCompacting(sessionID, this.now());
+    this.sessionStore.upsert(sessionID, s => {
+      delete s.lastInjectedRulesHash;
+    });
 
     const sortedPaths = Array.from(sessionState.contextPaths).sort((a, b) =>
       a.localeCompare(b)

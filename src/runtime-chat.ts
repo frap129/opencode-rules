@@ -51,7 +51,8 @@ export function handleChatMessage(
   sessionStore.upsert(sessionID, state => {
     if (userPrompt) {
       state.lastUserPrompt = userPrompt;
-      state.rulesInjected = false;
+      state.turnCount = (state.turnCount ?? 0) + 1;
+      state.turnCount = (state.turnCount ?? 0) + 1;
     }
 
     if (input.model?.modelID) {

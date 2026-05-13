@@ -17,7 +17,7 @@ export {
 } from './rule-discovery.js';
 
 // Re-export from rule-metadata (RuleMetadata is internal, not re-exported)
-export { parseRuleMetadata } from './rule-metadata.js';
+export { parseRuleMetadata, type InjectMode } from './rule-metadata.js';
 
 // Re-export from rule-filter
 export {
@@ -26,6 +26,7 @@ export {
   readAndFormatRules,
   type RuleFilterContext,
   type FilterResult,
+  type ReadAndFormatOptions,
 } from './rule-filter.js';
 
 // Re-export from message-paths

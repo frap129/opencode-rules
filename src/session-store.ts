@@ -10,6 +10,9 @@ export interface SessionState {
   lastAgentType?: string;
   rulesInjected?: boolean;
   lastInjectedAt?: number;
+  turnCount: number;
+  lastUserInjectTurn: number;
+  lastInjectedRulesHash?: string;
 }
 
 interface SessionStoreOptions {
@@ -120,6 +123,8 @@ export class SessionStore {
       lastUpdated: ++this.tick,
       seededFromHistory: false,
       seedCount: 0,
+      turnCount: 0,
+      lastUserInjectTurn: 0,
     };
   }
 }
