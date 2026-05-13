@@ -7,6 +7,8 @@ const { parse: parseYaml } = await import('yaml');
 /**
  * Metadata extracted from .mdc file frontmatter
  */
+
+export type InjectMode = 'system' | 'user' | 'both';
 export interface RuleMetadata {
   globs?: string[];
   keywords?: string[];
@@ -19,6 +21,8 @@ export interface RuleMetadata {
   os?: string[];
   ci?: boolean;
   match?: 'any' | 'all';
+  inject?: InjectMode;
+  repeat_every?: number | Record<string, number>;
 }
 
 /**
@@ -36,6 +40,8 @@ interface ParsedFrontmatter {
   os?: unknown;
   ci?: unknown;
   match?: unknown;
+  inject?: unknown;
+  repeat_every?: unknown;
 }
 
 /** Field names in ParsedFrontmatter that are string arrays */
@@ -127,6 +133,36 @@ export function parseRuleMetadata(content: string): RuleMetadata | undefined {
     // Extract match (normalize to 'any' | 'all' only)
     if (parsed.match === 'any' || parsed.match === 'all') {
       metadata.match = parsed.match;
+    }
+
+    // Extract inject
+    if (
+      parsed.inject === 'system' ||
+      parsed.inject === 'user' ||
+      parsed.inject === 'both'
+    ) {
+      metadata.inject = parsed.inject;
+    }
+
+    // Extract repeat_every
+    if (typeof parsed.repeat_every === 'number') {
+      if (Number.isInteger(parsed.repeat_every) && parsed.repeat_every >= 1) {
+        metadata.repeat_every = parsed.repeat_every;
+      }
+    } else if (
+      typeof parsed.repeat_every === 'object' &&
+      parsed.repeat_every !== null &&
+      !Array.isArray(parsed.repeat_every)
+    ) {
+      const dict: Record<string, number> = {};
+      for (const [key, value] of Object.entries(parsed.repeat_every)) {
+        if (typeof value === 'number' && Number.isInteger(value) && value >= 1) {
+          dict[key] = value;
+        }
+      }
+      if (Object.keys(dict).length > 0) {
+        metadata.repeat_every = dict;
+      }
     }
 
     // Return metadata only if it has content

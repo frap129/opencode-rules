@@ -98,10 +98,17 @@ That's it! The rule will now be automatically injected into all AI agent prompts
 2. **Parsing**: Extract metadata from files with YAML front matter
 3. **Tool Execution**: `tool.execute.before` hook captures file paths before tools run
 4. **Message Flow**: `chat.message` hook updates user prompt as messages arrive
+    - Tracks turn count, model ID, and agent type for rule filtering
 5. **Initial Seeding**: `experimental.chat.messages.transform` extracts context from message history once
 6. **Rule Filtering**: `experimental.chat.system.transform` evaluates rules based on context and injects into system prompt
+    - Dedup: Rules already present in the current system prompt are skipped (content-based comparison)
+    - Hash-based dedup: Identical rule sets are not re-injected (KV-cache preservation)
 7. **State Persistence**: After filtering, matched rule paths are written to `~/.opencode/state/opencode-rules/{sessionId}.json` for TUI consumption
 8. **Compaction Persistence**: `experimental.session.compacting` preserves context during session compression
+9. **User Prompt Injection**: `experimental.chat.messages.transform` injects user/both-mode rules before the last user message
+    - Injected at configurable turn intervals via `repeat_every`
+    - Raw content only (no headers or preamble)
+    - Marked as synthetic to prevent accidental extraction
 
 ## Performance
 
@@ -165,6 +172,10 @@ os:
 ci: false
 # Matching mode
 match: any
+# Injection mode
+inject: system
+# Repeat interval (turns) for user-prompt injection
+repeat_every: 1
 ---
 ```
 
@@ -199,6 +210,15 @@ match: any
 - `match` (optional): Matching mode for multiple conditions
   - `any` (default): Rule applies if ANY declared condition matches
   - `all`: Rule applies only if ALL declared conditions match
+- `inject` (optional): Where to inject the rule content
+  - `system` (default): Injected into the system prompt once per session
+  - `user`: Injected into user messages at configurable intervals
+  - `both`: Injected into both system prompt and user messages
+- `repeat_every` (optional): Minimum number of user turns between user-prompt injections
+  - Accepts a number (e.g., `3` to inject every 3rd turn) or a model-pattern map
+  - Model-pattern map example: `{ "gpt-4*": 3, "default": 1 }` (uses minimatch for pattern matching)
+  - Default: `1` (every turn) when `inject` is `user` or `both`
+  - Only applies to rules with `inject: user` or `inject: both`
 
 > [!NOTE] 
 > When a runtime context value is unavailable (e.g., not in a git repository), that dimension is treated as a non-match.
