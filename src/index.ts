@@ -4,7 +4,10 @@
  * Discovers markdown rule files and injects them into the system prompt.
  */
 
-import type { Plugin, PluginInput } from '@opencode-ai/plugin';
+interface LegacyPluginInput {
+  client: unknown;
+  directory: string;
+}
 import { discoverRuleFiles } from './utils.js';
 import { OpenCodeRulesRuntime } from './runtime.js';
 import { SessionStore, type SessionState } from './session-store.js';
@@ -14,7 +17,7 @@ import { createDebugLog } from './debug.js';
 
 const debugLog = createDebugLog();
 
-const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
+const openCodeRulesPlugin = async (pluginInput: LegacyPluginInput) => {
   const ruleFiles = await discoverRuleFiles(pluginInput.directory);
   debugLog(`Discovered ${ruleFiles.length} rule file(s)`);
 
@@ -63,6 +66,6 @@ const __testOnly = Object.freeze(
 );
 
 const id = 'opencode-rules' as const;
-const server = openCodeRulesPlugin satisfies Plugin;
+const server = openCodeRulesPlugin;
 export default { id, server };
 export { __testOnly };

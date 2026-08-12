@@ -1,14 +1,10 @@
 {
   "name": "opencode-rules",
-  "version": "0.7.0-beta.4",
+  "version": "1.0.0-beta.1",
   "description": "OpenCode plugin that discovers and injects markdown rules into system prompts",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
   "type": "module",
-  "oc-plugin": [
-    "server",
-    "tui"
-  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
@@ -62,14 +58,13 @@
     },
     "./tui": {
       "types": "./dist/tui/index.d.ts",
-      "import": "./tui/index.tsx"
+      "import": "./dist/tui/index.js"
     }
   },
   "peerDependencies": {
-    "@opencode-ai/plugin": "^1.3.7",
-    "@opencode-ai/sdk": "^1.3.7",
-    "@opentui/core": "^0.1.97",
-    "@opentui/solid": "^0.1.97"
+    "@opencode-ai/plugin": "0.0.0-next-17335",
+    "@opentui/core": "0.0.0-20260808-9ecf7c0a",
+    "@opentui/solid": "0.0.0-20260808-9ecf7c0a"
   },
   "peerDependenciesMeta": {
     "@opentui/core": {
@@ -80,8 +75,7 @@
     }
   },
   "devDependencies": {
-    "@opencode-ai/plugin": "^1.3.9",
-    "@opencode-ai/sdk": "^1.3.9",
+    "@opencode-ai/plugin": "0.0.0-next-17335",
     "@types/node": "^20.19.30",
     "@typescript-eslint/eslint-plugin": "^6.21.0",
     "@typescript-eslint/parser": "^6.21.0",
@@ -91,10 +85,10 @@
     "vitest": "^1.6.1"
   },
   "dependencies": {
-    "@opentui/core": "^0.1.97",
-    "@opentui/solid": "^0.1.97",
+    "@opentui/core": "0.0.0-20260808-9ecf7c0a",
+    "@opentui/solid": "0.0.0-20260808-9ecf7c0a",
     "minimatch": "^9.0.5",
-    "solid-js": "1.9.11",
+    "solid-js": "1.9.12",
     "yaml": "^2.8.2"
   }
 }
