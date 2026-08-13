@@ -1,4 +1,4 @@
-import { readAndFormatRules, type RuleFilterContext } from './rule-filter.js';
+import { readAndFormatRules } from './rule-filter.js';
 import { extractFilePathsFromMessages } from './message-paths.js';
 import {
   type DiscoveredRule,
@@ -16,21 +16,12 @@ import type {
 } from './v2-types.js';
 import {
   extractLatestUserPrompt,
-  extractSessionID,
   normalizeContextPath,
-  sanitizePathForContext,
   filterValidMessages,
-  type MessageWithInfo,
 } from './message-context.js';
-import { extractConnectedMcpCapabilityIDs } from './mcp-tools.js';
 import { createDebugLog, logWarning, type DebugLog } from './debug.js';
 import type { SessionStore } from './session-store.js';
 import { buildFilterContext } from './runtime-context.js';
-import {
-  updateSessionFromChatMessage,
-  type ChatMessageInput,
-  type ChatMessageOutput,
-} from './runtime-chat.js';
 import { writeActiveRulesState } from './active-rules-state.js';
 import { evaluateHooks, serializeToolArgs } from './rule-hooks.js';
 import { exec } from 'node:child_process';
@@ -42,37 +33,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-interface MessagesTransformOutput {
-  messages: MessageWithInfo[];
-}
-
-interface SystemTransformInput {
-  sessionID?: string;
-}
-
-interface SystemTransformOutput {
-  system?: string;
-}
-
-interface OpenCodeClient {
-  tool?: {
-    ids?: (args: {
-      query: { directory: string };
-    }) => Promise<{ data: string[] }>;
-  };
-  mcp?: {
-    status?: (args: {
-      query: { directory: string };
-    }) => Promise<{ connected?: Array<{ id: string }> }>;
-  };
-}
-
 interface OpenCodeRulesRuntimeOptions {
-  client?: unknown;
-  directory?: string;
-  projectDirectory?: string;
-  ruleFiles?: DiscoveredRule[];
-  globalRules?: DiscoveredRule[];
+  globalRules: DiscoveredRule[];
   sessionStore: SessionStore;
   debugLog?: DebugLog;
   now?: () => number;
@@ -90,11 +52,7 @@ export class RuleBlockError extends Error {
 }
 
 export class OpenCodeRulesRuntime {
-  private client: OpenCodeClient;
-  private directory: string;
-  private projectDirectory: string;
-  private ruleFiles: DiscoveredRule[];
-  private globalRules: DiscoveredRule[] = [];
+  private globalRules: DiscoveredRule[];
   private sessionStore: SessionStore;
   private debugLog: DebugLog;
   private now: () => number;
@@ -109,29 +67,13 @@ export class OpenCodeRulesRuntime {
   private projectRulesInFlight = new Map<string, Promise<DiscoveredRule[]>>();
 
   constructor(opts: OpenCodeRulesRuntimeOptions) {
-    this.client = opts.client as OpenCodeClient;
-    this.directory = opts.directory ?? '';
-    this.projectDirectory = opts.projectDirectory ?? opts.directory ?? '';
-    this.ruleFiles = opts.ruleFiles ?? [];
-    this.globalRules = opts.globalRules ?? [];
+    this.globalRules = opts.globalRules;
     this.sessionStore = opts.sessionStore;
     this.debugLog = opts.debugLog ?? createDebugLog();
     this.now = opts.now ?? (() => Date.now());
     this.directoryTTL = opts.directoryTTL ?? 30_000;
     this.failedDirectoryTTL = opts.failedDirectoryTTL ?? 5_000;
     this.emptyProjectRulesTTL = opts.emptyProjectRulesTTL ?? 60_000;
-  }
-
-  createHooks(): Record<string, unknown> {
-    return {
-      'tool.execute.before': this.onToolExecuteBefore.bind(this),
-      'tool.execute.after': this.onToolExecuteAfter.bind(this),
-      'experimental.chat.messages.transform':
-        this.onMessagesTransform.bind(this),
-      'chat.message': this.onChatMessage.bind(this),
-      'experimental.chat.system.transform': this.onSystemTransform.bind(this),
-      'experimental.session.compacting': this.onSessionCompacting.bind(this),
-    };
   }
 
   /**
@@ -478,387 +420,6 @@ export class OpenCodeRulesRuntime {
     });
     this.projectRulesInFlight.set(directory, promise);
     return promise;
-  }
-
-  private async onToolExecuteBefore(
-    input: { tool?: string; sessionID?: string; callID?: string },
-    output: { args?: Record<string, unknown> }
-  ): Promise<void> {
-    const sessionID = input?.sessionID;
-    const toolName = input?.tool;
-    const args = output?.args;
-
-    if (!sessionID || !toolName || !args) {
-      return;
-    }
-
-    let filePath: string | undefined;
-
-    if (['read', 'edit', 'write'].includes(toolName)) {
-      const arg = args.filePath;
-      if (typeof arg === 'string' && arg.length > 0) {
-        filePath = arg;
-      }
-    } else if (['glob', 'grep'].includes(toolName)) {
-      const arg = args.path;
-      if (typeof arg === 'string' && arg.length > 0) {
-        filePath = arg;
-      }
-    } else if (toolName === 'bash') {
-      const arg = args.workdir;
-      if (typeof arg === 'string' && arg.length > 0) {
-        filePath = arg;
-      }
-    }
-
-    if (filePath) {
-      const normalized = normalizeContextPath(filePath, this.projectDirectory);
-      this.sessionStore.upsert(sessionID, state => {
-        state.contextPaths.add(normalized);
-      });
-
-      this.debugLog(
-        `Recorded context path from tool ${toolName}: ${normalized}`
-      );
-    }
-
-    await this.evaluateAndQueueHooks(
-      'PreToolUse',
-      sessionID,
-      toolName,
-      args,
-      this.ruleFiles,
-      this.projectDirectory
-    );
-  }
-
-  private async onToolExecuteAfter(
-    input: {
-      tool?: string;
-      sessionID?: string;
-      callID?: string;
-      args?: Record<string, unknown>;
-    },
-    _output: { title?: string; output?: string; metadata?: unknown }
-  ): Promise<void> {
-    const sessionID = input?.sessionID;
-    const toolName = input?.tool;
-    const args = input?.args;
-
-    if (!sessionID || !toolName || !args) {
-      return;
-    }
-
-    await this.evaluateAndQueueHooks(
-      'PostToolUse',
-      sessionID,
-      toolName,
-      args,
-      this.ruleFiles,
-      this.projectDirectory
-    );
-  }
-
-  private async onMessagesTransform(
-    _input: Record<string, never>,
-    output: MessagesTransformOutput
-  ): Promise<MessagesTransformOutput> {
-    const sessionID = extractSessionID(output.messages);
-    if (!sessionID) {
-      this.debugLog('No sessionID found in messages');
-      return output;
-    }
-
-    const existingState = this.sessionStore.get(sessionID);
-    if (existingState && existingState.seededFromHistory) {
-      this.debugLog(`Session ${sessionID} already seeded, skipping rescan`);
-      return output;
-    }
-
-    const contextPaths = extractFilePathsFromMessages(
-      filterValidMessages(output.messages)
-    );
-    const userPrompt = extractLatestUserPrompt(output.messages);
-
-    this.sessionStore.upsert(sessionID, state => {
-      for (const p of contextPaths) {
-        state.contextPaths.add(normalizeContextPath(p, this.projectDirectory));
-      }
-      if (userPrompt && !state.lastUserPrompt) {
-        state.lastUserPrompt = userPrompt;
-      }
-      state.seededFromHistory = true;
-      state.seedCount = (state.seedCount ?? 0) + 1;
-    });
-
-    if (contextPaths.length > 0) {
-      this.debugLog(
-        `Seeded ${contextPaths.length} context path(s) for session ${sessionID}: ${contextPaths
-          .slice(0, 5)
-          .join(', ')}${contextPaths.length > 5 ? '...' : ''}`
-      );
-    }
-
-    if (userPrompt) {
-      this.debugLog(
-        `Seeded user prompt for session ${sessionID} (len=${userPrompt.length})`
-      );
-    }
-
-    return output;
-  }
-
-  private async onChatMessage(
-    input: ChatMessageInput,
-    output: ChatMessageOutput
-  ): Promise<void> {
-    updateSessionFromChatMessage(
-      input,
-      output,
-      this.sessionStore,
-      this.debugLog
-    );
-  }
-
-  private async onSystemTransform(
-    hookInput: SystemTransformInput,
-    output: SystemTransformOutput | null
-  ): Promise<SystemTransformOutput> {
-    const sessionID = hookInput?.sessionID;
-    const sessionState = sessionID
-      ? this.sessionStore.get(sessionID)
-      : undefined;
-
-    // 1. Check compaction gate (must happen before flushing hook injections —
-    //    otherwise injections cleared during a compacting window are silently lost).
-    if (sessionID) {
-      const skip = this.sessionStore.shouldSkipInjection(
-        sessionID,
-        this.now(),
-        30_000
-      );
-      if (skip) {
-        this.debugLog(
-          `Session ${sessionID} is compacting - skipping rule injection`
-        );
-        return output ?? {};
-      }
-    }
-
-    // 2. Flush pending hook injections (always — even when rulesInjected is true).
-    //    Hook-triggered content bypasses the static rulesInjected deduplication gate.
-    //    Flushing here (after compaction check) ensures injections are never silently
-    //    dropped: if compaction was active, they remain queued for the next turn.
-    let hookInjectionsText: string | undefined;
-    if (
-      sessionID &&
-      sessionState?.pendingHookInjections &&
-      sessionState.pendingHookInjections.length > 0
-    ) {
-      const uniqueInjections = [...new Set(sessionState.pendingHookInjections)];
-      hookInjectionsText = uniqueInjections.join('\n\n---\n\n');
-
-      this.sessionStore.upsert(sessionID, state => {
-        state.pendingHookInjections = [];
-      });
-
-      this.debugLog(
-        `Flushing ${uniqueInjections.length} pending hook injection(s) for session ${sessionID}`
-      );
-    }
-
-    // 3. Decide whether to process static rules.
-    //    hook injections ALWAYS proceed (flushed above); static rules are gated.
-    const skipStaticRules = sessionState?.rulesInjected ?? false;
-
-    let formattedRules: string | undefined;
-
-    if (!skipStaticRules) {
-      const contextPaths = sessionState
-        ? Array.from(sessionState.contextPaths).sort((a, b) =>
-            a.localeCompare(b)
-          )
-        : [];
-      const userPrompt = sessionState?.lastUserPrompt;
-
-      const availableToolIDs = await this.queryAvailableToolIDs();
-
-      const filterContext: RuleFilterContext = await buildFilterContext({
-        contextFilePaths: contextPaths,
-        userPrompt,
-        availableToolIDs,
-        modelID: sessionState?.lastModelID,
-        agentType: sessionState?.lastAgentType,
-        projectDirectory: this.projectDirectory,
-        debugLog: this.debugLog,
-      });
-
-      const result = await readAndFormatRules(this.ruleFiles, filterContext);
-      formattedRules = result.formattedRules;
-
-      if (sessionID) {
-        await writeActiveRulesState(sessionID, result.matchedPaths);
-      }
-    } else {
-      this.debugLog(
-        `Session ${sessionID} already has rules injected - skipping static rule injection`
-      );
-    }
-
-    // 4. Build combined system content from hook injections + static rules
-    const systemParts: string[] = [];
-
-    if (hookInjectionsText) {
-      systemParts.push(hookInjectionsText);
-    }
-
-    if (formattedRules) {
-      systemParts.push(formattedRules);
-    }
-
-    if (systemParts.length === 0) {
-      this.debugLog(
-        'No applicable rules or hook injections for current context'
-      );
-      return output ?? {};
-    }
-
-    this.debugLog('Injecting rules into system prompt');
-    const combinedSystem = systemParts.join('\n\n---\n\n');
-
-    if (!output) {
-      if (sessionID) {
-        this.sessionStore.upsert(sessionID, state => {
-          state.rulesInjected = true;
-          state.lastInjectedAt = this.now();
-        });
-      }
-      return { system: combinedSystem };
-    }
-
-    if (Array.isArray(output.system)) {
-      output.system =
-        output.system.join('\n\n') +
-        (output.system.length > 0 ? '\n\n' : '') +
-        combinedSystem;
-    } else {
-      output.system = output.system
-        ? `${output.system}\n\n${combinedSystem}`
-        : combinedSystem;
-    }
-
-    if (sessionID) {
-      this.sessionStore.upsert(sessionID, state => {
-        state.rulesInjected = true;
-        state.lastInjectedAt = this.now();
-      });
-    }
-
-    return output;
-  }
-
-  private async queryAvailableToolIDs(): Promise<string[]> {
-    const ids = new Set<string>();
-    const query = { directory: this.directory };
-
-    const toolPromise = this.client.tool?.ids?.({ query });
-    const mcpPromise = this.client.mcp?.status?.({ query });
-
-    const [toolResult, mcpResult] = await Promise.allSettled([
-      toolPromise,
-      mcpPromise,
-    ] as const);
-
-    const logSettledError = (
-      label: string,
-      result: PromiseRejectedResult
-    ): void => {
-      const message =
-        result.reason instanceof Error
-          ? result.reason.message
-          : String(result.reason);
-      logWarning(`Failed to query ${label}`, message);
-    };
-
-    if (
-      toolResult.status === 'fulfilled' &&
-      Array.isArray(toolResult.value?.data)
-    ) {
-      for (const id of toolResult.value.data) {
-        ids.add(id);
-      }
-      this.debugLog(
-        `Built-in tools: ${toolResult.value.data.slice(0, 10).join(', ')}${toolResult.value.data.length > 10 ? '...' : ''} (${toolResult.value.data.length} total)`
-      );
-    } else if (toolResult.status === 'rejected') {
-      logSettledError('tool IDs', toolResult);
-    }
-
-    if (
-      mcpResult.status === 'fulfilled' &&
-      mcpResult.value &&
-      'data' in mcpResult.value
-    ) {
-      const mcpIds = extractConnectedMcpCapabilityIDs(
-        mcpResult.value.data as Record<string, { status?: string }>
-      );
-      for (const id of mcpIds) {
-        ids.add(id);
-      }
-      if (mcpIds.length > 0) {
-        this.debugLog(`MCP capability IDs: ${mcpIds.join(', ')}`);
-      }
-    } else if (mcpResult.status === 'rejected') {
-      logSettledError('MCP status', mcpResult);
-    }
-
-    return Array.from(ids);
-  }
-
-  private async onSessionCompacting(
-    input: { sessionID?: string },
-    output: { context?: string[] }
-  ): Promise<void> {
-    const sessionID = input?.sessionID;
-    if (!sessionID) {
-      this.debugLog('No sessionID in compacting hook input');
-      return;
-    }
-
-    const sessionState = this.sessionStore.get(sessionID);
-    if (!sessionState || sessionState.contextPaths.size === 0) {
-      this.debugLog(
-        `No context paths for session ${sessionID} during compaction`
-      );
-      return;
-    }
-
-    this.sessionStore.markCompacting(sessionID, this.now());
-
-    const sortedPaths = Array.from(sessionState.contextPaths).sort((a, b) =>
-      a.localeCompare(b)
-    );
-    const maxPaths = 20;
-    const pathsToInclude = sortedPaths.slice(0, maxPaths);
-
-    const contextString = [
-      'OpenCode Rules: Working context',
-      'Current file paths in context:',
-      ...pathsToInclude.map(p => `  - ${sanitizePathForContext(p)}`),
-      ...(sortedPaths.length > maxPaths
-        ? [`  ... and ${sortedPaths.length - maxPaths} more paths`]
-        : []),
-    ].join('\n');
-
-    if (!output.context) {
-      output.context = [];
-    }
-
-    output.context.push(contextString);
-
-    this.debugLog(
-      `Added ${pathsToInclude.length} context path(s) to compaction for session ${sessionID}`
-    );
   }
 
   private async executeHookSideEffect(

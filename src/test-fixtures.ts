@@ -112,57 +112,6 @@ export function restoreCiEnvVars(saved: CiEnvSnapshot): void {
 }
 
 // ============================================================================
-// Mock Plugin Input Helpers
-// ============================================================================
-
-interface MockPluginInput {
-  testDir: string;
-  toolIds?: string[];
-  mcpStatus?: Record<string, { status: string }>;
-}
-
-/**
- * Creates a typed mock input object for the plugin function.
- */
-export function createMockPluginInput(opts: MockPluginInput): {
-  client: {
-    tool: { ids: () => Promise<{ data: string[] }> };
-    mcp?: {
-      status: () => Promise<{ data: Record<string, { status: string }> }>;
-    };
-  };
-  project: Record<string, unknown>;
-  directory: string;
-  worktree: string;
-  $: Record<string, unknown>;
-  serverUrl: URL;
-} {
-  const client: {
-    tool: { ids: () => Promise<{ data: string[] }> };
-    mcp?: {
-      status: () => Promise<{ data: Record<string, { status: string }> }>;
-    };
-  } = {
-    tool: { ids: async () => ({ data: opts.toolIds ?? [] }) },
-  };
-
-  if (opts.mcpStatus) {
-    client.mcp = {
-      status: async () => ({ data: opts.mcpStatus! }),
-    };
-  }
-
-  return {
-    client,
-    project: {},
-    directory: opts.testDir,
-    worktree: opts.testDir,
-    $: {},
-    serverUrl: new URL('http://localhost:3000'),
-  };
-}
-
-// ============================================================================
 // Generic Environment Snapshot Helpers
 // ============================================================================
 

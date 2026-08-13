@@ -1,55 +1,57 @@
 /**
- * OpenCode Rules Plugin
+ * OpenCode Rules Plugin (OpenCode v2)
  *
- * Discovers markdown rule files and injects them into the system prompt.
+ * Discovers markdown rule files and injects them into the system prompt
+ * through the session context hook.
  */
 
-interface LegacyPluginInput {
-  client: unknown;
-  directory: string;
-}
+import { Plugin } from '@opencode-ai/plugin';
 import { discoverRuleFiles } from './utils.js';
 import { OpenCodeRulesRuntime } from './runtime.js';
 import { SessionStore, type SessionState } from './session-store.js';
+import { createDebugLog, logWarning } from './debug.js';
+import type { V2PluginContext } from './v2-types.js';
 
 const sessionStore = new SessionStore();
-import { createDebugLog } from './debug.js';
-
 const debugLog = createDebugLog();
 
-const openCodeRulesPlugin = async (pluginInput: LegacyPluginInput) => {
-  const ruleFiles = await discoverRuleFiles(pluginInput.directory);
-  debugLog(`Discovered ${ruleFiles.length} rule file(s)`);
+const id = 'opencode-rules' as const;
 
-  const runtime = new OpenCodeRulesRuntime({
-    client: pluginInput.client,
-    directory: pluginInput.directory,
-    projectDirectory: pluginInput.directory,
-    ruleFiles,
-    sessionStore,
-    debugLog,
-  });
+export default Plugin.define({
+  id,
+  async setup(ctx: Plugin.Context) {
+    try {
+      const globalRules = await discoverRuleFiles();
+      debugLog(`Discovered ${globalRules.length} global rule file(s)`);
 
-  return runtime.createHooks();
-};
+      const runtime = new OpenCodeRulesRuntime({
+        globalRules,
+        sessionStore,
+        debugLog,
+      });
+
+      return await runtime.registerHooks(ctx as unknown as V2PluginContext);
+    } catch (error) {
+      logWarning('Plugin setup failed', error);
+      return undefined;
+    }
+  },
+});
 
 /**
  * Test-only exports for accessing internal state and functions.
  * @internal - Test utilities only. Not part of public API.
  */
-// NOTE: OpenCode's plugin loader calls every named export as a plugin initializer.
-// To avoid runtime crashes, __testOnly must be callable.
+// NOTE: The v2 plugin loader reads only the default export; named exports
+// are ignored, so __testOnly is safe to keep as a plain named export.
 const __testOnly = Object.freeze(
   Object.assign(async () => ({}), {
     setSessionStateLimit: (limit: number): void => {
       sessionStore.setMax(limit);
     },
-    getSessionStateIDs: (): string[] => {
-      return sessionStore.ids();
-    },
-    getSessionStateSnapshot: (sessionID: string): SessionState | undefined => {
-      return sessionStore.snapshot(sessionID);
-    },
+    getSessionStateIDs: (): string[] => sessionStore.ids(),
+    getSessionStateSnapshot: (sessionID: string): SessionState | undefined =>
+      sessionStore.snapshot(sessionID),
     upsertSessionState: (
       sessionID: string,
       mutator: (state: SessionState) => void
@@ -59,16 +61,10 @@ const __testOnly = Object.freeze(
     resetSessionState: (): void => {
       sessionStore.reset();
     },
-    getSeedCount: (sessionID: string): number => {
-      return sessionStore.get(sessionID)?.seedCount ?? 0;
-    },
-    getSessionStore: (): SessionStore => {
-      return sessionStore;
-    },
+    getSeedCount: (sessionID: string): number =>
+      sessionStore.get(sessionID)?.seedCount ?? 0,
+    getSessionStore: (): SessionStore => sessionStore,
   })
 );
 
-const id = 'opencode-rules' as const;
-const server = openCodeRulesPlugin;
-export default { id, server };
 export { __testOnly };

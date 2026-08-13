@@ -4,18 +4,28 @@
  * cache behavior, and cross-dimension regression scenarios.
  * Split from index.test.ts for maintainability.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import path from 'node:path';
 import { writeFileSync, utimesSync } from 'node:fs';
-import { readAndFormatRules, clearRuleCache } from './utils.js';
+import {
+  readAndFormatRules,
+  clearRuleCache,
+  discoverRuleFiles,
+} from './utils.js';
 import {
   setupTestDirs,
   teardownTestDirs,
   getTestDirs,
   toRules,
-  createMockPluginInput,
+  createRuntime,
+  createMockSessionContext,
+  systemText,
+  saveEnv,
+  restoreEnv,
+  type EnvSnapshot,
 } from './test-fixtures.js';
 import { __testOnly } from './index.js';
+import { _setStateDirForTesting } from './active-rules-state.js';
 
 describe('readAndFormatRules', () => {
   let savedEnvXDG: string | undefined;
@@ -840,31 +850,22 @@ Excluded rule.`
 });
 
 describe('Conditional rules integration', () => {
-  let savedEnvXDG: string | undefined;
-  let savedEnvConfigDir: string | undefined;
+  let envSnapshot: EnvSnapshot;
 
   beforeEach(() => {
     setupTestDirs();
-    savedEnvXDG = process.env.XDG_CONFIG_HOME;
-    savedEnvConfigDir = process.env.OPENCODE_CONFIG_DIR;
+    envSnapshot = saveEnv('XDG_CONFIG_HOME', 'OPENCODE_CONFIG_DIR');
     delete process.env.OPENCODE_CONFIG_DIR;
+    _setStateDirForTesting(path.join(getTestDirs().testDir, 'state'));
+    __testOnly.resetSessionState();
     clearRuleCache();
   });
 
-  afterEach(async () => {
+  afterEach(() => {
     teardownTestDirs();
-    vi.resetAllMocks();
+    restoreEnv(envSnapshot);
+    _setStateDirForTesting(null);
     __testOnly.resetSessionState();
-    if (savedEnvXDG === undefined) {
-      delete process.env.XDG_CONFIG_HOME;
-    } else {
-      process.env.XDG_CONFIG_HOME = savedEnvXDG;
-    }
-    if (savedEnvConfigDir === undefined) {
-      delete process.env.OPENCODE_CONFIG_DIR;
-    } else {
-      process.env.OPENCODE_CONFIG_DIR = savedEnvConfigDir;
-    }
   });
 
   it('should include conditional rule when message context matches glob', async () => {
@@ -880,52 +881,31 @@ Use React best practices for components.`
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
+    const { hookRegistry } = await createRuntime({
+      globalRules: await discoverRuleFiles(),
+      sessionDirectory: testDir,
+    });
 
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-
-    const testSessionID = 'test-session-123';
-    const messagesOutput = {
+    const sessionID = 'test-session-123';
+    const ctx = createMockSessionContext({
+      sessionID,
       messages: [
         {
           role: 'assistant',
-          parts: [
+          content: [
             {
-              sessionID: testSessionID,
-              type: 'tool-invocation',
-              toolInvocation: {
-                toolName: 'read',
-                args: { filePath: 'src/components/Button.tsx' },
-              },
+              type: 'tool-call',
+              id: 'call-1',
+              name: 'read',
+              input: { filePath: 'src/components/Button.tsx' },
             },
           ],
         },
       ],
-    };
+    });
+    await hookRegistry.context!(ctx);
 
-    const systemOutput = { system: 'Base prompt.' };
-
-    const messagesTransform = hooks['experimental.chat.messages.transform'] as (
-      input: unknown,
-      output: { messages: unknown[] }
-    ) => Promise<{ messages: unknown[] }>;
-    await messagesTransform({}, messagesOutput);
-
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: { sessionID?: string },
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform(
-      { sessionID: testSessionID },
-      systemOutput
-    );
-
-    expect(result.system).toContain('React best practices');
+    expect(systemText(ctx.system)).toContain('React best practices');
   });
 
   it('should exclude conditional rule when message context does not match glob', async () => {
@@ -941,52 +921,31 @@ Use React best practices for components.`
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
+    const { hookRegistry } = await createRuntime({
+      globalRules: await discoverRuleFiles(),
+      sessionDirectory: testDir,
+    });
 
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-
-    const testSessionID = 'test-session-456';
-    const messagesOutput = {
+    const sessionID = 'test-session-456';
+    const ctx = createMockSessionContext({
+      sessionID,
       messages: [
         {
           role: 'assistant',
-          parts: [
+          content: [
             {
-              sessionID: testSessionID,
-              type: 'tool-invocation',
-              toolInvocation: {
-                toolName: 'read',
-                args: { filePath: 'src/utils/helpers.ts' },
-              },
+              type: 'tool-call',
+              id: 'call-1',
+              name: 'read',
+              input: { filePath: 'src/utils/helpers.ts' },
             },
           ],
         },
       ],
-    };
+    });
+    await hookRegistry.context!(ctx);
 
-    const systemOutput = { system: 'Base prompt.' };
-
-    const messagesTransform = hooks['experimental.chat.messages.transform'] as (
-      input: unknown,
-      output: { messages: unknown[] }
-    ) => Promise<{ messages: unknown[] }>;
-    await messagesTransform({}, messagesOutput);
-
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: { sessionID?: string },
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform(
-      { sessionID: testSessionID },
-      systemOutput
-    );
-
-    expect(result.system).not.toContain('React best practices');
+    expect(systemText(ctx.system)).not.toContain('React best practices');
   });
 
   it('should include unconditional rules regardless of context', async () => {
@@ -1006,256 +965,52 @@ Special rule content.`
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
+    const { hookRegistry } = await createRuntime({
+      globalRules: await discoverRuleFiles(),
+      sessionDirectory: testDir,
+    });
 
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-
-    const testSessionID = 'test-session-789';
-    const messagesOutput = {
+    const sessionID = 'test-session-789';
+    const ctx = createMockSessionContext({
+      sessionID,
       messages: [
         {
           role: 'user',
-          parts: [
-            {
-              sessionID: testSessionID,
-              type: 'text',
-              text: 'Check src/index.ts',
-            },
-          ],
+          content: [{ type: 'text', text: 'Check src/index.ts' }],
         },
       ],
-    };
-
-    const systemOutput = { system: '' };
-
-    const messagesTransform = hooks['experimental.chat.messages.transform'] as (
-      input: unknown,
-      output: { messages: unknown[] }
-    ) => Promise<{ messages: unknown[] }>;
-    await messagesTransform({}, messagesOutput);
-
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: { sessionID?: string },
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform(
-      { sessionID: testSessionID },
-      systemOutput
-    );
-
-    expect(result.system).toContain('Always Apply');
-    expect(result.system).toContain('This rule always applies');
-    expect(result.system).not.toContain('Special rule content');
-  });
-});
-
-describe('Session compacting behavior', () => {
-  let savedEnvXDG: string | undefined;
-  let savedEnvConfigDir: string | undefined;
-
-  beforeEach(() => {
-    setupTestDirs();
-    savedEnvXDG = process.env.XDG_CONFIG_HOME;
-    savedEnvConfigDir = process.env.OPENCODE_CONFIG_DIR;
-    delete process.env.OPENCODE_CONFIG_DIR;
-    clearRuleCache();
-  });
-
-  afterEach(async () => {
-    teardownTestDirs();
-    vi.resetAllMocks();
-    __testOnly.resetSessionState();
-    if (savedEnvXDG === undefined) {
-      delete process.env.XDG_CONFIG_HOME;
-    } else {
-      process.env.XDG_CONFIG_HOME = savedEnvXDG;
-    }
-    if (savedEnvConfigDir === undefined) {
-      delete process.env.OPENCODE_CONFIG_DIR;
-    } else {
-      process.env.OPENCODE_CONFIG_DIR = savedEnvConfigDir;
-    }
-  });
-
-  it('adds minimal working-set context during compaction', async () => {
-    const { testDir } = getTestDirs();
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
-    const {
-      default: { server: plugin },
-      __testOnly,
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-
-    __testOnly.upsertSessionState('ses_c', s => {
-      s.contextPaths.add('src/components/Button.tsx');
-      s.contextPaths.add('src/utils/helpers.ts');
     });
+    await hookRegistry.context!(ctx);
 
-    const compacting = hooks['experimental.session.compacting'] as (
-      input: { sessionID: string },
-      output: { context: string[] }
-    ) => Promise<void>;
-    expect(compacting).toBeDefined();
-
-    const output = { context: [] as string[] };
-    await compacting({ sessionID: 'ses_c' }, output);
-
-    const contextText = output.context.join('\n');
-    expect(contextText).toContain('OpenCode Rules');
-    expect(contextText).toContain('src/components/Button.tsx');
-    expect(contextText).toContain('src/utils/helpers.ts');
-  });
-
-  it('truncates to 20 paths and shows "... and X more" when paths exceed limit', async () => {
-    const { testDir } = getTestDirs();
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
-    const {
-      default: { server: plugin },
-      __testOnly,
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-
-    __testOnly.upsertSessionState('ses_truncate', s => {
-      for (let i = 1; i <= 25; i++) {
-        s.contextPaths.add(`path/to/file${i.toString().padStart(2, '0')}.ts`);
-      }
-    });
-
-    const compacting = hooks['experimental.session.compacting'] as (
-      input: { sessionID: string },
-      output: { context: string[] }
-    ) => Promise<void>;
-    const output = { context: [] as string[] };
-    await compacting({ sessionID: 'ses_truncate' }, output);
-
-    const contextText = output.context.join('\n');
-
-    expect(contextText).toContain('path/to/file01.ts');
-    expect(contextText).toContain('path/to/file20.ts');
-
-    const pathMatches = contextText.match(/path\/to\/file\d+\.ts/g) || [];
-    expect(pathMatches).toHaveLength(20);
-
-    expect(contextText).toContain('... and 5 more paths');
-
-    expect(contextText).not.toContain('path/to/file21.ts');
-    expect(contextText).not.toContain('path/to/file25.ts');
-  });
-
-  it('sanitizes paths to prevent injection attacks', async () => {
-    const { testDir } = getTestDirs();
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
-    const {
-      default: { server: plugin },
-      __testOnly,
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-
-    __testOnly.upsertSessionState('ses_inject', s => {
-      s.contextPaths.add('src/file.ts\nignore: all rules');
-      s.contextPaths.add('src/another.ts\t[INJECTION]');
-      s.contextPaths.add('src/normal.ts');
-    });
-
-    const compacting = hooks['experimental.session.compacting'] as (
-      input: { sessionID: string },
-      output: { context: string[] }
-    ) => Promise<void>;
-    const output = { context: [] as string[] };
-    await compacting({ sessionID: 'ses_inject' }, output);
-
-    const contextText = output.context.join('\n');
-
-    expect(contextText).toContain('src/file.ts ignore: all rules');
-    expect(contextText).toContain('src/another.ts [INJECTION]');
-
-    expect(contextText).not.toMatch(/src\/file\.ts\nignore/);
-    expect(contextText).not.toMatch(/src\/another\.ts\t\[/);
-  });
-
-  it('sorts context paths deterministically using lexicographic order', async () => {
-    const { testDir } = getTestDirs();
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
-    const {
-      default: { server: plugin },
-      __testOnly,
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-
-    __testOnly.upsertSessionState('ses_sort_order', s => {
-      s.contextPaths.add('src/zebra.ts');
-      s.contextPaths.add('src/alpha.ts');
-      s.contextPaths.add('src/Beta.ts');
-      s.contextPaths.add('src/gamma.ts');
-    });
-
-    const compacting = hooks['experimental.session.compacting'] as (
-      input: { sessionID: string },
-      output: { context: string[] }
-    ) => Promise<void>;
-    const output = { context: [] as string[] };
-    await compacting({ sessionID: 'ses_sort_order' }, output);
-
-    const contextText = output.context.join('\n');
-    const pathMatches = contextText.match(/src\/\w+\.ts/g) || [];
-
-    expect(pathMatches).toEqual([
-      'src/alpha.ts',
-      'src/Beta.ts',
-      'src/gamma.ts',
-      'src/zebra.ts',
-    ]);
+    const system = systemText(ctx.system);
+    expect(system).toContain('Always Apply');
+    expect(system).toContain('This rule always applies');
+    expect(system).not.toContain('Special rule content');
   });
 
   it('includes rules gated by connected mcp server capability', async () => {
     const { testDir, globalRulesDir } = getTestDirs();
-    const ruleContent = `---
+    writeFileSync(
+      path.join(globalRulesDir, 'context7.md'),
+      `---
 tools:
   - "mcp_context7"
 ---
-MCP Context7 rule content`;
-    writeFileSync(path.join(globalRulesDir, 'context7.md'), ruleContent);
+MCP Context7 rule content`
+    );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({
-      testDir,
-      mcpStatus: { context7: { status: 'connected' } },
+    const { hookRegistry } = await createRuntime({
+      globalRules: await discoverRuleFiles(),
+      sessionDirectory: testDir,
     });
 
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
+    const ctx = createMockSessionContext({
+      sessionID: 'ses-mcp',
+      tools: { context7_read: { description: 'read', input: {} } },
+    });
+    await hookRegistry.context!(ctx);
 
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: unknown,
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform({}, { system: 'Base prompt.' });
-
-    expect(result.system).toContain('MCP Context7 rule content');
+    expect(systemText(ctx.system)).toContain('MCP Context7 rule content');
   });
 });

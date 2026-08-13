@@ -1,15 +1,20 @@
 /**
- * Tests for OpenCodeRulesPlugin runtime behavior and session state management.
+ * Tests for OpenCodeRulesRuntime (v2) behavior and session state management.
  * Split from index.test.ts for maintainability.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import path from 'node:path';
-import { writeFileSync, mkdirSync, readdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import {
   setupTestDirs,
   teardownTestDirs,
   getTestDirs,
-  createMockPluginInput,
+  createRuntime,
+  createMockSessionContext,
+  createMockToolExecuteBefore,
+  createMockToolExecuteAfter,
+  systemText,
+  toRules,
   saveCiEnvVars,
   clearCiEnvVars,
   restoreCiEnvVars,
@@ -24,13 +29,13 @@ import * as messagePathsModule from './message-paths.js';
 import * as utilsModule from './utils.js';
 import * as sessionStoreModule from './session-store.js';
 import * as runtimeContextModule from './runtime-context.js';
-import * as runtimeChatModule from './runtime-chat.js';
 import * as ruleHooksModule from './rule-hooks.js';
 import { __testOnly } from './index.js';
 import {
   _setStateDirForTesting,
   readActiveRulesState,
 } from './active-rules-state.js';
+import { RuleBlockError } from './runtime.js';
 import { clearRuleCache } from './utils.js';
 
 describe('module boundary tests', () => {
@@ -123,13 +128,6 @@ describe('module boundary tests', () => {
     expect(typeof runtimeContextModule.detectCiEnvironment).toBe('function');
   });
 
-  it('should export updateSessionFromChatMessage from runtime-chat module', () => {
-    expect(runtimeChatModule.updateSessionFromChatMessage).toBeDefined();
-    expect(typeof runtimeChatModule.updateSessionFromChatMessage).toBe(
-      'function'
-    );
-  });
-
   it('should detect CI environment correctly via runtime-context module', () => {
     const originalCI = process.env.CI;
 
@@ -158,538 +156,306 @@ describe('module boundary tests', () => {
   });
 });
 
-describe('OpenCodeRulesPlugin', () => {
-  let savedEnvXDG: string | undefined;
-  let savedEnvConfigDir: string | undefined;
-
+describe('runtime context and tool hooks (v2)', () => {
   beforeEach(() => {
     setupTestDirs();
-    savedEnvXDG = process.env.XDG_CONFIG_HOME;
-    savedEnvConfigDir = process.env.OPENCODE_CONFIG_DIR;
-    delete process.env.OPENCODE_CONFIG_DIR;
+    _setStateDirForTesting(path.join(getTestDirs().testDir, 'state'));
+    __testOnly.resetSessionState();
+    clearRuleCache();
   });
 
   afterEach(() => {
     teardownTestDirs();
-    vi.resetAllMocks();
+    _setStateDirForTesting(null);
     __testOnly.resetSessionState();
-    if (savedEnvXDG === undefined) {
-      delete process.env.XDG_CONFIG_HOME;
-    } else {
-      process.env.XDG_CONFIG_HOME = savedEnvXDG;
-    }
-    if (savedEnvConfigDir === undefined) {
-      delete process.env.OPENCODE_CONFIG_DIR;
-    } else {
-      process.env.OPENCODE_CONFIG_DIR = savedEnvConfigDir;
-    }
   });
 
-  it('should export a plugin module with id and server', async () => {
-    const { default: pluginModule } = await import('./index.js');
-    expect(pluginModule).toHaveProperty('id', 'opencode-rules');
-    expect(typeof pluginModule.server).toBe('function');
-  });
+  describe('context hook', () => {
+    it('injects rules into the system prompt', async () => {
+      const { globalRulesDir } = getTestDirs();
+      const rulePath = path.join(globalRulesDir, 'rule.md');
+      writeFileSync(rulePath, '# Test Rule\nDo this always');
+      const { hookRegistry } = await createRuntime({
+        globalRules: toRules([rulePath]),
+        sessionDirectory: getTestDirs().testDir,
+      });
 
-  it('should return transform hooks even when no rules exist', async () => {
-    const { testDir } = getTestDirs();
-    process.env.XDG_CONFIG_HOME = path.join(testDir, 'empty-config');
-    mkdirSync(path.join(testDir, 'empty-config', 'opencode', 'rules'), {
-      recursive: true,
+      const ctx = createMockSessionContext({
+        sessionID: 'ses_inject',
+        system: [{ type: 'text', text: 'You are a helpful assistant.' }],
+      });
+      await hookRegistry.context!(ctx);
+
+      expect(systemText(ctx.system)).toContain('You are a helpful assistant.');
+      expect(systemText(ctx.system)).toContain('OpenCode Rules');
+      expect(systemText(ctx.system)).toContain('Test Rule');
     });
 
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({
-      testDir: path.join(testDir, 'empty-project'),
+    it('appends rules to existing system prompt', async () => {
+      const { globalRulesDir } = getTestDirs();
+      const rulePath = path.join(globalRulesDir, 'rule.md');
+      writeFileSync(rulePath, '# My Rule');
+      const { hookRegistry } = await createRuntime({
+        globalRules: toRules([rulePath]),
+        sessionDirectory: getTestDirs().testDir,
+      });
+
+      const ctx = createMockSessionContext({
+        sessionID: 'ses_append',
+        system: [{ type: 'text', text: 'Original system prompt.' }],
+      });
+      await hookRegistry.context!(ctx);
+
+      expect(systemText(ctx.system)).toMatch(/^Original system prompt\./);
+      expect(systemText(ctx.system)).toContain('My Rule');
     });
 
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-    expect(hooks['experimental.chat.messages.transform']).toBeDefined();
-    expect(typeof hooks['experimental.chat.messages.transform']).toBe(
-      'function'
-    );
-    expect(hooks['experimental.chat.system.transform']).toBeDefined();
-    expect(typeof hooks['experimental.chat.system.transform']).toBe('function');
-  });
+    it('injects rules when the system prompt is empty', async () => {
+      const { globalRulesDir } = getTestDirs();
+      const rulePath = path.join(globalRulesDir, 'rule.md');
+      writeFileSync(rulePath, '# Rule Content');
+      const { hookRegistry } = await createRuntime({
+        globalRules: toRules([rulePath]),
+        sessionDirectory: getTestDirs().testDir,
+      });
 
-  it('should return transform hooks when rules exist', async () => {
-    const { testDir, globalRulesDir } = getTestDirs();
-    writeFileSync(path.join(globalRulesDir, 'rule.md'), '# Test Rule');
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+      const ctx = createMockSessionContext({ sessionID: 'ses_empty' });
+      await hookRegistry.context!(ctx);
 
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
+      expect(systemText(ctx.system)).toContain('OpenCode Rules');
+      expect(systemText(ctx.system)).toContain('Rule Content');
+    });
 
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-    expect(hooks['experimental.chat.messages.transform']).toBeDefined();
-    expect(hooks['experimental.chat.system.transform']).toBeDefined();
-  });
-
-  it('should inject rules into system prompt via system.transform hook', async () => {
-    const { testDir, globalRulesDir } = getTestDirs();
-    writeFileSync(
-      path.join(globalRulesDir, 'rule.md'),
-      '# Test Rule\nDo this always'
-    );
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: unknown,
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform(
-      {},
-      { system: 'You are a helpful assistant.' }
-    );
-
-    expect(result.system).toContain('You are a helpful assistant.');
-    expect(result.system).toContain('OpenCode Rules');
-    expect(result.system).toContain('Test Rule');
-  });
-
-  it('should append rules to existing system prompt', async () => {
-    const { testDir, globalRulesDir } = getTestDirs();
-    writeFileSync(path.join(globalRulesDir, 'rule.md'), '# My Rule');
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: unknown,
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform(
-      {},
-      { system: 'Original system prompt.' }
-    );
-
-    expect(result.system).toMatch(/^Original system prompt\./);
-    expect(result.system).toContain('My Rule');
-  });
-
-  it('should handle empty system prompt', async () => {
-    const { testDir, globalRulesDir } = getTestDirs();
-    writeFileSync(path.join(globalRulesDir, 'rule.md'), '# Rule Content');
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: unknown,
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform({}, { system: '' });
-
-    expect(result.system).toContain('OpenCode Rules');
-    expect(result.system).toContain('Rule Content');
-  });
-
-  it('should consolidate array system messages into single string', async () => {
-    const { testDir, globalRulesDir } = getTestDirs();
-    writeFileSync(path.join(globalRulesDir, 'rule.md'), '# My Rule');
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: unknown,
-      output: { system: string[] }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform(
-      {},
-      { system: ['First message.', 'Second message.'] }
-    );
-
-    expect(typeof result.system).toBe('string');
-    expect(result.system).toContain('First message.');
-    expect(result.system).toContain('Second message.');
-    expect(result.system).toContain('My Rule');
-  });
-
-  it('should handle empty array system messages', async () => {
-    const { testDir, globalRulesDir } = getTestDirs();
-    writeFileSync(path.join(globalRulesDir, 'rule.md'), '# My Rule');
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: unknown,
-      output: { system: string[] }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform({}, { system: [] });
-
-    expect(typeof result.system).toBe('string');
-    expect(result.system).toContain('My Rule');
-  });
-
-  it('should handle single-element array system message', async () => {
-    const { testDir, globalRulesDir } = getTestDirs();
-    writeFileSync(path.join(globalRulesDir, 'rule.md'), '# My Rule');
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: unknown,
-      output: { system: string[] }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform({}, { system: ['Only message.'] });
-
-    expect(typeof result.system).toBe('string');
-    expect(result.system).toContain('Only message.');
-    expect(result.system).toContain('My Rule');
-  });
-
-  it('should not modify messages in messages.transform hook', async () => {
-    const { testDir, globalRulesDir } = getTestDirs();
-    writeFileSync(path.join(globalRulesDir, 'rule.md'), '# Rule');
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-
-    const originalMessages = [
-      {
-        role: 'user',
-        parts: [{ sessionID: 'test-123', type: 'text', text: 'Hello' }],
-      },
-    ];
-
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-    const messagesTransform = hooks['experimental.chat.messages.transform'] as (
-      input: unknown,
-      output: { messages: unknown[] }
-    ) => Promise<{ messages: unknown[] }>;
-    const result = await messagesTransform({}, { messages: originalMessages });
-
-    expect(result.messages).toEqual(originalMessages);
-  });
-
-  it('seeds session state once from messages.transform and does not rescan', async () => {
-    const { testDir } = getTestDirs();
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-    const transform = hooks['experimental.chat.messages.transform'] as (
-      input: unknown,
-      output: { messages: unknown[] }
-    ) => Promise<{ messages: unknown[] }>;
-
-    const messages = {
-      messages: [
+    it('does not modify messages during context dispatch', async () => {
+      const { hookRegistry } = await createRuntime({
+        sessionDirectory: getTestDirs().testDir,
+      });
+      const originalMessages = [
         {
-          info: { role: 'assistant' },
-          parts: [
+          role: 'user' as const,
+          content: [{ type: 'text' as const, text: 'Hello' }],
+        },
+      ];
+
+      const ctx = createMockSessionContext({
+        sessionID: 'ses_messages',
+        messages: originalMessages,
+      });
+      await hookRegistry.context!(ctx);
+
+      expect(ctx.messages).toEqual(originalMessages);
+    });
+
+    it('seeds session state once from message history and does not rescan', async () => {
+      const { hookRegistry } = await createRuntime({
+        sessionDirectory: getTestDirs().testDir,
+      });
+      const messages = [
+        {
+          role: 'assistant' as const,
+          content: [
             {
-              sessionID: 'ses_seed',
-              type: 'tool-invocation',
-              toolInvocation: {
-                toolName: 'read',
-                args: { filePath: 'src/a.ts' },
-              },
+              type: 'tool-call' as const,
+              id: 'c1',
+              name: 'read',
+              input: { filePath: 'src/a.ts' },
             },
           ],
         },
-      ],
-    };
+      ];
 
-    await transform({}, messages);
-    await transform({}, messages);
+      await hookRegistry.context!(
+        createMockSessionContext({ sessionID: 'ses_seed', messages })
+      );
+      await hookRegistry.context!(
+        createMockSessionContext({ sessionID: 'ses_seed', messages })
+      );
 
-    expect(__testOnly.getSeedCount('ses_seed')).toBe(1);
-  });
-  it('queues PreToolUse hook injection when bash command matches', async () => {
-    const { testDir, globalRulesDir } = getTestDirs();
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+      expect(__testOnly.getSeedCount('ses_seed')).toBe(1);
+      const snapshot = __testOnly.getSessionStateSnapshot('ses_seed');
+      expect(snapshot?.contextPaths.has('src/a.ts')).toBe(true);
+    });
 
-    // Clear rule cache to ensure fresh reads
-    utilsModule.clearRuleCache();
+    it('delivers pending PreToolUse injection in the next context dispatch', async () => {
+      const { globalRulesDir } = getTestDirs();
+      const rulePath = path.join(globalRulesDir, 'security.mdc');
+      writeFileSync(
+        rulePath,
+        `---\nhooks:\n  - type: PreToolUse\n    tool: bash\n    match: "0\\\\.0\\\\.0\\\\.0"\n---\n\nDo not bind to 0.0.0.0.`
+      );
+      const { hookRegistry } = await createRuntime({
+        globalRules: toRules([rulePath]),
+        sessionDirectory: getTestDirs().testDir,
+      });
 
-    writeFileSync(
-      path.join(globalRulesDir, 'security.mdc'),
-      `---\nhooks:\n  - type: PreToolUse\n    tool: bash\n    match: "0\\\\.0\\\\.0\\\\.0"\n---\n\nDo not bind to 0.0.0.0.`
-    );
+      await hookRegistry['execute.before']!(
+        createMockToolExecuteBefore({
+          tool: 'bash',
+          sessionID: 'ses_deliver',
+          input: { command: 'node server.js --host 0.0.0.0' },
+        })
+      );
 
-    const {
-      default: { server: plugin },
-      __testOnly,
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
+      const ctx = createMockSessionContext({
+        sessionID: 'ses_deliver',
+        system: [{ type: 'text', text: 'Base prompt.' }],
+      });
+      await hookRegistry.context!(ctx);
 
-    const before = hooks['tool.execute.before'] as (
-      input: { tool: string; sessionID: string; callID: string },
-      output: { args: Record<string, unknown> }
-    ) => Promise<void>;
+      expect(systemText(ctx.system)).toContain('Do not bind to 0.0.0.0');
 
-    await before(
-      { tool: 'bash', sessionID: 'ses_pre', callID: 'call_1' },
-      { args: { command: 'node server.js --host 0.0.0.0' } }
-    );
-
-    const snapshot = __testOnly.getSessionStateSnapshot('ses_pre');
-    expect(snapshot?.pendingHookInjections).toHaveLength(1);
-    expect(snapshot?.pendingHookInjections?.[0]).toContain(
-      'Do not bind to 0.0.0.0'
-    );
-  });
-
-  it('registers tool.execute.after hook and queues PostToolUse injection', async () => {
-    clearRuleCache();
-    const { testDir, globalRulesDir } = getTestDirs();
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
-    writeFileSync(
-      path.join(globalRulesDir, 'steering.mdc'),
-      `---\nhooks:\n  - type: PostToolUse\n    tool: bash\n    match: "grep"\n---\n\nUse ripgrep (rg) instead of grep.`
-    );
-
-    const {
-      default: { server: plugin },
-      __testOnly,
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-
-    const after = hooks['tool.execute.after'] as (
-      input: {
-        tool: string;
-        sessionID: string;
-        callID: string;
-        args: Record<string, unknown>;
-      },
-      output: { title: string; output: string; metadata: unknown }
-    ) => Promise<void>;
-    expect(after).toBeDefined();
-
-    await after(
-      {
-        tool: 'bash',
-        sessionID: 'ses_post',
-        callID: 'call_1',
-        args: { command: 'grep foo' },
-      },
-      { title: '', output: '', metadata: {} }
-    );
-
-    const snapshot = __testOnly.getSessionStateSnapshot('ses_post');
-    expect(snapshot?.pendingHookInjections).toHaveLength(1);
-    expect(snapshot?.pendingHookInjections?.[0]).toContain('Use ripgrep');
+      // Pending injections should be cleared after delivery
+      const snapshot = __testOnly.getSessionStateSnapshot('ses_deliver');
+      expect(snapshot?.pendingHookInjections).toHaveLength(0);
+    });
   });
 
-  it('delivers pending PreToolUse injection in system transform', async () => {
-    clearRuleCache();
-    const { testDir, globalRulesDir } = getTestDirs();
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+  describe('tool.execute.before', () => {
+    it('queues PreToolUse hook injection when bash command matches', async () => {
+      const { globalRulesDir } = getTestDirs();
+      const rulePath = path.join(globalRulesDir, 'security.mdc');
+      writeFileSync(
+        rulePath,
+        `---\nhooks:\n  - type: PreToolUse\n    tool: bash\n    match: "0\\\\.0\\\\.0\\\\.0"\n---\n\nDo not bind to 0.0.0.0.`
+      );
+      const { hookRegistry } = await createRuntime({
+        globalRules: toRules([rulePath]),
+        sessionDirectory: getTestDirs().testDir,
+      });
 
-    writeFileSync(
-      path.join(globalRulesDir, 'security.mdc'),
-      `---\nhooks:\n  - type: PreToolUse\n    tool: bash\n    match: "0\\\\.0\\\\.0\\\\.0"\n---\n\nDo not bind to 0.0.0.0.`
-    );
+      await hookRegistry['execute.before']!(
+        createMockToolExecuteBefore({
+          tool: 'bash',
+          sessionID: 'ses_pre',
+          input: { command: 'node server.js --host 0.0.0.0' },
+        })
+      );
 
-    const {
-      default: { server: plugin },
-      __testOnly,
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
+      const snapshot = __testOnly.getSessionStateSnapshot('ses_pre');
+      expect(snapshot?.pendingHookInjections).toHaveLength(1);
+      expect(snapshot?.pendingHookInjections?.[0]).toContain(
+        'Do not bind to 0.0.0.0'
+      );
+    });
 
-    const before = hooks['tool.execute.before'] as (
-      input: { tool: string; sessionID: string; callID: string },
-      output: { args: Record<string, unknown> }
-    ) => Promise<void>;
-    await before(
-      { tool: 'bash', sessionID: 'ses_deliver', callID: 'call_1' },
-      { args: { command: 'node server.js --host 0.0.0.0' } }
-    );
+    it('throws when PreToolUse hook has block: true', async () => {
+      const { globalRulesDir } = getTestDirs();
+      const rulePath = path.join(globalRulesDir, 'blocker.mdc');
+      writeFileSync(
+        rulePath,
+        `---\nhooks:\n  - type: PreToolUse\n    tool: bash\n    match: "0\\\\.0\\\\.0\\\\.0"\n    block: true\n---\n\nBlocked.`
+      );
+      const { hookRegistry } = await createRuntime({
+        globalRules: toRules([rulePath]),
+        sessionDirectory: getTestDirs().testDir,
+      });
 
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: { sessionID?: string },
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform(
-      { sessionID: 'ses_deliver' },
-      { system: 'Base prompt.' }
-    );
+      const blocked = hookRegistry['execute.before']!(
+        createMockToolExecuteBefore({
+          tool: 'bash',
+          sessionID: 'ses_block',
+          input: { command: 'node server.js --host 0.0.0.0' },
+        })
+      );
+      await expect(blocked).rejects.toBeInstanceOf(RuleBlockError);
+      await expect(blocked).rejects.toThrow('[opencode-rules] Blocked by rule');
+    });
 
-    expect(result.system).toContain('Do not bind to 0.0.0.0');
+    it('includes glob-conditional rule when tool hook records matching file path', async () => {
+      const { globalRulesDir } = getTestDirs();
+      const rulePath = path.join(globalRulesDir, 'typescript.mdc');
+      writeFileSync(
+        rulePath,
+        `---\nglobs:\n  - "src/components/**/*.tsx"\n---\n\nUse React best practices.`
+      );
+      const { hookRegistry } = await createRuntime({
+        globalRules: toRules([rulePath]),
+        sessionDirectory: getTestDirs().testDir,
+      });
 
-    // Pending injections should be cleared after delivery
-    const snapshot = __testOnly.getSessionStateSnapshot('ses_deliver');
-    expect(snapshot?.pendingHookInjections).toHaveLength(0);
+      await hookRegistry['execute.before']!(
+        createMockToolExecuteBefore({
+          tool: 'read',
+          sessionID: 'ses_glob',
+          input: { filePath: 'src/components/Button.tsx' },
+        })
+      );
+
+      const ctx = createMockSessionContext({ sessionID: 'ses_glob' });
+      await hookRegistry.context!(ctx);
+
+      expect(systemText(ctx.system)).toContain('React best practices');
+    });
   });
 
-  it('throws when PreToolUse hook has block: true', async () => {
-    clearRuleCache();
-    const { testDir, globalRulesDir } = getTestDirs();
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+  describe('tool.execute.after', () => {
+    it('queues PostToolUse injection', async () => {
+      const { globalRulesDir } = getTestDirs();
+      const rulePath = path.join(globalRulesDir, 'steering.mdc');
+      writeFileSync(
+        rulePath,
+        `---\nhooks:\n  - type: PostToolUse\n    tool: bash\n    match: "grep"\n---\n\nUse ripgrep (rg) instead of grep.`
+      );
+      const { hookRegistry } = await createRuntime({
+        globalRules: toRules([rulePath]),
+        sessionDirectory: getTestDirs().testDir,
+      });
 
-    writeFileSync(
-      path.join(globalRulesDir, 'blocker.mdc'),
-      `---\nhooks:\n  - type: PreToolUse\n    tool: bash\n    match: "0\\\\.0\\\\.0\\\\.0"\n    block: true\n---\n\nBlocked.`
-    );
+      await hookRegistry['execute.after']!(
+        createMockToolExecuteAfter({
+          tool: 'bash',
+          sessionID: 'ses_post',
+          input: { command: 'grep foo' },
+        })
+      );
 
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
+      const snapshot = __testOnly.getSessionStateSnapshot('ses_post');
+      expect(snapshot?.pendingHookInjections).toHaveLength(1);
+      expect(snapshot?.pendingHookInjections?.[0]).toContain('Use ripgrep');
+    });
 
-    const before = hooks['tool.execute.before'] as (
-      input: { tool: string; sessionID: string; callID: string },
-      output: { args: Record<string, unknown> }
-    ) => Promise<void>;
+    it('executes run side-effect when PostToolUse hook fires', async () => {
+      const { testDir, globalRulesDir } = getTestDirs();
+      const markerFile = path.join(testDir, 'side-effect-marker.txt');
+      const rulePath = path.join(globalRulesDir, 'side-effect.mdc');
+      writeFileSync(
+        rulePath,
+        `---\nhooks:\n  - type: PostToolUse\n    tool: bash\n    match: "grep"\n    run: "echo fired > ${markerFile}"\n---\n\nSide effect rule.`
+      );
+      const { hookRegistry } = await createRuntime({
+        globalRules: toRules([rulePath]),
+        sessionDirectory: testDir,
+      });
 
-    await expect(
-      before(
-        { tool: 'bash', sessionID: 'ses_block', callID: 'call_1' },
-        { args: { command: 'node server.js --host 0.0.0.0' } }
-      )
-    ).rejects.toThrow('[opencode-rules] Blocked by rule');
-  });
+      await hookRegistry['execute.after']!(
+        createMockToolExecuteAfter({
+          tool: 'bash',
+          sessionID: 'ses_run',
+          input: { command: 'grep foo' },
+        })
+      );
 
-  it('executes run side-effect when PostToolUse hook fires', async () => {
-    clearRuleCache();
-    const { testDir, globalRulesDir } = getTestDirs();
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-    const markerFile = path.join(testDir, 'side-effect-marker.txt');
-
-    writeFileSync(
-      path.join(globalRulesDir, 'side-effect.mdc'),
-      `---\nhooks:\n  - type: PostToolUse\n    tool: bash\n    match: "grep"\n    run: "echo fired > ${markerFile}"\n---\n\nSide effect rule.`
-    );
-
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-
-    const after = hooks['tool.execute.after'] as (
-      input: {
-        tool: string;
-        sessionID: string;
-        callID: string;
-        args: Record<string, unknown>;
-      },
-      output: { title: string; output: string; metadata: unknown }
-    ) => Promise<void>;
-
-    await after(
-      {
-        tool: 'bash',
-        sessionID: 'ses_run',
-        callID: 'call_1',
-        args: { command: 'grep foo' },
-      },
-      { title: '', output: '', metadata: {} }
-    );
-
-    // Allow async side-effect to complete
-    await new Promise(resolve => setTimeout(resolve, 100));
-
-    const { readFileSync } = await import('fs');
-    const marker = readFileSync(markerFile, 'utf-8').trim();
-    expect(marker).toBe('fired');
+      const marker = readFileSync(markerFile, 'utf-8').trim();
+      expect(marker).toBe('fired');
+    });
   });
 });
 
 describe('SessionState', () => {
-  let savedEnvXDG: string | undefined;
-  let savedEnvConfigDir: string | undefined;
-
   beforeEach(() => {
     setupTestDirs();
-    savedEnvXDG = process.env.XDG_CONFIG_HOME;
-    savedEnvConfigDir = process.env.OPENCODE_CONFIG_DIR;
-    delete process.env.OPENCODE_CONFIG_DIR;
-  });
-
-  afterEach(async () => {
-    teardownTestDirs();
-    const { __testOnly } = await import('./index.js');
+    _setStateDirForTesting(path.join(getTestDirs().testDir, 'state'));
     __testOnly.resetSessionState();
-    if (savedEnvXDG === undefined) {
-      delete process.env.XDG_CONFIG_HOME;
-    } else {
-      process.env.XDG_CONFIG_HOME = savedEnvXDG;
-    }
-    if (savedEnvConfigDir === undefined) {
-      delete process.env.OPENCODE_CONFIG_DIR;
-    } else {
-      process.env.OPENCODE_CONFIG_DIR = savedEnvConfigDir;
-    }
+    clearRuleCache();
   });
 
-  it('prunes session state when over limit', async () => {
-    const { __testOnly } = await import('./index.js');
+  afterEach(() => {
+    teardownTestDirs();
+    _setStateDirForTesting(null);
+    __testOnly.resetSessionState();
+  });
 
+  it('prunes session state when over limit', () => {
     __testOnly.setSessionStateLimit(2);
     __testOnly.upsertSessionState('ses_1', s => void (s.lastUpdated = 1));
     __testOnly.upsertSessionState('ses_2', s => void (s.lastUpdated = 2));
@@ -701,241 +467,46 @@ describe('SessionState', () => {
     expect(ids).toContain('ses_3');
   });
 
-  it('updates lastUserPrompt from chat.message', async () => {
-    const { testDir } = getTestDirs();
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
+  it('captures lastUserPrompt from user messages', async () => {
+    const { hookRegistry } = await createRuntime({
+      sessionDirectory: getTestDirs().testDir,
+    });
 
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-    const hook = hooks['chat.message'] as (
-      input: { sessionID: string },
-      output: { message: { role: string }; parts: unknown[] }
-    ) => Promise<void>;
-    expect(hook).toBeTypeOf('function');
-
-    await hook(
-      { sessionID: 'ses_test' },
-      {
-        message: { role: 'user' },
-        parts: [{ type: 'text', text: 'please add tests' }],
-      }
+    await hookRegistry.context!(
+      createMockSessionContext({
+        sessionID: 'ses_test',
+        messages: [
+          {
+            role: 'user',
+            content: [{ type: 'text', text: 'please add tests' }],
+          },
+        ],
+      })
     );
 
-    const { __testOnly } = await import('./index.js');
     const snapshot = __testOnly.getSessionStateSnapshot('ses_test');
     expect(snapshot?.lastUserPrompt).toBe('please add tests');
   });
 
-  it('extracts text from mixed parts using shared extraction logic', async () => {
-    const { testDir } = getTestDirs();
-    const {
-      default: { server: plugin },
-      __testOnly,
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
+  it('updates model and agent on subsequent context dispatches', async () => {
+    const { hookRegistry } = await createRuntime({
+      sessionDirectory: getTestDirs().testDir,
+    });
 
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-    const hook = hooks['chat.message'] as (
-      input: { sessionID: string },
-      output: { message: { role: string }; parts: unknown[] }
-    ) => Promise<void>;
-
-    await hook(
-      { sessionID: 'ses_mixed' },
-      {
-        message: { role: 'user' },
-        parts: [
-          { type: 'text', text: 'typed' },
-          { text: 'untyped' },
-          { type: 'image', data: 'binary' },
-          { type: 'text', text: 'skip', synthetic: true },
-          { type: 'text', text: 'final' },
-        ],
-      }
-    );
-
-    const snapshot = __testOnly.getSessionStateSnapshot('ses_mixed');
-    expect(snapshot?.lastUserPrompt).toBe('typed untyped final');
-  });
-
-  it('stores lastModelID from chat.message for user messages', async () => {
-    const { testDir } = getTestDirs();
-    const {
-      default: { server: plugin },
-      __testOnly,
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-    const hook = hooks['chat.message'] as (
-      input: { sessionID: string; model?: { modelID: string } },
-      output: { message: { role: string }; parts: unknown[] }
-    ) => Promise<void>;
-
-    await hook(
-      { sessionID: 'ses_model', model: { modelID: 'claude-opus' } },
-      {
-        message: { role: 'user' },
-        parts: [{ type: 'text', text: 'hello' }],
-      }
-    );
-
-    const snapshot = __testOnly.getSessionStateSnapshot('ses_model');
-    expect(snapshot?.lastModelID).toBe('claude-opus');
-  });
-
-  it('stores lastAgentType from chat.message for user messages', async () => {
-    const { testDir } = getTestDirs();
-    const {
-      default: { server: plugin },
-      __testOnly,
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-    const hook = hooks['chat.message'] as (
-      input: { sessionID: string; agent?: string },
-      output: { message: { role: string }; parts: unknown[] }
-    ) => Promise<void>;
-
-    await hook(
-      { sessionID: 'ses_agent', agent: 'programmer' },
-      {
-        message: { role: 'user' },
-        parts: [{ type: 'text', text: 'hello' }],
-      }
-    );
-
-    const snapshot = __testOnly.getSessionStateSnapshot('ses_agent');
-    expect(snapshot?.lastAgentType).toBe('programmer');
-  });
-
-  it('stores both model and agent from chat.message', async () => {
-    const { testDir } = getTestDirs();
-    const {
-      default: { server: plugin },
-      __testOnly,
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-    const hook = hooks['chat.message'] as (
-      input: { sessionID: string; model?: { modelID: string }; agent?: string },
-      output: { message: { role: string }; parts: unknown[] }
-    ) => Promise<void>;
-
-    await hook(
-      {
-        sessionID: 'ses_both',
-        model: { modelID: 'gpt-5' },
-        agent: 'coder',
-      },
-      {
-        message: { role: 'user' },
-        parts: [{ type: 'text', text: 'hello' }],
-      }
-    );
-
-    const snapshot = __testOnly.getSessionStateSnapshot('ses_both');
-    expect(snapshot?.lastModelID).toBe('gpt-5');
-    expect(snapshot?.lastAgentType).toBe('coder');
-  });
-
-  it('does not update model/agent for non-user messages', async () => {
-    const { testDir } = getTestDirs();
-    const {
-      default: { server: plugin },
-      __testOnly,
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-    const hook = hooks['chat.message'] as (
-      input: { sessionID: string; model?: { modelID: string }; agent?: string },
-      output: { message: { role: string }; parts: unknown[] }
-    ) => Promise<void>;
-
-    await hook(
-      {
-        sessionID: 'ses_nonuser',
-        model: { modelID: 'initial-model' },
-        agent: 'initial-agent',
-      },
-      {
-        message: { role: 'user' },
-        parts: [{ type: 'text', text: 'hello' }],
-      }
-    );
-
-    await hook(
-      {
-        sessionID: 'ses_nonuser',
-        model: { modelID: 'new-model' },
-        agent: 'new-agent',
-      },
-      {
-        message: { role: 'assistant' },
-        parts: [{ type: 'text', text: 'response' }],
-      }
-    );
-
-    const snapshot = __testOnly.getSessionStateSnapshot('ses_nonuser');
-    expect(snapshot?.lastModelID).toBe('initial-model');
-    expect(snapshot?.lastAgentType).toBe('initial-agent');
-  });
-
-  it('updates model/agent on subsequent user messages', async () => {
-    const { testDir } = getTestDirs();
-    const {
-      default: { server: plugin },
-      __testOnly,
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-    const hook = hooks['chat.message'] as (
-      input: { sessionID: string; model?: { modelID: string }; agent?: string },
-      output: { message: { role: string }; parts: unknown[] }
-    ) => Promise<void>;
-
-    await hook(
-      {
+    await hookRegistry.context!(
+      createMockSessionContext({
         sessionID: 'ses_update',
-        model: { modelID: 'model-v1' },
+        model: { id: 'model-v1', providerID: 'test' },
         agent: 'agent-v1',
-      },
-      {
-        message: { role: 'user' },
-        parts: [{ type: 'text', text: 'first message' }],
-      }
+      })
     );
 
-    await hook(
-      {
+    await hookRegistry.context!(
+      createMockSessionContext({
         sessionID: 'ses_update',
-        model: { modelID: 'model-v2' },
+        model: { id: 'model-v2', providerID: 'test' },
         agent: 'agent-v2',
-      },
-      {
-        message: { role: 'user' },
-        parts: [{ type: 'text', text: 'second message' }],
-      }
+      })
     );
 
     const snapshot = __testOnly.getSessionStateSnapshot('ses_update');
@@ -943,140 +514,63 @@ describe('SessionState', () => {
     expect(snapshot?.lastAgentType).toBe('agent-v2');
   });
 
-  it('includes glob-conditional rule when tool hook records matching file path', async () => {
-    const { testDir, globalRulesDir } = getTestDirs();
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
-    writeFileSync(
-      path.join(globalRulesDir, 'typescript.mdc'),
-      `---\nglobs:\n  - "src/components/**/*.tsx"\n---\n\nUse React best practices.`
-    );
-
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-
-    const before = hooks['tool.execute.before'] as (
-      input: { tool: string; sessionID: string; callID: string },
-      output: { args: Record<string, unknown> }
-    ) => Promise<void>;
-    expect(before).toBeDefined();
-
-    await before(
-      { tool: 'read', sessionID: 'ses_1', callID: 'call_1' },
-      { args: { filePath: 'src/components/Button.tsx' } }
-    );
-
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: { sessionID?: string },
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform(
-      { sessionID: 'ses_1' },
-      { system: 'Base prompt.' }
-    );
-
-    expect(result.system).toContain('React best practices');
-  });
-
   it('skips full rule injection when session is compacting', async () => {
-    const { testDir, globalRulesDir } = getTestDirs();
-    writeFileSync(
-      path.join(globalRulesDir, 'always.md'),
-      '# Always\nAlways apply this'
-    );
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
-    const {
-      default: { server: plugin },
-      __testOnly,
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
+    const { globalRulesDir } = getTestDirs();
+    const rulePath = path.join(globalRulesDir, 'always.md');
+    writeFileSync(rulePath, '# Always\nAlways apply this');
+    const { hookRegistry } = await createRuntime({
+      globalRules: toRules([rulePath]),
+      sessionDirectory: getTestDirs().testDir,
+    });
 
     __testOnly.upsertSessionState(
       'ses_compact',
       s => void (s.isCompacting = true)
     );
 
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: { sessionID?: string },
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform(
-      { sessionID: 'ses_compact' },
-      { system: 'Base prompt.' }
-    );
+    const ctx = createMockSessionContext({
+      sessionID: 'ses_compact',
+      system: [{ type: 'text', text: 'Base prompt.' }],
+    });
+    await hookRegistry.context!(ctx);
 
-    expect(result.system).toBe('Base prompt.');
+    expect(ctx.system).toHaveLength(1);
+    expect(systemText(ctx.system)).toBe('Base prompt.');
   });
 });
 
 describe('Active rules state persistence', () => {
-  let savedEnvXDG: string | undefined;
-  let savedEnvConfigDir: string | undefined;
   let stateDir: string;
 
   beforeEach(() => {
     setupTestDirs();
-    savedEnvXDG = process.env.XDG_CONFIG_HOME;
-    savedEnvConfigDir = process.env.OPENCODE_CONFIG_DIR;
-    delete process.env.OPENCODE_CONFIG_DIR;
-    const { testDir } = getTestDirs();
-    stateDir = path.join(testDir, 'state');
+    __testOnly.resetSessionState();
+    clearRuleCache();
+    stateDir = path.join(getTestDirs().testDir, 'state');
     mkdirSync(stateDir, { recursive: true });
     _setStateDirForTesting(stateDir);
   });
 
-  afterEach(async () => {
+  afterEach(() => {
     teardownTestDirs();
     _setStateDirForTesting(null);
-    const { __testOnly } = await import('./index.js');
     __testOnly.resetSessionState();
-    if (savedEnvXDG === undefined) {
-      delete process.env.XDG_CONFIG_HOME;
-    } else {
-      process.env.XDG_CONFIG_HOME = savedEnvXDG;
-    }
-    if (savedEnvConfigDir === undefined) {
-      delete process.env.OPENCODE_CONFIG_DIR;
-    } else {
-      process.env.OPENCODE_CONFIG_DIR = savedEnvConfigDir;
-    }
   });
 
   it('writes matched rule paths to state file when rules match', async () => {
     const { testDir, globalRulesDir } = getTestDirs();
     const rulePath = path.join(globalRulesDir, 'always-apply.md');
     writeFileSync(rulePath, '# Always Apply\nThis rule always applies.');
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
+    const { hookRegistry } = await createRuntime({
+      globalRules: toRules([rulePath]),
+      sessionDirectory: testDir,
+    });
 
     const sessionID = 'ses-state-match';
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: { sessionID?: string },
-      output: { system: string }
-    ) => Promise<{ system: string }>;
+    const ctx = createMockSessionContext({ sessionID });
+    await hookRegistry.context!(ctx);
 
-    const result = await systemTransform(
-      { sessionID },
-      { system: 'Base prompt.' }
-    );
-
-    expect(result.system).toContain('Always Apply');
+    expect(systemText(ctx.system)).toContain('Always Apply');
 
     // Wait for fire-and-forget write to complete
     await new Promise(resolve => setTimeout(resolve, 50));
@@ -1100,29 +594,17 @@ model:
 
 Conditional rule for gpt-5 only.`
     );
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
+    const { hookRegistry } = await createRuntime({
+      globalRules: toRules([rulePath]),
+      sessionDirectory: testDir,
+    });
 
     const sessionID = 'ses-state-nomatch';
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: { sessionID?: string },
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-
-    const result = await systemTransform(
-      { sessionID },
-      { system: 'Base prompt.' }
-    );
+    const ctx = createMockSessionContext({ sessionID });
+    await hookRegistry.context!(ctx);
 
     // No rules should match (model is not gpt-5)
-    expect(result.system).not.toContain('Conditional rule');
+    expect(systemText(ctx.system)).toBe('');
 
     // Wait for fire-and-forget write to complete
     await new Promise(resolve => setTimeout(resolve, 50));
@@ -1136,23 +618,13 @@ Conditional rule for gpt-5 only.`
   it('does not write state when sessionID is missing', async () => {
     const { testDir, globalRulesDir } = getTestDirs();
     writeFileSync(path.join(globalRulesDir, 'rule.md'), '# Test Rule\nContent');
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+    const { hookRegistry } = await createRuntime({
+      globalRules: toRules([path.join(globalRulesDir, 'rule.md')]),
+      sessionDirectory: testDir,
+    });
 
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: { sessionID?: string },
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-
-    // Call without sessionID
-    await systemTransform({}, { system: 'Base prompt.' });
+    // Call with empty sessionID
+    await hookRegistry.context!(createMockSessionContext({ sessionID: '' }));
 
     // Wait briefly
     await new Promise(resolve => setTimeout(resolve, 50));
@@ -1194,171 +666,83 @@ describe('session-store runtime exports', () => {
 
 describe('CI environment detection', () => {
   let savedCiEnv: CiEnvSnapshot;
-  let savedXDG: string | undefined;
-  let savedConfigDir: string | undefined;
 
   beforeEach(() => {
     setupTestDirs();
     savedCiEnv = saveCiEnvVars();
-    savedXDG = process.env.XDG_CONFIG_HOME;
-    savedConfigDir = process.env.OPENCODE_CONFIG_DIR;
-    delete process.env.OPENCODE_CONFIG_DIR;
+    _setStateDirForTesting(path.join(getTestDirs().testDir, 'state'));
+    __testOnly.resetSessionState();
+    clearRuleCache();
   });
 
-  afterEach(async () => {
+  afterEach(() => {
     teardownTestDirs();
     restoreCiEnvVars(savedCiEnv);
-    const { __testOnly } = await import('./index.js');
+    _setStateDirForTesting(null);
     __testOnly.resetSessionState();
-    if (savedXDG === undefined) {
-      delete process.env.XDG_CONFIG_HOME;
-    } else {
-      process.env.XDG_CONFIG_HOME = savedXDG;
-    }
-    if (savedConfigDir === undefined) {
-      delete process.env.OPENCODE_CONFIG_DIR;
-    } else {
-      process.env.OPENCODE_CONFIG_DIR = savedConfigDir;
-    }
   });
 
-  it('should include ci-conditional rule when CI env var is set', async () => {
-    const { testDir, globalRulesDir } = getTestDirs();
-    writeFileSync(
-      path.join(globalRulesDir, 'ci-rule.mdc'),
-      `---\nci: true\n---\n\nCI-specific guidelines.`
-    );
+  async function contextSystemWithRule(ruleContent: string): Promise<string> {
+    const { globalRulesDir } = getTestDirs();
+    const rulePath = path.join(globalRulesDir, 'ci-rule.mdc');
+    writeFileSync(rulePath, ruleContent);
+    const { hookRegistry } = await createRuntime({
+      globalRules: toRules([rulePath]),
+      sessionDirectory: getTestDirs().testDir,
+    });
 
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+    const ctx = createMockSessionContext({ sessionID: 'ses-ci' });
+    await hookRegistry.context!(ctx);
+    return systemText(ctx.system);
+  }
+
+  it('should include ci-conditional rule when CI env var is set', async () => {
     clearCiEnvVars();
     process.env.CI = 'true';
 
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
+    const system = await contextSystemWithRule(
+      `---\nci: true\n---\n\nCI-specific guidelines.`
     );
-
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: unknown,
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform({}, { system: 'Base prompt.' });
-
-    expect(result.system).toContain('CI-specific guidelines');
+    expect(system).toContain('CI-specific guidelines');
   });
 
   it('should NOT include ci:true rule when CI env var is "false"', async () => {
-    const { testDir, globalRulesDir } = getTestDirs();
-    writeFileSync(
-      path.join(globalRulesDir, 'ci-only-rule.mdc'),
-      `---\nci: true\n---\n\nCI-only guidelines.`
-    );
-
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
     clearCiEnvVars();
     process.env.CI = 'false';
 
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
+    const system = await contextSystemWithRule(
+      `---\nci: true\n---\n\nCI-only guidelines.`
     );
-
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: unknown,
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform({}, { system: 'Base prompt.' });
-
-    expect(result.system).not.toContain('CI-only guidelines');
+    expect(system).not.toContain('CI-only guidelines');
   });
 
   it('should NOT include ci:true rule when CI env var is "0"', async () => {
-    const { testDir, globalRulesDir } = getTestDirs();
-    writeFileSync(
-      path.join(globalRulesDir, 'ci-zero-rule.mdc'),
-      `---\nci: true\n---\n\nCI-zero guidelines.`
-    );
-
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
     clearCiEnvVars();
     process.env.CI = '0';
 
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
+    const system = await contextSystemWithRule(
+      `---\nci: true\n---\n\nCI-zero guidelines.`
     );
-
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: unknown,
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform({}, { system: 'Base prompt.' });
-
-    expect(result.system).not.toContain('CI-zero guidelines');
+    expect(system).not.toContain('CI-zero guidelines');
   });
 
   it('should detect CI from provider vars when CI env var is not set', async () => {
-    const { testDir, globalRulesDir } = getTestDirs();
-    writeFileSync(
-      path.join(globalRulesDir, 'ci-fallback-rule.mdc'),
-      `---\nci: true\n---\n\nCI-fallback guidelines.`
-    );
-
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
     clearCiEnvVars();
     process.env.GITHUB_ACTIONS = 'true';
 
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
+    const system = await contextSystemWithRule(
+      `---\nci: true\n---\n\nCI-fallback guidelines.`
     );
-
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: unknown,
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform({}, { system: 'Base prompt.' });
-
-    expect(result.system).toContain('CI-fallback guidelines');
+    expect(system).toContain('CI-fallback guidelines');
   });
 
   it('should NOT detect CI when BUILD_NUMBER is "false"', async () => {
-    const { testDir, globalRulesDir } = getTestDirs();
-    writeFileSync(
-      path.join(globalRulesDir, 'ci-build-number-rule.mdc'),
-      `---\nci: true\n---\n\nCI-build-number guidelines.`
-    );
-
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
     clearCiEnvVars();
     process.env.BUILD_NUMBER = 'false';
 
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
+    const system = await contextSystemWithRule(
+      `---\nci: true\n---\n\nCI-build-number guidelines.`
     );
-
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: unknown,
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform({}, { system: 'Base prompt.' });
-
-    expect(result.system).not.toContain('CI-build-number guidelines');
+    expect(system).not.toContain('CI-build-number guidelines');
   });
 });

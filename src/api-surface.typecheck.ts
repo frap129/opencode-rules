@@ -8,10 +8,6 @@
  * This file is checked by `npm run build` / `tsc` but produces no runtime output.
  */
 
-// --- mcp-tools.ts: McpStatusMap should NOT be exported ---
-// @ts-expect-error McpStatusMap is internal and should not be exported
-import type { McpStatusMap } from './mcp-tools.js';
-
 // --- runtime.ts: OpenCodeRulesRuntimeOptions should NOT be exported ---
 // @ts-expect-error OpenCodeRulesRuntimeOptions is internal and should not be exported
 import type { OpenCodeRulesRuntimeOptions } from './runtime.js';
@@ -21,6 +17,5 @@ import type { OpenCodeRulesRuntimeOptions } from './runtime.js';
 import type { SessionStoreOptions } from './session-store.js';
 
 // Suppress unused variable warnings for the type imports above
-void (0 as unknown as McpStatusMap);
 void (0 as unknown as OpenCodeRulesRuntimeOptions);
 void (0 as unknown as SessionStoreOptions);
