@@ -55,6 +55,12 @@ Reviewed all active changes against the v2 cutover (spec deltas describing V1 ho
 - `test` — LEFT ACTIVE. Contains only a `plan.md` placeholder with no spec deltas; nothing contradicts the v2 cutover and nothing is implementable as-is. Cleanup is out of scope for this change.
 - `add-beta-channel-release` — LEFT ACTIVE. Empty change (no proposal, no tasks, no spec deltas); nothing contradicts the v2 cutover. Its intended scope (release via beta channel) is now covered by this migration's release task; re-propose or archive it separately.
 
+## Deviations from Plan
+
+1. **Dogfood config key**: `.opencode/opencode.json` and the README examples use the singular `"plugin"` key (not the plan's plural `"plugins"`), because the official config schema and the pinned `@opencode-ai/plugin@0.0.0-next-17335` `Config` type define only the singular key; a plural key is silently ignored by real binaries.
+2. **`matcher` frontmatter + match-less hooks**: `matcher` support and hooks without `match` defaulting to match-any were added in commit `432aba8` (required by the V2 test rules' native hook shape). `matcher` is exact-name matched (`*` wildcard matches all tools), not a regex.
+3. **Test fixture deviation**: `createRuntime` defaults `sessionStore` to `__testOnly.getSessionStore()` (the `src/index.ts` module-level store) instead of a fresh `new SessionStore()`, requiring the `getSessionStore` member on `__testOnly` — needed so `__testOnly.getSessionStateSnapshot`/`getSeedCount` assertions observe the runtime's state.
+
 ## Open Questions
 
 - None blocking. Beta stability of `@opencode-ai/plugin` and `@opentui` is the main open variable and is handled by the re-sync risk above.

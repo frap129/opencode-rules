@@ -281,13 +281,16 @@ respects `.gitignore` by default, and produces better formatted output.
 
 #### Fields
 
-| Field   | Required | Description                                                                    |
-| ------- | -------- | ------------------------------------------------------------------------------ |
-| `type`  | Yes      | `PreToolUse` or `PostToolUse`                                                  |
-| `tool`  | Yes      | Tool name to intercept. Use `*` for all tools.                                 |
-| `match` | Yes      | Regex pattern matched against the **serialized tool arguments** (JSON string). |
-| `block` | No       | If `true` and `type: PreToolUse`, throws an error to prevent tool execution.   |
-| `run`   | No       | Shell command to execute when the hook fires (fire-and-forget).                |
+| Field     | Required | Description                                                                                                                                |
+| --------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `type`    | Yes      | `PreToolUse` or `PostToolUse`                                                                                                              |
+| `tool`    | Yes*     | Tool name to intercept. Use `*` for all tools. (`*`: either `tool` or `matcher` is required.)                                              |
+| `matcher` | No       | V2-native alias of `tool`; exact tool name or `*` for all tools. Not a regex.                                                              |
+| `match`   | No       | Regex pattern matched against the **serialized tool arguments** (JSON string). Omitted means the hook matches all invocations of the tool. |
+| `block`   | No       | If `true` and `type: PreToolUse`, throws an error to prevent tool execution.                                                               |
+| `run`     | No       | Shell command to execute when the hook fires (fire-and-forget).                                                                            |
+
+A hook without a `match` defaults to match-any (`match: ''`, and `new RegExp('')` matches every argument string), so it fires on every invocation of the matched tool.
 
 ### How Hook Injections Work
 

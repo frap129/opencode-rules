@@ -102,6 +102,7 @@ export class OpenCodeRulesRuntime {
       );
     } catch (error) {
       await this.disposeRegistrations(registrations);
+      registrations.length = 0; // Registrations already disposed; keep the returned cleanup a no-op.
       logWarning('Failed to register plugin hooks', error);
     }
     return async () => {
@@ -410,7 +411,6 @@ export class OpenCodeRulesRuntime {
     }
 
     const promise = discoverProjectRuleFiles(directory).then(files => {
-      this.projectRulesInFlight.delete(directory);
       if (files.length === 0) {
         this.projectRulesEmptyAt.set(directory, this.now());
       } else {
@@ -418,6 +418,9 @@ export class OpenCodeRulesRuntime {
       }
       return files;
     });
+    promise
+      .finally(() => this.projectRulesInFlight.delete(directory))
+      .catch(() => {});
     this.projectRulesInFlight.set(directory, promise);
     return promise;
   }
