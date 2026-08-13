@@ -26,6 +26,7 @@
 // Re-export from rule-discovery
 export {
   discoverRuleFiles,
+  discoverProjectRuleFiles,
   getCachedRule,
   clearRuleCache,
   type DiscoveredRule,

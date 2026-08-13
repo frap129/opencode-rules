@@ -1169,6 +1169,7 @@ describe('utils runtime exports', () => {
     const exportedKeys = Object.keys(utilsModule).sort();
     expect(exportedKeys).toEqual([
       'clearRuleCache',
+      'discoverProjectRuleFiles',
       'discoverRuleFiles',
       'evaluateHooks',
       'extractFilePathsFromMessages',

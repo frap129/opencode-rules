@@ -152,6 +152,25 @@ export interface DiscoveredRule {
 }
 
 /**
+ * Discover markdown rule files under <projectDir>/.opencode/rules only.
+ */
+export async function discoverProjectRuleFiles(
+  projectDir: string
+): Promise<DiscoveredRule[]> {
+  const files: DiscoveredRule[] = [];
+  const projectRulesDir = path.join(projectDir, '.opencode', 'rules');
+  const projectRules = await scanDirectoryRecursively(
+    projectRulesDir,
+    projectRulesDir
+  );
+  for (const { filePath, relativePath } of projectRules) {
+    debugLog(`Discovered project rule: ${relativePath} (${filePath})`);
+    files.push({ filePath, relativePath });
+  }
+  return files;
+}
+
+/**
  * Discover markdown rule files from standard directories
  * Searches recursively in:
  * - $OPENCODE_CONFIG_DIR/rules/ (highest priority)
@@ -179,15 +198,7 @@ export async function discoverRuleFiles(
 
   // Discover project-local rules (recursively) if project directory is provided
   if (projectDir) {
-    const projectRulesDir = path.join(projectDir, '.opencode', 'rules');
-    const projectRules = await scanDirectoryRecursively(
-      projectRulesDir,
-      projectRulesDir
-    );
-    for (const { filePath, relativePath } of projectRules) {
-      debugLog(`Discovered project rule: ${relativePath} (${filePath})`);
-      files.push({ filePath, relativePath });
-    }
+    files.push(...(await discoverProjectRuleFiles(projectDir)));
   }
 
   return files;
