@@ -62,6 +62,9 @@ const __testOnly = Object.freeze(
     getSeedCount: (sessionID: string): number => {
       return sessionStore.get(sessionID)?.seedCount ?? 0;
     },
+    getSessionStore: (): SessionStore => {
+      return sessionStore;
+    },
   })
 );
 

@@ -8,7 +8,7 @@ import * as runtimeChatModule from './runtime-chat.js';
 describe('runtime module runtime exports', () => {
   it('exports only OpenCodeRulesRuntime class at runtime', () => {
     const exportedKeys = Object.keys(runtimeModule).sort();
-    expect(exportedKeys).toEqual(['OpenCodeRulesRuntime']);
+    expect(exportedKeys).toEqual(['OpenCodeRulesRuntime', 'RuleBlockError']);
   });
 });
 

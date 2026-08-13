@@ -139,22 +139,36 @@ export function parseRuleMetadata(content: string): RuleMetadata | null {
       for (const h of parsed.hooks) {
         if (typeof h !== 'object' || h === null) continue;
         const hook = h as Record<string, unknown>;
-        if (
-          (hook.type === 'PreToolUse' || hook.type === 'PostToolUse') &&
-          typeof hook.tool === 'string' &&
-          hook.tool.length > 0 &&
-          typeof hook.match === 'string' &&
-          hook.match.length > 0
-        ) {
-          hooks.push({
-            type: hook.type,
-            tool: hook.tool,
-            match: hook.match,
-            ...(typeof hook.block === 'boolean' && { block: hook.block }),
-            ...(typeof hook.run === 'string' &&
-              hook.run.length > 0 && { run: hook.run }),
-          });
+        if (hook.type !== 'PreToolUse' && hook.type !== 'PostToolUse') {
+          continue;
         }
+
+        // V2-native `matcher` (tool-name match) maps to the V1 `tool` field.
+        // Without an args regex (`match`), the hook applies to any invocation
+        // of that tool.
+        // NOTE: `matcher` is exact-name matched only (not a regex) in this
+        // project's simplified DSL; `'*'` matches all tools.
+        const tool =
+          typeof hook.matcher === 'string' && hook.matcher.length > 0
+            ? hook.matcher
+            : typeof hook.tool === 'string' && hook.tool.length > 0
+              ? hook.tool
+              : undefined;
+        if (!tool) continue;
+
+        const argsMatch =
+          typeof hook.match === 'string' && hook.match.length > 0
+            ? hook.match
+            : '';
+
+        hooks.push({
+          type: hook.type,
+          tool,
+          match: argsMatch,
+          ...(typeof hook.block === 'boolean' && { block: hook.block }),
+          ...(typeof hook.run === 'string' &&
+            hook.run.length > 0 && { run: hook.run }),
+        });
       }
       if (hooks.length > 0) {
         metadata.hooks = hooks;

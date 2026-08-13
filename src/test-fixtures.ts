@@ -6,6 +6,17 @@ import path from 'node:path';
 import os from 'node:os';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import type { DiscoveredRule } from './utils.js';
+import type {
+  V2PluginContext,
+  V2SessionContext,
+  V2ToolExecuteAfter,
+  V2ToolExecuteBefore,
+} from './v2-types.js';
+import { OpenCodeRulesRuntime } from './runtime.js';
+import { SessionStore } from './session-store.js';
+import { __testOnly } from './index.js';
+import type { DebugLog } from './debug.js';
+import { vi, type Mock } from 'vitest';
 
 // ============================================================================
 // Test Directory Management
@@ -186,4 +197,142 @@ export function restoreEnv(saved: EnvSnapshot): void {
       process.env[key] = value;
     }
   }
+}
+
+// ============================================================================
+// V2 Plugin Context Helpers
+// ============================================================================
+
+/** Creates a mutable V2 session-context payload for the context hook. */
+export function createMockSessionContext(
+  overrides: Partial<V2SessionContext> = {}
+): V2SessionContext {
+  return {
+    sessionID: 'test-session',
+    agent: 'build',
+    model: { id: 'claude-opus', providerID: 'anthropic' },
+    system: [],
+    messages: [],
+    tools: {},
+    ...overrides,
+  };
+}
+
+/** Creates a V2 tool.execute.before payload. */
+export function createMockToolExecuteBefore(
+  overrides: Partial<V2ToolExecuteBefore> = {}
+): V2ToolExecuteBefore {
+  return {
+    tool: 'read',
+    sessionID: 'test-session',
+    agent: 'build',
+    messageID: 'msg-1',
+    id: 'call-1',
+    input: { filePath: 'src/index.ts' },
+    ...overrides,
+  };
+}
+
+/** Creates a V2 tool.execute.after payload. */
+export function createMockToolExecuteAfter(
+  overrides: Partial<V2ToolExecuteAfter> = {}
+): V2ToolExecuteAfter {
+  return {
+    tool: 'read',
+    sessionID: 'test-session',
+    agent: 'build',
+    messageID: 'msg-1',
+    id: 'call-1',
+    input: { filePath: 'src/index.ts' },
+    status: 'completed',
+    result: { output: {}, metadata: {} },
+    ...overrides,
+  } as V2ToolExecuteAfter;
+}
+
+export interface RuntimeHarness {
+  runtime: OpenCodeRulesRuntime;
+  ctx: V2PluginContext;
+  /** Callbacks captured by the mock hook registrars, keyed by hook name. */
+  hookRegistry: {
+    context?: (input: V2SessionContext) => Promise<void>;
+    'execute.before'?: (input: V2ToolExecuteBefore) => Promise<void>;
+    'execute.after'?: (input: V2ToolExecuteAfter) => Promise<void>;
+  };
+  sessionGet: Mock<
+    [],
+    Promise<{ location: { directory: string } } | undefined>
+  >;
+  cleanup: Awaited<ReturnType<OpenCodeRulesRuntime['registerHooks']>>;
+}
+
+export interface CreateRuntimeOptions {
+  globalRules?: DiscoveredRule[];
+  sessionStore?: SessionStore;
+  debugLog?: DebugLog;
+  now?: () => number;
+  /** Directory returned by the mock session.get. Undefined => get returns undefined. */
+  sessionDirectory?: string;
+}
+
+/** Constructs a runtime and registers it against a mock V2 plugin context. */
+export async function createRuntime(
+  opts: CreateRuntimeOptions = {}
+): Promise<RuntimeHarness> {
+  const hookRegistry: RuntimeHarness['hookRegistry'] = {};
+  const sessionGet = vi.fn(async () =>
+    opts.sessionDirectory
+      ? { location: { directory: opts.sessionDirectory } }
+      : undefined
+  );
+  const ctx = {
+    session: {
+      get: sessionGet,
+      hook: vi.fn(
+        async (
+          name: 'context',
+          cb: (input: V2SessionContext) => Promise<void>
+        ) => {
+          if (name === 'context') hookRegistry.context = cb;
+          return { dispose: vi.fn(async () => {}) };
+        }
+      ),
+    },
+    tool: {
+      hook: vi.fn(
+        async (
+          name: 'execute.before' | 'execute.after',
+          cb: (input: V2ToolExecuteBefore | V2ToolExecuteAfter) => Promise<void>
+        ) => {
+          if (name === 'execute.before') {
+            hookRegistry['execute.before'] = cb as (
+              input: V2ToolExecuteBefore
+            ) => Promise<void>;
+          } else {
+            hookRegistry['execute.after'] = cb as (
+              input: V2ToolExecuteAfter
+            ) => Promise<void>;
+          }
+          return { dispose: vi.fn(async () => {}) };
+        }
+      ),
+    },
+  } as unknown as V2PluginContext;
+
+  const runtime = new OpenCodeRulesRuntime({
+    globalRules: opts.globalRules ?? [],
+    sessionStore: opts.sessionStore ?? __testOnly.getSessionStore(),
+    ...(opts.debugLog !== undefined ? { debugLog: opts.debugLog } : {}),
+    ...(opts.now !== undefined ? { now: opts.now } : {}),
+  });
+
+  const cleanup = await runtime.registerHooks(ctx);
+  return { runtime, ctx, hookRegistry, sessionGet, cleanup };
+}
+
+/** Extracts the concatenated text of all text SystemParts. */
+export function systemText(
+  system: Array<{ type: 'text'; text: string }>
+): string {
+  return system.map(p => p.text).join('\n\n');
 }
