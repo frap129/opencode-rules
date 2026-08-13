@@ -1,4 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["./plugins/opencode-rules.ts"]
+  "plugin": [
+    "./plugins/opencode-rules.ts"
+  ]
 }

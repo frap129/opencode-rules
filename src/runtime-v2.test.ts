@@ -275,6 +275,45 @@ describe('OpenCodeRulesRuntime (v2)', () => {
       expect(state?.pendingHookInjections).toContain('# Hooked rule');
     });
 
+    it('captures v2 path input for read and shell workdir for commands', async () => {
+      const { projectRulesDir } = getTestDirs();
+      const rulePath = path.join(projectRulesDir, 'hooks.md');
+      writeFileSync(
+        rulePath,
+        [
+          '---',
+          'hooks:',
+          '  - type: PreToolUse',
+          '    matcher: read',
+          '---',
+          '# Hooked rule',
+        ].join('\n')
+      );
+      const { hookRegistry } = await createRuntime({
+        globalRules: toRules([rulePath]),
+        sessionDirectory: getTestDirs().testDir,
+      });
+
+      await hookRegistry['execute.before']!(
+        createMockToolExecuteBefore({
+          sessionID: 's1',
+          tool: 'read',
+          input: { path: 'src/v2-path.ts' },
+        })
+      );
+      await hookRegistry['execute.before']!(
+        createMockToolExecuteBefore({
+          sessionID: 's1',
+          tool: 'shell',
+          input: { command: 'pwd', workdir: 'apps/web' },
+        })
+      );
+
+      const state = __testOnly.getSessionStateSnapshot('s1');
+      expect(state?.contextPaths.has('src/v2-path.ts')).toBe(true);
+      expect(state?.contextPaths.has('apps/web')).toBe(true);
+    });
+
     it('throws RuleBlockError when a PreToolUse hook has block: true', async () => {
       const { projectRulesDir } = getTestDirs();
       const rulePath = path.join(projectRulesDir, 'block.md');

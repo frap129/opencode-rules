@@ -295,7 +295,7 @@ export class OpenCodeRulesRuntime {
 
     let filePath: string | undefined;
     if (['read', 'edit', 'write'].includes(toolName)) {
-      const arg = args.filePath;
+      const arg = args.path ?? args.filePath;
       if (typeof arg === 'string' && arg.length > 0) {
         filePath = arg;
       }
@@ -304,8 +304,8 @@ export class OpenCodeRulesRuntime {
       if (typeof arg === 'string' && arg.length > 0) {
         filePath = arg;
       }
-    } else if (toolName === 'bash') {
-      const arg = args.workdir;
+    } else if (toolName === 'bash' || toolName === 'shell') {
+      const arg = args.workdir ?? args.cwd;
       if (typeof arg === 'string' && arg.length > 0) {
         filePath = arg;
       }
