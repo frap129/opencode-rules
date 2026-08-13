@@ -9,9 +9,12 @@ import {
   For,
   type JSX,
 } from 'solid-js';
-import type { TuiPluginApi, TuiTheme } from '@opencode-ai/plugin/tui';
+import type { Plugin } from '@opencode-ai/plugin/tui';
+import { themeColors, projectDirectory, type ThemeColors } from '../adapt.js';
 import { loadSidebarRules, type SidebarRuleEntry } from '../data/rules.js';
 import type { RuleMetadata } from '../../src/utils.js';
+
+type TuiContext = Plugin.Context;
 
 const metadataFieldDescriptors: Array<{
   key: keyof RuleMetadata;
@@ -30,18 +33,11 @@ const metadataFieldDescriptors: Array<{
 
 interface SidebarContentProps {
   sessionId: string;
-  api: TuiPluginApi;
-  theme: TuiTheme;
+  ctx: TuiContext;
+  theme: Plugin.Context['theme'];
 }
 
 type ThemeColor = string | import('@opentui/core').RGBA;
-
-interface ThemeColors {
-  text: ThemeColor;
-  textMuted: ThemeColor;
-  success: ThemeColor;
-  [key: string]: unknown;
-}
 
 interface RuleSectionProps {
   title: string;
@@ -155,10 +151,15 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
   const [globalOpen, setGlobalOpen] = createSignal(false);
   const [refreshCounter, setRefreshCounter] = createSignal(0);
 
-  const theme = (): ThemeColors => props.theme.current as ThemeColors;
+  const theme = (): ThemeColors => themeColors(props.theme);
 
   const resolveProjectDir = (): string | null => {
-    return props.api.state.path.directory ?? null;
+    const location = props.ctx.data.location;
+    try {
+      return projectDirectory(location) ?? null;
+    } catch {
+      return null;
+    }
   };
 
   // Monotonic counter to detect stale async results
@@ -227,13 +228,10 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
   });
 
   // Subscribe to OpenCode events with debounce
-  const triggerRefresh = (event: {
-    type: string;
-    properties: Record<string, unknown>;
-  }): void => {
+  const triggerRefresh = (event: { data?: { sessionID?: string } }): void => {
     // Filter events to current sessionId before debouncing
-    // OpenCode SDK events nest sessionID inside properties: { type, properties: { sessionID, ... } }
-    const eventSessionID = event.properties.sessionID;
+    // V2 events nest sessionID inside data: { type, data: { sessionID, ... } }
+    const eventSessionID = event.data?.sessionID;
     if (
       typeof eventSessionID === 'string' &&
       eventSessionID !== props.sessionId
@@ -250,11 +248,11 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
     }, 150);
   };
 
-  const unsubMessageUpdated = props.api.event.on(
-    'message.updated',
+  const unsubTextEnded = props.ctx.data.on(
+    'session.text.ended',
     triggerRefresh
   );
-  const unsubSessionStatus = props.api.event.on(
+  const unsubSessionStatus = props.ctx.data.on(
     'session.status',
     triggerRefresh
   );
@@ -263,7 +261,7 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
     if (debounceTimer !== null) {
       clearTimeout(debounceTimer);
     }
-    unsubMessageUpdated();
+    unsubTextEnded();
     unsubSessionStatus();
   });
 
