@@ -44,43 +44,49 @@ approach.
 
 ### Installation
 
-```bash
-opencode plugin opencode-rules@latest --global
+> [!IMPORTANT]
+> **Requires OpenCode 2** (beta channel). opencode-rules `1.0.0-beta.1` is built against the
+> v2 plugin API and will not load under OpenCode 1.x.
+
+Add the plugin to your opencode config (`~/.config/opencode/opencode.json`):
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["opencode-rules@1.0.0-beta.1"]
+}
 ```
 
 <details>
 <summary>Manual installation</summary>
 
-Add the plugin to your opencode config:
+For a local checkout or vendored build, reference the plugin file directly instead:
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-rules@latest"]
+  "plugin": ["./plugins/opencode-rules.ts"]
 }
 ```
 
-To enable the TUI sidebar, add the same plugin entry to your TUI config:
-
-```json
-// ~/.config/opencode/tui.json
-{
-  "plugin": ["opencode-rules@latest"]
-}
-```
+The TUI sidebar entrypoint ships in the same package (via its `./tui` export) and is
+loaded by the OpenCode TUI alongside the server plugin.
 
 </details>
 
 ### Beta Channel
 
-Pre-release versions from the `dev` branch are published under the `beta` npm dist-tag. These include upcoming features and fixes but may be unstable.
+Pre-release versions are published under the `beta` npm dist-tag. These include upcoming features and fixes but may be unstable.
 
-```bash
-opencode plugin opencode-rules@beta --global
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["opencode-rules@beta"]
+}
 ```
 
 > [!WARNING]
-> Beta releases track the `dev` branch and may contain breaking changes or bugs. Test thoroughly in non-critical workflows before using.
+> Beta releases may contain breaking changes or bugs. Test thoroughly in non-critical workflows before using.
 
 ### Create Your First Rule
 
@@ -106,14 +112,15 @@ That's it! The rule will now be automatically injected into all AI agent prompts
 
 ## How It Works
 
-1. **Discovery**: Scan global and project directories for `.md` and `.mdc` files (at plugin init)
+1. **Discovery**: Scan global and project directories for `.md` and `.mdc` files (global at plugin init; project results cached per directory)
 2. **Parsing**: Extract metadata from files with YAML front matter
-3. **Tool Execution**: `tool.execute.before` hook captures file paths before tools run
-4. **Message Flow**: `chat.message` hook updates user prompt as messages arrive
-5. **Initial Seeding**: `experimental.chat.messages.transform` extracts context from message history once
-6. **Rule Filtering**: `experimental.chat.system.transform` evaluates rules based on context and injects into system prompt
-7. **State Persistence**: After filtering, matched rule paths are written to `~/.opencode/state/opencode-rules/{sessionId}.json` for TUI consumption
-8. **Compaction Persistence**: `experimental.session.compacting` preserves context during session compression
+3. **Setup**: `Plugin.define` registers the session `context` hook and the `tool.execute.before`/`after` hooks
+4. **Session Context**: On each LLM turn, the `context` hook receives the session's `system`, `messages`, and `tools`; it seeds context paths and the user prompt from message history (once per session) and appends matching rules to `system`
+5. **Tool Execution**: `tool.execute.before` captures file paths from the (mutable) tool `input` before tools run; `tool.execute.after` evaluates `PostToolUse` hooks and queues corrective guidance
+6. **Directory Resolution**: Each session's project directory is resolved via `session.get` (TTL-cached), and project rule discovery is cached per directory
+7. **Rule Filtering**: Rules are filtered against context file paths, the latest user prompt, available tool IDs, and runtime environment fields
+8. **State Persistence**: After filtering, matched rule paths are written to `~/.opencode/state/opencode-rules/{sessionId}.json` for TUI consumption
+9. **Re-injection**: When the user prompt changes, rules are re-injected on the next context dispatch
 
 ## Performance
 
@@ -190,8 +197,9 @@ match: any
   - Does NOT match mid-word (e.g., "test" does NOT match "contest")
 - `tools` (optional): Array of tool IDs for tool-availability matching
   - Rule applies when any listed tool is available to the agent
-  - Uses exact string matching against tool IDs (e.g., `mcp_websearch`, `mcp_bash`)
-  - Enable debug logging (`OPENCODE_RULES_DEBUG=1`) to see available tool IDs
+  - Built-in and plugin tools match by their exact tool key
+  - MCP matching is derived from tool-key prefixes: a key like `context7_search` also produces the server-level candidate `mcp_context7`, so V1-style declarations such as `mcp_context7` keep working
+  - Enable debug logging (`OPENCODE_RULES_DEBUG=1`) to see rule matching decisions
 - `model` (optional): Array of model IDs to match against the current LLM
   - Example: `['gpt-5.3-codex', 'claude-sonnet-4']`
 - `agent` (optional): Array of agent types to match
@@ -329,9 +337,9 @@ tools:
 
 This rule only applies when the websearch or codesearch MCP tools are available.
 
-NOTE: Due to limitations on how opencode provides tools via the SDK, individual
-MCP tools cannot be matched. Only built-in tools, plugin tools, and whole MCPs
-can be matched.
+NOTE: OpenCode v2 keys tools as `<server>_<tool>` (e.g. `context7_search`), so MCP tool
+matching is derived from tool-key prefixes. V1-style server-level IDs like `mcp_context7`
+still work: any tool key with a matching prefix yields the `mcp_context7` candidate.
 
 ### Combined Globs and Keywords Rule
 
@@ -455,33 +463,34 @@ The following shows the key source modules. Additional test files (`*.test.ts`) 
 ```
 opencode-rules/
 ├── src/
-│   ├── index.ts              # Main plugin entry point and exports
+│   ├── index.ts              # Main plugin entry point (Plugin.define) and exports
 │   ├── runtime.ts            # OpenCodeRulesRuntime class (hook orchestration)
 │   ├── runtime-context.ts    # Context-building helpers (filter context, project detection)
-│   ├── runtime-chat.ts       # Chat message handling and text extraction
 │   ├── rule-discovery.ts     # Rule file scanning and discovery
 │   ├── rule-metadata.ts      # YAML frontmatter parsing
 │   ├── rule-filter.ts        # Rule filtering logic (globs, keywords, tools, runtime)
+│   ├── rule-hooks.ts         # PreToolUse/PostToolUse hook evaluation
 │   ├── message-paths.ts      # Path extraction from messages
 │   ├── message-context.ts    # User prompt extraction from message parts
 │   ├── session-store.ts      # Per-session state management
 │   ├── project-fingerprint.ts # Project type detection (Node.js, Python, etc.)
-│   ├── mcp-tools.ts          # MCP tool ID extraction
+│   ├── tool-ids.ts           # Tool-key expansion and MCP server candidate derivation
+│   ├── v2-messages.ts        # V2 message adaptation
+│   ├── v2-types.ts           # Structural types for the V2 plugin API
 │   ├── git-branch.ts         # Git branch detection
 │   ├── active-rules-state.ts # Persists matched rules per session for TUI
 │   ├── debug.ts              # Debug logging utilities
 │   ├── utils.ts              # Re-export facade for backwards compatibility
 │   ├── test-fixtures.ts      # Shared test fixtures and builders
-│   └── *.test.ts             # Unit/integration tests (11 test files)
+│   └── *.test.ts             # Unit/integration tests
 ├── tui/
-│   ├── index.tsx             # TUI entrypoint, exports { id, tui }
+│   ├── index.tsx             # TUI entrypoint, export default Plugin.define(...) with sidebar.content slot
+│   ├── adapt.ts              # Structural views of the v2 TUI context
 │   ├── slots/
 │   │   └── sidebar-content.tsx # Sidebar widget component
-│   ├── data/
-│   │   ├── rules.ts          # Rule discovery + formatting for sidebar
-│   │   └── rules.test.ts     # Data layer tests
-│   └── types/
-│       └── opencode-plugin-tui.d.ts  # Vendored type shim
+│   └── data/
+│       ├── rules.ts          # Rule discovery + formatting for sidebar
+│       └── rules.test.ts     # Data layer tests
 ├── docs/
 │   └── rules.md              # Detailed usage documentation
 ├── openspec/                 # Project specifications and proposals
@@ -492,26 +501,27 @@ opencode-rules/
 
 The following highlights the primary runtime modules:
 
-- **runtime.ts** - Orchestrates hooks (`tool.execute.before`, `chat.message`, `experimental.chat.*`)
+- **runtime.ts** - Orchestrates the V2 hooks (`session` `context`, `tool.execute.before`, `tool.execute.after`) and per-session directory resolution
 - **runtime-context.ts** - Builds `RuleFilterContext` from session state and environment
-- **runtime-chat.ts** - Extracts text from chat message parts for keyword matching
+- **v2-messages.ts** - Adapts V2 messages to the message shape used for path/prompt extraction
 - **rule-discovery.ts** - Recursively scans directories for `.md`/`.mdc` rule files
 - **rule-metadata.ts** - Parses YAML frontmatter into typed `RuleMetadata`
 - **rule-filter.ts** - Evaluates rules against context (globs, keywords, tools, runtime filters); returns `FilterResult` with `formattedRules` and `matchedPaths`
+- **rule-hooks.ts** - Evaluates `PreToolUse`/`PostToolUse` hooks and serializes tool args
 - **message-paths.ts** - Extracts file paths from tool invocation arguments and message text
 - **message-context.ts** - Extracts user prompt text, slash commands, and session IDs from message parts
 - **session-store.ts** - Manages per-session state with LRU eviction
 - **project-fingerprint.ts** - Detects project type from marker files (e.g., `package.json`)
-- **mcp-tools.ts** - Maps connected MCP clients to tool IDs for `tools` condition matching
+- **tool-ids.ts** - Expands V2 tool keys into filter-context tool IDs, deriving `mcp_<server>` candidates for `tools` condition matching
 - **git-branch.ts** - Resolves current git branch for `branch` condition matching
 - **active-rules-state.ts** - Persists which rules matched per session to `~/.opencode/state/opencode-rules/{sessionId}.json` for TUI consumption (atomic writes, per-session queuing)
 - **utils.ts** - Thin facade re-exporting from decomposed modules
 
 ### TUI Sidebar
 
-The plugin registers a `sidebar_content` slot in the OpenCode TUI, displaying all discovered rules (global and project-local) with their active state and metadata.
+The plugin registers a `sidebar.content` slot in the OpenCode TUI, displaying all discovered rules (global and project-local) with their active state and metadata.
 
-**Requirements:** `@opencode-ai/plugin` ^1.3.7 with TUI support.
+**Requirements:** OpenCode 2 with TUI support. The TUI entrypoint is built against an `@opentui` snapshot (`@opentui/core`/`@opentui/solid`), so it tracks the TUI's rendering API rather than a stable release.
 
 **What it shows:**
 
@@ -524,7 +534,7 @@ The plugin registers a `sidebar_content` slot in the OpenCode TUI, displaying al
 **Behavior:**
 
 - Active rules are sorted to the top within each section
-- Subscribes to `message.updated` and `session.status` events for real-time refresh (150ms debounce, filtered by session ID)
+- Subscribes to `session.text.ended` and `session.status` events for real-time refresh (150ms debounce, filtered by session ID) — refreshes fire when an assistant text response completes or the session status transitions
 - Active state is read from `~/.opencode/state/opencode-rules/{sessionId}.json`, written by the server plugin after each rule evaluation
 
 ### Build and Test
@@ -562,60 +572,39 @@ bun run lint
 
 ## Architecture
 
-This plugin uses OpenCode's hook system for incremental, stateful rule injection:
+This plugin is built against the OpenCode v2 plugin API (`@opencode-ai/plugin`). `Plugin.define` registers session and tool hooks for incremental, stateful rule injection:
 
 ### Hook-Based Approach
 
-1. **`tool.execute.before`** - Authoritative path capture and reactive hook evaluation
-   - Fires before each tool runs (read, edit, write, glob, grep, etc.)
-   - Captures `filePath` or `path` arguments authoritative from the tool definition
-   - Evaluates `PreToolUse` hooks: rules with `block: true` can prevent execution
-   - Queues matched rule content as pending hook injections for the next system prompt
+1. **`session` `context`** - Rule injection and context capture per LLM turn
+   - Fires for each LLM turn with the session's `system`, `messages`, and `tools`
+   - Seeds context paths and the user prompt from message history once per session; captures model and agent
+   - A new user prompt resets the injection gate, so rules are re-evaluated and re-injected when the prompt changes
+   - Filters discovered rules against context file paths (`globs`), the latest user prompt (`keywords`), available tool IDs (`tools`, with MCP candidates derived from tool-key prefixes), and runtime environment fields (model, agent, command, project, branch, OS, CI)
+   - Appends formatted rules (and any pending hook injections) to `system`
+
+2. **`tool.execute.before`** - Authoritative path capture and reactive hook evaluation
+   - Fires before each tool runs (read, edit, write, glob, grep, etc.) with the tool's mutable `input`
+   - Captures `filePath`/`path`/`workdir` arguments from the tool definition
+   - Evaluates `PreToolUse` hooks: rules with `block: true` throw a `RuleBlockError` to prevent execution
+   - Queues matched rule content as pending hook injections for the next context dispatch
    - Updates session state with normalized, verified context paths
-   - Provides real-time context as tools are executed
 
-2. **`chat.message`** - Incremental user prompt capture
-   - Fires as each user message arrives
-   - Extracts and stores the latest user prompt text
-   - Enables keyword-based rule matching across the conversation flow
-
-3. **`experimental.chat.messages.transform`** - One-time seeding fallback
-   - Fires before the first LLM call only (skipped on subsequent turns)
-   - Seeds session state from full message history if needed
-   - Provides fallback context extraction from all visible messages
-   - Ensures rules apply even if initial context wasn't captured by tool hooks
-
-4. **`experimental.chat.system.transform`** - Rule injection and filtering
-   - Fires before each LLM system prompt is constructed
-   - Receives full runtime filter context: model, agent, command, project type, git branch, OS, and CI environment
-   - Reads discovered rule files and filters based on:
-     - Extracted file paths from session state (`globs`)
-     - Latest user prompt (`keywords`)
-     - Available tool IDs (`tools`)
-     - Runtime environment (model, agent, command, project, branch, OS, CI)
-   - Command is inferred from the leading slash token (first token) of the latest user prompt
-   - Appends formatted rules to the system prompt
-
-5. **`experimental.session.compacting`** - Compaction context preservation
-   - Fires when a session is compacted (summarized)
-   - Injects current context paths into the compaction context
-   - Prevents rules from being lost during session compression
-
-6. **`tool.execute.after`** - Post-execution corrective guidance
+3. **`tool.execute.after`** - Post-execution corrective guidance
    - Fires after each tool completes
    - Evaluates `PostToolUse` hooks for reactive rule triggering
-   - Queues corrective rule content into pending hook injections
-   - Content is delivered on the next `experimental.chat.system.transform`
+   - Queues corrective rule content into pending hook injections, delivered on the next `context` dispatch
 
-### Experimental API Notice
+4. **Per-session directory resolution** - `session.get` resolves each session's project directory (TTL-cached, with a fallback cache for failures), and project rule discovery is cached per directory
+   - Global rule discovery runs once at plugin setup
 
-This plugin depends on experimental OpenCode APIs:
+### Beta API Notice
 
-- `experimental.chat.messages.transform` (fallback seeding)
-- `experimental.chat.system.transform` (rule injection)
-- `experimental.session.compacting` (compaction context)
+This plugin is built against the beta channel of the OpenCode v2 plugin API:
 
-These APIs may change in future OpenCode versions. Check OpenCode release notes when upgrading.
+- `@opencode-ai/plugin@0.0.0-next-*`
+
+The v2 plugin API may change before the 1.0 stable release. Check OpenCode release notes when upgrading.
 
 ## Debug Logging
 
@@ -627,10 +616,10 @@ OPENCODE_RULES_DEBUG=1 opencode
 
 This will log information about:
 
-- Rule discovery (files found)
+- Rule discovery (global and project files found)
 - Cache hits/misses
 - Rule filtering (which rules are included/skipped)
-- Available tool IDs (useful for writing `tools` conditions)
+- Filter context values used for matching (model, agent, command, branch, OS, CI, project tags)
 
 ## Troubleshooting
 
@@ -670,9 +659,9 @@ We welcome contributions! Please:
 Beta releases are published from the `dev` branch. To cut a beta:
 
 1. Ensure all checks pass on `dev`
-2. Bump the version in `package.json` using a semver prerelease suffix (e.g., `0.7.0-beta.1`)
-3. Commit: `chore: bump to 0.7.0-beta.1`
-4. Tag: `git tag v0.7.0-beta.1`
+2. Bump the version in `package.json` using a semver prerelease suffix (e.g., `1.0.0-beta.2`)
+3. Commit: `chore: bump to 1.0.0-beta.2`
+4. Tag: `git tag v1.0.0-beta.2`
 5. Push: `git push origin dev --tags`
 
 The `release-beta.yml` workflow publishes to npm with `--tag beta` and creates a prerelease GitHub Release.

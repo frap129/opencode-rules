@@ -233,11 +233,10 @@ The plugin uses OpenCode's hook system to track context and inject rules:
 
 1. **Context Tracking**:
    - `tool.execute.before` hook captures file paths as tools execute (read, edit, write, glob, grep, etc.)
-   - `chat.message` hook captures the latest user prompt as messages arrive
-   - `experimental.chat.messages.transform` hook seeds session state from message history on first call only
+   - `session context` hook captures the latest user prompt per turn and seeds context paths from message history once per session
 
 2. **Rule Injection**:
-   - `experimental.chat.system.transform` hook evaluates all discovered rules against the accumulated context
+   - The same `session context` hook evaluates all discovered rules against the accumulated context on each dispatch
    - Rules are filtered based on:
      - **File paths** (`globs`): Glob patterns matched against files in context
      - **User prompts** (`keywords`): Keyword matching against the latest user message
@@ -251,10 +250,6 @@ The plugin uses OpenCode's hook system to track context and inject rules:
      - **CI** (`ci`): Boolean equality against CI environment detection
    - Missing runtime context (e.g., no git branch available) is treated as a non-match for that dimension
    - Matching rules are formatted and appended to the system prompt
-
-3. **Session Persistence**:
-   - `experimental.session.compacting` hook preserves context paths during session compression
-   - This ensures rules remain applicable after session compaction
 
 ## Hook-Based Rule Triggers
 
@@ -297,7 +292,7 @@ respects `.gitignore` by default, and produces better formatted output.
 ### How Hook Injections Work
 
 1. When a tool call matches a hook's `tool` and `match`, the rule's body is queued as a **pending hook injection** in the session state.
-2. On the next `experimental.chat.system.transform`, pending injections are flushed and prepended to the system prompt.
+2. On the next `session context` dispatch, pending injections are flushed and prepended to the system prompt.
 3. The agent sees the corrective guidance on its next turn and can self-correct.
 4. Pending injections are cleared after delivery to avoid duplication.
 
@@ -353,7 +348,7 @@ respects `.gitignore` by default, and produces better formatted output.
 ### Scenario 2: User Mentions Testing
 
 - User types prompt: "How do I write unit tests for this function?"
-- `chat.message` hook captures the prompt
+- `session context` hook captures the prompt
 - Plugin evaluates rules with `keywords: ['testing', 'unit test']`
 - Testing rules are injected into system prompt
 

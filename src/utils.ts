@@ -9,9 +9,10 @@
  * Modules intentionally NOT re-exported (internal implementation):
  * - debug.ts: internal logging utilities
  * - message-context.ts: internal message helpers
- * - mcp-tools.ts: internal MCP integration
+ * - tool-ids.ts: internal tool-key expansion and MCP candidate derivation
  * - runtime.ts: internal orchestration (entry point is index.ts)
- * - runtime-chat.ts: internal chat hook handler
+ * - v2-messages.ts: internal V2 message adaptation
+ * - v2-types.ts: internal V2 structural API types
  * - runtime-context.ts: internal filter context builder
  * - session-store.ts: internal session state
  *
