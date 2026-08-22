@@ -96,5 +96,11 @@
     "minimatch": "^9.0.5",
     "solid-js": "1.9.11",
     "yaml": "^2.8.2"
+  },
+  "aube": {
+    "allowBuilds": {
+      "esbuild": true,
+      "msgpackr-extract": true
+    }
   }
 }
