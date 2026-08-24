@@ -34,7 +34,7 @@ interface SystemTransformInput {
 }
 
 interface SystemTransformOutput {
-  system?: string;
+  system?: string | string[];
 }
 
 interface OpenCodeClient {
@@ -334,10 +334,17 @@ export class OpenCodeRulesRuntime {
     }
 
     if (Array.isArray(output.system)) {
-      output.system =
-        output.system.join('\n\n') +
-        (output.system.length > 0 ? '\n\n' : '') +
-        combinedSystem;
+      // opencode passes this output object to every system-transform hook and
+      // ignores hook return values, so mutate the backing array in place;
+      // rebinding output.system to a string is discarded by opencode and
+      // breaks sibling plugins that call .join() on it.
+      const existing = output.system.join('\n\n');
+      const consolidated =
+        existing.length > 0
+          ? `${existing}\n\n${combinedSystem}`
+          : combinedSystem;
+      output.system.length = 0;
+      output.system.push(consolidated);
     } else {
       output.system = output.system
         ? `${output.system}\n\n${combinedSystem}`

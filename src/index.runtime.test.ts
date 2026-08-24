@@ -312,7 +312,7 @@ describe('OpenCodeRulesPlugin', () => {
     expect(result.system).toContain('Rule Content');
   });
 
-  it('should consolidate array system messages into single string', async () => {
+  it('should consolidate array system messages in place', async () => {
     const { testDir, globalRulesDir } = getTestDirs();
     writeFileSync(path.join(globalRulesDir, 'rule.md'), '# My Rule');
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
@@ -328,16 +328,17 @@ describe('OpenCodeRulesPlugin', () => {
     const systemTransform = hooks['experimental.chat.system.transform'] as (
       input: unknown,
       output: { system: string[] }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform(
-      {},
-      { system: ['First message.', 'Second message.'] }
-    );
+    ) => Promise<{ system: string[] }>;
+    const output = { system: ['First message.', 'Second message.'] };
+    const result = await systemTransform({}, output);
 
-    expect(typeof result.system).toBe('string');
-    expect(result.system).toContain('First message.');
-    expect(result.system).toContain('Second message.');
-    expect(result.system).toContain('My Rule');
+    expect(result).toBe(output);
+    expect(result.system).toBe(output.system);
+    expect(result.system).toHaveLength(1);
+    expect(result.system[0]).toMatch(
+      /^First message\.\n\nSecond message\.\n\n/
+    );
+    expect(result.system[0]).toContain('My Rule');
   });
 
   it('should handle empty array system messages', async () => {
@@ -356,11 +357,20 @@ describe('OpenCodeRulesPlugin', () => {
     const systemTransform = hooks['experimental.chat.system.transform'] as (
       input: unknown,
       output: { system: string[] }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform({}, { system: [] });
+    ) => Promise<{ system: string[] }>;
+    const output = { system: [] };
+    const result = await systemTransform({}, output);
 
-    expect(typeof result.system).toBe('string');
-    expect(result.system).toContain('My Rule');
+    expect(result).toBe(output);
+    expect(result.system).toBe(output.system);
+    expect(result.system).toHaveLength(1);
+    expect(result.system[0]).toMatch(/^# OpenCode Rules/);
+    expect(result.system[0]).not.toMatch(/^\n\n/);
+
+    const whitespaceOnly = { system: [' ', ''] };
+    await systemTransform({}, whitespaceOnly);
+    expect(whitespaceOnly.system).toHaveLength(1);
+    expect(whitespaceOnly.system[0]).toContain('My Rule');
   });
 
   it('should handle single-element array system message', async () => {
@@ -379,12 +389,50 @@ describe('OpenCodeRulesPlugin', () => {
     const systemTransform = hooks['experimental.chat.system.transform'] as (
       input: unknown,
       output: { system: string[] }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform({}, { system: ['Only message.'] });
+    ) => Promise<{ system: string[] }>;
+    const output = { system: ['Only message.'] };
+    const result = await systemTransform({}, output);
 
-    expect(typeof result.system).toBe('string');
-    expect(result.system).toContain('Only message.');
-    expect(result.system).toContain('My Rule');
+    expect(result).toBe(output);
+    expect(result.system).toBe(output.system);
+    expect(result.system).toHaveLength(1);
+    expect(result.system[0]).toMatch(/^Only message\.\n\n/);
+    expect(result.system[0]).toContain('My Rule');
+  });
+
+  it('should keep system joinable for sibling plugins across sequential invocations', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    writeFileSync(path.join(globalRulesDir, 'rule.md'), '# My Rule');
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+    const systemTransform = hooks['experimental.chat.system.transform'] as (
+      input: unknown,
+      output: { system: string[] }
+    ) => Promise<{ system: string[] }>;
+    const output = { system: ['Base prompt.'] };
+    await systemTransform({}, output);
+
+    expect(typeof output.system.join).toBe('function');
+    const joined = output.system.join('\n');
+    expect(joined).toContain('Base prompt.');
+    expect(joined).toContain('My Rule');
+
+    output.system.push('Sibling message.');
+    const second = await systemTransform({}, output);
+
+    expect(second).toBe(output);
+    expect(second.system).toHaveLength(1);
+    expect(second.system[0]).toMatch(
+      /^Base prompt\.[\s\S]*My Rule[\s\S]*Sibling message\./
+    );
   });
 
   it('should not modify messages in messages.transform hook', async () => {
