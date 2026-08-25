@@ -1966,3 +1966,147 @@ describe('chat.message rule persistence', () => {
     ).toBe(true);
   });
 });
+
+describe('transient hook injection delivery', () => {
+  let savedEnvXDG: string | undefined;
+  let savedEnvConfigDir: string | undefined;
+
+  beforeEach(() => {
+    setupTestDirs();
+    savedEnvXDG = process.env.XDG_CONFIG_HOME;
+    savedEnvConfigDir = process.env.OPENCODE_CONFIG_DIR;
+    delete process.env.OPENCODE_CONFIG_DIR;
+  });
+
+  afterEach(async () => {
+    teardownTestDirs();
+    vi.resetAllMocks();
+    const { __testOnly } = await import('./index.js');
+    __testOnly.resetSessionState();
+    if (savedEnvXDG === undefined) {
+      delete process.env.XDG_CONFIG_HOME;
+    } else {
+      process.env.XDG_CONFIG_HOME = savedEnvXDG;
+    }
+    if (savedEnvConfigDir === undefined) {
+      delete process.env.OPENCODE_CONFIG_DIR;
+    } else {
+      process.env.OPENCODE_CONFIG_DIR = savedEnvConfigDir;
+    }
+  });
+
+  async function setup(
+    sessionID: string,
+    queue: string[]
+  ): Promise<{
+    messagesTransform: (
+      input: unknown,
+      output: { messages: unknown[] }
+    ) => Promise<{ messages: unknown[] }>;
+  }> {
+    const { testDir } = getTestDirs();
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+    const {
+      default: { server: plugin },
+      __testOnly,
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+    __testOnly.upsertSessionState(sessionID, s => {
+      s.pendingHookInjections = queue;
+      s.seededFromHistory = true;
+    });
+    const messagesTransform = hooks['experimental.chat.messages.transform'] as (
+      input: unknown,
+      output: { messages: unknown[] }
+    ) => Promise<{ messages: unknown[] }>;
+    return { messagesTransform };
+  }
+
+  it('appends a trailing synthetic user message for pending hooks mid-turn', async () => {
+    const { messagesTransform } = await setup('ses_mid', ['Mind the linter.']);
+    const messages = [
+      {
+        info: { id: 'msg_u1', role: 'user', sessionID: 'ses_mid' },
+        parts: [{ type: 'text', text: 'run the build' }],
+      },
+      {
+        info: { id: 'msg_a1', role: 'assistant', sessionID: 'ses_mid' },
+        parts: [{ type: 'text', text: 'building...' }],
+      },
+    ];
+    await messagesTransform({}, { messages });
+
+    expect(messages).toHaveLength(3);
+    expect((messages[1] as { info: { id: string } }).info.id).toBe('msg_a1'); // source info untouched
+    const appended = messages[2] as {
+      info: { id: string; role: string; sessionID: string };
+      parts: Array<{ id?: string; synthetic?: boolean; text?: string }>;
+    };
+    expect(appended.info.id.startsWith('msg_rules_hook_')).toBe(true);
+    expect(appended.info.role).toBe('user');
+    expect(appended.info.sessionID).toBe('ses_mid');
+    expect(appended.parts).toHaveLength(1);
+    expect(appended.parts[0]?.id?.startsWith('prt_hook_transient_')).toBe(true);
+    expect(appended.parts[0]?.synthetic).toBe(true);
+    expect(appended.parts[0]?.text).toBe('Mind the linter.');
+  });
+
+  it('is idempotent across dispatches within the turn', async () => {
+    const { messagesTransform } = await setup('ses_idem', ['Mind the linter.']);
+    const messages: Array<Record<string, unknown>> = [
+      {
+        info: { id: 'msg_u1', role: 'user', sessionID: 'ses_idem' },
+        parts: [{ type: 'text', text: 'hi' }],
+      },
+    ];
+    await messagesTransform({}, { messages });
+    await messagesTransform({}, { messages });
+
+    expect(messages).toHaveLength(2);
+    const appended = messages[1] as {
+      info: { id: string };
+    };
+    expect(appended.info.id.startsWith('msg_rules_hook_')).toBe(true);
+  });
+
+  it('skips content whose durable part is already in history', async () => {
+    const { buildHookInjectionPart } = await import('./synthetic-injection.js');
+    const durable = buildHookInjectionPart('Already persisted.');
+    const { messagesTransform } = await setup('ses_dur', [
+      'Already persisted.',
+    ]);
+    const messages = [
+      {
+        info: { id: 'msg_u1', role: 'user', sessionID: 'ses_dur' },
+        parts: [durable, { type: 'text', text: 'hi' }],
+      },
+    ];
+    await messagesTransform({}, { messages });
+
+    expect(messages).toHaveLength(1);
+  });
+
+  it('does not inject when the queue is empty', async () => {
+    const { messagesTransform } = await setup('ses_empty', []);
+    const messages = [
+      {
+        info: { id: 'msg_u1', role: 'user', sessionID: 'ses_empty' },
+        parts: [{ type: 'text', text: 'hi' }],
+      },
+    ];
+    await messagesTransform({}, { messages });
+
+    expect(messages).toHaveLength(1);
+  });
+
+  it('guards against empty message arrays', async () => {
+    const { messagesTransform } = await setup('ses_none', ['Text.']);
+    const messages: unknown[] = [];
+    await messagesTransform({}, { messages });
+
+    expect(messages).toHaveLength(0);
+  });
+});

@@ -33,6 +33,7 @@ import { evaluateHooks, serializeToolArgs } from './rule-hooks.js';
 import {
   buildRulePart,
   buildHookInjectionPart,
+  buildTransientHookMessage,
   hashContent,
   ruleKeyFor,
   scanInjectedParts,
@@ -231,7 +232,65 @@ export class OpenCodeRulesRuntime {
       await this.rescanInjectedParts(sessionID, output.messages);
     }
 
+    this.appendTransientHookInjections(sessionID, output.messages);
+
     return output;
+  }
+
+  /** Append request-scoped synthetic user messages carrying pending hook
+   * texts. Never persisted: opencode discards messages.transform mutations
+   * after the model dispatch. Idempotent by deterministic id/content. */
+  private appendTransientHookInjections(
+    sessionID: string,
+    messages: MessageWithInfo[]
+  ): void {
+    try {
+      const state = this.sessionStore.get(sessionID);
+      const pending = state?.pendingHookInjections;
+      if (!pending || pending.length === 0 || messages.length === 0) {
+        return;
+      }
+
+      // Presence check: skip contents already carried by this request.
+      const presentIds = new Set<string>();
+      for (const message of messages) {
+        if (typeof message.info?.id === 'string') {
+          presentIds.add(message.info.id);
+        }
+        for (const part of message.parts ?? []) {
+          if (typeof part.id === 'string') {
+            presentIds.add(part.id);
+          }
+        }
+      }
+
+      const lastMessage = messages[messages.length - 1];
+      if (!lastMessage?.parts) {
+        return;
+      }
+
+      for (const content of new Set(pending)) {
+        const hash = hashContent(content);
+        const transientMessageId = `msg_rules_hook_${hash}`;
+        const transientPartId = `prt_hook_transient_${hash}`;
+        if (
+          presentIds.has(transientMessageId) ||
+          presentIds.has(transientPartId) ||
+          presentIds.has(`prt_hook_${hash}`)
+        ) {
+          continue;
+        }
+        const transient = buildTransientHookMessage(
+          content,
+          lastMessage.info as Record<string, unknown>
+        );
+        messages.push(transient as MessageWithInfo);
+      }
+    } catch (error) {
+      this.debugLog(
+        `Transient injection failed for ${sessionID}: ${formatError(error)}`
+      );
+    }
   }
 
   /** Rebuild injected-part tracking from the message array (history is ground truth). */
@@ -447,8 +506,8 @@ export class OpenCodeRulesRuntime {
       ? this.sessionStore.get(sessionID)
       : undefined;
 
-    // 1. Check compaction gate (must happen before flushing hook injections —
-    //    otherwise injections cleared during a compacting window are silently lost).
+    // 1. Check compaction gate (must happen before rule injection — otherwise
+    //    the static-rule path could inject during a compacting window).
     if (sessionID) {
       const skip = this.sessionStore.shouldSkipInjection(
         sessionID,
@@ -463,30 +522,8 @@ export class OpenCodeRulesRuntime {
       }
     }
 
-    // 2. Flush pending hook injections (always — even when rulesInjected is true).
-    //    Hook-triggered content bypasses the static rulesInjected deduplication gate.
-    //    Flushing here (after compaction check) ensures injections are never silently
-    //    dropped: if compaction was active, they remain queued for the next turn.
-    let hookInjectionsText: string | undefined;
-    if (
-      sessionID &&
-      sessionState?.pendingHookInjections &&
-      sessionState.pendingHookInjections.length > 0
-    ) {
-      const uniqueInjections = [...new Set(sessionState.pendingHookInjections)];
-      hookInjectionsText = uniqueInjections.join('\n\n---\n\n');
-
-      this.sessionStore.upsert(sessionID, state => {
-        state.pendingHookInjections = [];
-      });
-
-      this.debugLog(
-        `Flushing ${uniqueInjections.length} pending hook injection(s) for session ${sessionID}`
-      );
-    }
-
-    // 3. Decide whether to process static rules.
-    //    hook injections ALWAYS proceed (flushed above); static rules are gated.
+    // 2. Decide whether to process static rules.
+    //    Static rules are gated by rulesInjected (set by the chat.message bridge).
     const skipStaticRules = sessionState?.rulesInjected ?? false;
 
     let formattedRules: string | undefined;
@@ -523,21 +560,15 @@ export class OpenCodeRulesRuntime {
       );
     }
 
-    // 4. Build combined system content from hook injections + static rules
+    // 3. Build combined system content from static rules
     const systemParts: string[] = [];
-
-    if (hookInjectionsText) {
-      systemParts.push(hookInjectionsText);
-    }
 
     if (formattedRules) {
       systemParts.push(formattedRules);
     }
 
     if (systemParts.length === 0) {
-      this.debugLog(
-        'No applicable rules or hook injections for current context'
-      );
+      this.debugLog('No applicable rules for current context');
       return output ?? {};
     }
 
