@@ -10,7 +10,12 @@ import {
   type MessageWithInfo,
 } from './message-context.js';
 import { extractConnectedMcpCapabilityIDs } from './mcp-tools.js';
-import { createDebugLog, logWarning, type DebugLog } from './debug.js';
+import {
+  createDebugLog,
+  logWarning,
+  formatError,
+  type DebugLog,
+} from './debug.js';
 import type { SessionStore } from './session-store.js';
 import { buildFilterContext } from './runtime-context.js';
 import {
@@ -20,6 +25,7 @@ import {
 } from './runtime-chat.js';
 import { writeActiveRulesState } from './active-rules-state.js';
 import { evaluateHooks, serializeToolArgs } from './rule-hooks.js';
+import { scanInjectedParts } from './synthetic-injection.js';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -167,42 +173,75 @@ export class OpenCodeRulesRuntime {
     }
 
     const existingState = this.sessionStore.get(sessionID);
-    if (existingState && existingState.seededFromHistory) {
-      this.debugLog(`Session ${sessionID} already seeded, skipping rescan`);
-      return output;
-    }
-
-    const contextPaths = extractFilePathsFromMessages(
-      filterValidMessages(output.messages)
-    );
-    const userPrompt = extractLatestUserPrompt(output.messages);
-
-    this.sessionStore.upsert(sessionID, state => {
-      for (const p of contextPaths) {
-        state.contextPaths.add(normalizeContextPath(p, this.projectDirectory));
-      }
-      if (userPrompt && !state.lastUserPrompt) {
-        state.lastUserPrompt = userPrompt;
-      }
-      state.seededFromHistory = true;
-      state.seedCount = (state.seedCount ?? 0) + 1;
-    });
-
-    if (contextPaths.length > 0) {
-      this.debugLog(
-        `Seeded ${contextPaths.length} context path(s) for session ${sessionID}: ${contextPaths
-          .slice(0, 5)
-          .join(', ')}${contextPaths.length > 5 ? '...' : ''}`
+    if (!existingState?.seededFromHistory) {
+      const contextPaths = extractFilePathsFromMessages(
+        filterValidMessages(output.messages)
       );
-    }
+      const userPrompt = extractLatestUserPrompt(output.messages);
 
-    if (userPrompt) {
-      this.debugLog(
-        `Seeded user prompt for session ${sessionID} (len=${userPrompt.length})`
-      );
+      this.sessionStore.upsert(sessionID, state => {
+        for (const p of contextPaths) {
+          state.contextPaths.add(
+            normalizeContextPath(p, this.projectDirectory)
+          );
+        }
+        if (userPrompt && !state.lastUserPrompt) {
+          state.lastUserPrompt = userPrompt;
+        }
+        state.seededFromHistory = true;
+        state.seedCount = (state.seedCount ?? 0) + 1;
+      });
+
+      if (contextPaths.length > 0) {
+        this.debugLog(
+          `Seeded ${contextPaths.length} context path(s) for session ${sessionID}: ${contextPaths
+            .slice(0, 5)
+            .join(', ')}${contextPaths.length > 5 ? '...' : ''}`
+        );
+      }
+
+      if (userPrompt) {
+        this.debugLog(
+          `Seeded user prompt for session ${sessionID} (len=${userPrompt.length})`
+        );
+      }
+
+      await this.rescanInjectedParts(sessionID, output.messages);
+    } else if (existingState.needsRuleRescan) {
+      this.debugLog(`Session ${sessionID} needs rule rescan - rescanning now`);
+      await this.rescanInjectedParts(sessionID, output.messages);
     }
 
     return output;
+  }
+
+  /** Rebuild injected-part tracking from the message array (history is ground truth). */
+  private async rescanInjectedParts(
+    sessionID: string,
+    messages: MessageWithInfo[]
+  ): Promise<void> {
+    try {
+      const scan = scanInjectedParts(messages);
+      this.sessionStore.upsert(sessionID, state => {
+        state.injectedRuleKeys = new Set(scan.ruleKeys);
+        state.injectedHookHashes = new Set(scan.hookHashes);
+        state.needsRuleRescan = false;
+      });
+      if (scan.ruleRelativePaths.size > 0) {
+        const matchedPaths = this.ruleFiles
+          .filter(rf => scan.ruleRelativePaths.has(rf.relativePath))
+          .map(rf => rf.filePath);
+        await writeActiveRulesState(sessionID, matchedPaths);
+      }
+      this.debugLog(
+        `Rescanned injected parts for session ${sessionID}: ${scan.ruleKeys.size} rule key(s), ${scan.hookHashes.size} hook hash(es)`
+      );
+    } catch (error) {
+      // Keep existing state; the flag (if set) stays for the next dispatch.
+      this.debugLog(
+        `History scan failed for ${sessionID}: ${formatError(error)}`
+      );
+    }
   }
 
   private async onChatMessage(
@@ -429,6 +468,12 @@ export class OpenCodeRulesRuntime {
       return;
     }
 
+    // Rule re-append must be decoupled from path tracking: pure chat
+    // sessions compact too. Consumed by the first post-compaction rescan.
+    this.sessionStore.upsert(sessionID, state => {
+      state.needsRuleRescan = true;
+    });
+
     const sessionState = this.sessionStore.get(sessionID);
     if (!sessionState || sessionState.contextPaths.size === 0) {
       this.debugLog(
@@ -436,8 +481,6 @@ export class OpenCodeRulesRuntime {
       );
       return;
     }
-
-    this.sessionStore.markCompacting(sessionID, this.now());
 
     const sortedPaths = Array.from(sessionState.contextPaths).sort((a, b) =>
       a.localeCompare(b)

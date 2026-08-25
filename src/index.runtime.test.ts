@@ -32,6 +32,12 @@ import {
   readActiveRulesState,
 } from './active-rules-state.js';
 import { clearRuleCache } from './utils.js';
+import {
+  buildRulePart,
+  buildHookInjectionPart,
+  ruleKeyFor,
+  hashContent,
+} from './synthetic-injection.js';
 
 describe('module boundary tests', () => {
   it('should re-export discoverRuleFiles from rule-discovery module', () => {
@@ -1063,6 +1069,199 @@ describe('SessionState', () => {
     );
 
     expect(result.system).toBe('Base prompt.');
+  });
+});
+
+describe('history scan and rescan', () => {
+  let savedEnvXDG: string | undefined;
+  let savedEnvConfigDir: string | undefined;
+  let stateDir: string;
+
+  beforeEach(() => {
+    setupTestDirs();
+    savedEnvXDG = process.env.XDG_CONFIG_HOME;
+    savedEnvConfigDir = process.env.OPENCODE_CONFIG_DIR;
+    delete process.env.OPENCODE_CONFIG_DIR;
+    const { testDir } = getTestDirs();
+    stateDir = path.join(testDir, 'state');
+    mkdirSync(stateDir, { recursive: true });
+    _setStateDirForTesting(stateDir);
+  });
+
+  afterEach(async () => {
+    teardownTestDirs();
+    _setStateDirForTesting(null);
+    const { __testOnly } = await import('./index.js');
+    __testOnly.resetSessionState();
+    if (savedEnvXDG === undefined) {
+      delete process.env.XDG_CONFIG_HOME;
+    } else {
+      process.env.XDG_CONFIG_HOME = savedEnvXDG;
+    }
+    if (savedEnvConfigDir === undefined) {
+      delete process.env.OPENCODE_CONFIG_DIR;
+    } else {
+      process.env.OPENCODE_CONFIG_DIR = savedEnvConfigDir;
+    }
+  });
+
+  it('rebuilds injected rule keys and hook hashes from history during seeding', async () => {
+    const { testDir } = getTestDirs();
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const {
+      default: { server: plugin },
+      __testOnly,
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+    const messagesTransform = hooks['experimental.chat.messages.transform'] as (
+      input: unknown,
+      output: { messages: unknown[] }
+    ) => Promise<{ messages: unknown[] }>;
+
+    const rulePart = buildRulePart('persisted.md', 'Persisted rule body.');
+    const hookPart = buildHookInjectionPart('Persisted hook text.');
+    await messagesTransform(
+      {},
+      {
+        messages: [
+          {
+            info: { id: 'msg_1', role: 'user', sessionID: 'ses_scan' },
+            parts: [rulePart, hookPart],
+          },
+        ],
+      }
+    );
+
+    const snapshot = __testOnly.getSessionStateSnapshot('ses_scan');
+    expect(snapshot?.injectedRuleKeys).toContain(
+      ruleKeyFor('persisted.md', 'Persisted rule body.')
+    );
+    expect(snapshot?.injectedHookHashes).toContain(
+      hashContent('Persisted hook text.')
+    );
+  });
+
+  it('refreshes active-rules-state from scanned history rule paths', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    const rulePath = path.join(globalRulesDir, 'persisted.md');
+    writeFileSync(rulePath, 'Persisted rule body.');
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+    const messagesTransform = hooks['experimental.chat.messages.transform'] as (
+      input: unknown,
+      output: { messages: unknown[] }
+    ) => Promise<{ messages: unknown[] }>;
+
+    await messagesTransform(
+      {},
+      {
+        messages: [
+          {
+            info: { id: 'msg_1', role: 'user', sessionID: 'ses_refresh' },
+            parts: [buildRulePart('persisted.md', 'Persisted rule body.')],
+          },
+        ],
+      }
+    );
+
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const state = await readActiveRulesState('ses_refresh');
+    expect(state?.matchedRulePaths).toEqual([rulePath]);
+  });
+
+  it('compacting sets needsRuleRescan even with empty context paths', async () => {
+    const { testDir } = getTestDirs();
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const {
+      default: { server: plugin },
+      __testOnly,
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+    const compacting = hooks['experimental.session.compacting'] as (
+      input: { sessionID: string },
+      output: { context: string[] }
+    ) => Promise<void>;
+
+    const output = { context: [] as string[] };
+    await compacting({ sessionID: 'ses_compact_empty' }, output);
+
+    expect(
+      __testOnly.getSessionStateSnapshot('ses_compact_empty')?.needsRuleRescan
+    ).toBe(true);
+    expect(output.context).toHaveLength(0);
+  });
+
+  it('rescan replaces keys and clears the flag when history lost the parts', async () => {
+    const { testDir } = getTestDirs();
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const {
+      default: { server: plugin },
+      __testOnly,
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+    const messagesTransform = hooks['experimental.chat.messages.transform'] as (
+      input: unknown,
+      output: { messages: unknown[] }
+    ) => Promise<{ messages: unknown[] }>;
+
+    // Seed once with parts present
+    await messagesTransform(
+      {},
+      {
+        messages: [
+          {
+            info: { id: 'msg_1', role: 'user', sessionID: 'ses_rescan' },
+            parts: [
+              buildRulePart('persisted.md', 'Persisted rule body.'),
+              { sessionID: 'ses_rescan', type: 'text', text: 'hi' },
+            ],
+          },
+        ],
+      }
+    );
+    expect(
+      __testOnly.getSessionStateSnapshot('ses_rescan')?.injectedRuleKeys.size
+    ).toBe(1);
+
+    // Simulate compaction: flag set, post-compaction history has no parts
+    __testOnly.upsertSessionState(
+      'ses_rescan',
+      s => void (s.needsRuleRescan = true)
+    );
+    await messagesTransform(
+      {},
+      {
+        messages: [
+          {
+            info: { id: 'msg_1', role: 'user', sessionID: 'ses_rescan' },
+            parts: [{ sessionID: 'ses_rescan', type: 'text', text: 'hi' }],
+          },
+        ],
+      }
+    );
+
+    const snapshot = __testOnly.getSessionStateSnapshot('ses_rescan');
+    expect(snapshot?.injectedRuleKeys.size).toBe(0);
+    expect(snapshot?.needsRuleRescan).toBe(false);
   });
 });
 
