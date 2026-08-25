@@ -32,9 +32,8 @@ When a session is compacted, the `experimental.session.compacting` hook injects 
   // Add to output context array
   output.context.push(contextString);
 
-  // Set flags for potential future use
-  state.isCompacting = true;
-  state.compactingSince = Date.now();
+  // Mark rules for rescan after compaction (set unconditionally on compaction)
+  sessionState.needsRuleRescan = true;
 };
 ```
 
@@ -75,16 +74,21 @@ interface SessionState {
   contextPaths: Set<string>; // Current working set of file paths
   lastUserPrompt?: string; // Latest user message text
   lastUpdated: number; // Timestamp for LRU cache pruning
-  isCompacting?: boolean; // Flag: compaction in progress
-  compactingSince?: number; // Timestamp when compaction started
   seededFromHistory: boolean; // Flag: history has been scanned
   seedCount?: number; // Count of history scans
+  lastModelID?: string; // Latest model ID
+  lastAgentType?: string; // Latest agent type
+  pendingHookInjections?: string[]; // Queued hook injection texts
+  injectedRuleKeys: Set<string>; // Content-hash dedup keys for delivered rules
+  injectedHookHashes: Set<string>; // Hashes of delivered durable hook injections
+  needsRuleRescan: boolean; // Flag: re-append rules after compaction
 }
 ```
 
 - Maximum of 100 concurrent sessions in memory (LRU eviction)
 - Each entry is tagged with `lastUpdated` for age tracking
 - Sessions are automatically pruned when limit is exceeded
+- After compaction, persisted synthetic parts are gone from history; the next `experimental.chat.messages.transform` rescan empties the injection key sets and the next user message re-appends all currently-matched rules
 
 ## Data Flow
 
@@ -97,7 +101,7 @@ chat.message hook captures file paths from message text
     ↓
 tool.execute.before hooks capture paths from tool calls
     ↓
-system.transform reads session state and injects applicable rules
+chat.message appends matching rules to the user message as synthetic parts
     ↓
 AI processes request with full context
 ```
@@ -200,19 +204,31 @@ When running with `OPENCODE_RULES_DEBUG=1`, you'll see:
 
 **Why not**: OpenCode plugin API doesn't provide reliable silent message delivery for session creation/compaction events.
 
-### ❌ System Prompt Injection
+### ⚠️ System Prompt Injection (Formerly Used)
 
-**Why not**: No plugin hooks expose system prompt modification.
+**Why replaced**: The plugin previously appended rules to the system prompt via `experimental.chat.system.transform`. Mutating the system prefix invalidated provider prompt caching for the whole conversation history, so it was replaced by persisted synthetic-part delivery.
 
-### ❌ Per-message Injection
+### ✅ Persisted Synthetic Parts (Current)
 
-**Why not**: Would duplicate rules in every message, wasting context tokens.
+**Advantages**:
+
+- Delivered via the standard `chat.message` hook - no experimental API required
+- Synthetic parts are hidden in the TUI but included in provider requests
+- System prompt stays byte-stable across requests, preserving provider prompt caching
+- Content-hash dedup keys prevent re-appending rules already in session history
+- After compaction, the next user message re-appends all currently-matched rules
+
+### ❌ Naive Per-message Injection
+
+**Why not**: Appending rule text to every message without deduplication would duplicate rules, wasting context tokens. Synthetic-part delivery avoids this with content-hash dedup keys.
 
 ### ❌ Config-based Approach
 
 **Why not**: Would persist rules to config file, affecting all users/projects globally.
 
-### ✅ Working-Set Context Injection (Current)
+### ✅ Working-Set Context Injection (Current, complementary)
+
+Persisted synthetic parts handle rule _delivery_, while working-set context injection preserves file _paths_ through compaction — the two mechanisms coexist.
 
 **Advantages**:
 

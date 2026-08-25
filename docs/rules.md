@@ -1,6 +1,6 @@
 # OpenCode Rules
 
-This document explains how to use OpenCode Rules to inject custom instructions into the agent's system prompt. Rules are automatically discovered and injected via OpenCode's hook system, enabling context-aware rule filtering based on:
+This document explains how to use OpenCode Rules to inject custom instructions into the agent's context. Rules are automatically discovered and injected via OpenCode's hook system, enabling context-aware rule filtering based on:
 
 - **Legacy filters**: file paths (`globs`), user prompts (`keywords`), and available tools (`tools`)
 - **Runtime filters**: model, agent, command, project type, git branch, OS, and CI environment
@@ -237,7 +237,7 @@ The plugin uses OpenCode's hook system to track context and inject rules:
    - `experimental.chat.messages.transform` hook seeds session state from message history on first call only
 
 2. **Rule Injection**:
-   - `experimental.chat.system.transform` hook evaluates all discovered rules against the accumulated context
+   - Matching rules are evaluated against the accumulated context on every user message
    - Rules are filtered based on:
      - **File paths** (`globs`): Glob patterns matched against files in context
      - **User prompts** (`keywords`): Keyword matching against the latest user message
@@ -250,7 +250,16 @@ The plugin uses OpenCode's hook system to track context and inject rules:
      - **OS** (`os`): Exact match against current operating system
      - **CI** (`ci`): Boolean equality against CI environment detection
    - Missing runtime context (e.g., no git branch available) is treated as a non-match for that dimension
-   - Matching rules are formatted and appended to the system prompt
+
+Rule injection happens once per user message via the `chat.message` hook:
+matching rules are formatted as self-contained blocks (`## <relativePath>`
+followed by the rule body) and appended to the user message as _synthetic_
+text parts before opencode persists it. Synthetic parts are hidden in the TUI
+but included in provider requests, so rules reach the model without ever
+touching the system prompt — the prompt stays byte-stable across requests,
+preserving provider prompt caching. Rules already recorded in session history
+are never re-appended (content-hash dedup), so restarting opencode or resuming
+a session does not duplicate rules.
 
 3. **Session Persistence**:
    - `experimental.session.compacting` hook preserves context paths during session compression
@@ -297,9 +306,13 @@ respects `.gitignore` by default, and produces better formatted output.
 ### How Hook Injections Work
 
 1. When a tool call matches a hook's `tool` and `match`, the rule's body is queued as a **pending hook injection** in the session state.
-2. On the next `experimental.chat.system.transform`, pending injections are flushed and prepended to the system prompt.
+2. Pending hook injections are delivered two ways: immediately, as a transient
+   synthetic user message appended to the very next model request
+   (`experimental.chat.messages.transform`, never persisted), and durably, as
+   synthetic parts attached to the next user message (`chat.message`) so they
+   remain in session history.
 3. The agent sees the corrective guidance on its next turn and can self-correct.
-4. Pending injections are cleared after delivery to avoid duplication.
+4. Pending injections are cleared once delivered durably via `chat.message`.
 
 ### Security Example: Blocking Insecure Bindings
 
@@ -340,7 +353,7 @@ respects `.gitignore` by default, and produces better formatted output.
 - **Regex matching** is performed against the JSON-serialized tool arguments (e.g., `{"command":"node server.js --host 0.0.0.0"}`). Escape dots and other regex metacharacters accordingly.
 - **`block: true`** only works with `PreToolUse`. It throws an error that OpenCode should surface to prevent execution. Use sparingly — `PostToolUse` with corrective guidance is usually preferred.
 - **`run` commands** execute fire-and-forget via `child_process.exec` in the project directory. Failures are logged as warnings and do not block the agent.
-- Hook-triggered rules are **injected independently** of the `rulesInjected` deduplication flag. They can fire multiple times per session and are always delivered when pending.
+- Hook-triggered rules are **injected independently** of the per-message rule deduplication. They can fire multiple times per session and are always delivered when pending.
 
 ## Rule Matching Examples
 
@@ -348,14 +361,14 @@ respects `.gitignore` by default, and produces better formatted output.
 
 - User edits `src/components/Button.tsx` (captured by `tool.execute.before`)
 - Plugin evaluates rules with `globs: ['**/*.ts', '**/*.tsx']`
-- TypeScript rules are injected into system prompt
+- TypeScript rules are appended to the user message as synthetic parts
 
 ### Scenario 2: User Mentions Testing
 
 - User types prompt: "How do I write unit tests for this function?"
 - `chat.message` hook captures the prompt
 - Plugin evaluates rules with `keywords: ['testing', 'unit test']`
-- Testing rules are injected into system prompt
+- Testing rules are appended to the user message as synthetic parts
 
 ### Scenario 3: Tool-Based Rules
 

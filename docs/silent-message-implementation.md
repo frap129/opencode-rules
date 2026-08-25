@@ -1,5 +1,9 @@
 # Silent Message Implementation
 
+> **Status: Historical.** This document describes the retired `noReply`
+> silent-message design. The plugin now delivers rules via persisted
+> synthetic parts (see `docs/rules.md`). Retained for design history only.
+
 ## Overview
 
 The plugin has been updated to use OpenCode's **silent message pattern** (the `noReply` flag) to inject rules into sessions. This approach is cleaner, more reliable, and immediately responsive to session events.

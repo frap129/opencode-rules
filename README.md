@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/opencode-rules)](https://www.npmjs.com/package/opencode-rules)
 [![npm downloads](https://img.shields.io/npm/dm/opencode-rules)](https://www.npmjs.com/package/opencode-rules)
 
-A lightweight OpenCode plugin that discovers and injects markdown rule files into AI agent system prompts, enabling flexible behavior customization without per-project configuration.
+A lightweight OpenCode plugin that discovers and injects markdown rule files into AI agent conversations, enabling flexible behavior customization without per-project configuration.
 
 ## Overview
 
@@ -110,10 +110,10 @@ That's it! The rule will now be automatically injected into all AI agent prompts
 2. **Parsing**: Extract metadata from files with YAML front matter
 3. **Tool Execution**: `tool.execute.before` hook captures file paths before tools run
 4. **Message Flow**: `chat.message` hook updates user prompt as messages arrive
-5. **Initial Seeding**: `experimental.chat.messages.transform` extracts context from message history once
-6. **Rule Filtering**: `experimental.chat.system.transform` evaluates rules based on context and injects into system prompt
-7. **State Persistence**: After filtering, matched rule paths are written to `~/.opencode/state/opencode-rules/{sessionId}.json` for TUI consumption
-8. **Compaction Persistence**: `experimental.session.compacting` preserves context during session compression
+5. **Initial Seeding**: `experimental.chat.messages.transform` extracts context from message history once and rebuilds dedup keys when resuming a session; pending hook injections are delivered as a transient synthetic message on the next request
+6. **Rule Delivery**: Matching rules are appended to the user message as synthetic text parts via `chat.message` (one per rule), hidden in the TUI but included in provider requests so the system prompt stays byte-stable for prompt caching; content-hash dedup keys ensure rules already in history are never re-appended
+7. **State Persistence**: Matched rule paths are written to `~/.opencode/state/opencode-rules/{sessionId}.json` for TUI consumption
+8. **Compaction Persistence**: `experimental.session.compacting` preserves context during session compression and marks rules for rescan, so the next user message re-appends all currently-matched rules
 
 ## Performance
 
@@ -472,7 +472,7 @@ opencode-rules/
 │   ├── debug.ts              # Debug logging utilities
 │   ├── utils.ts              # Re-export facade for backwards compatibility
 │   ├── test-fixtures.ts      # Shared test fixtures and builders
-│   └── *.test.ts             # Unit/integration tests (11 test files)
+│   └── *.test.ts             # Unit/integration tests (16 test files in src)
 ├── tui/
 │   ├── index.tsx             # TUI entrypoint, exports { id, tui }
 │   ├── slots/
@@ -570,23 +570,14 @@ This plugin uses OpenCode's hook system for incremental, stateful rule injection
    - Fires before each tool runs (read, edit, write, glob, grep, etc.)
    - Captures `filePath` or `path` arguments authoritative from the tool definition
    - Evaluates `PreToolUse` hooks: rules with `block: true` can prevent execution
-   - Queues matched rule content as pending hook injections for the next system prompt
+   - Queues matched rule content as pending hook injections for the next user message
    - Updates session state with normalized, verified context paths
    - Provides real-time context as tools are executed
 
-2. **`chat.message`** - Incremental user prompt capture
+2. **`chat.message`** - User prompt capture and synthetic-part rule delivery
    - Fires as each user message arrives
    - Extracts and stores the latest user prompt text
    - Enables keyword-based rule matching across the conversation flow
-
-3. **`experimental.chat.messages.transform`** - One-time seeding fallback
-   - Fires before the first LLM call only (skipped on subsequent turns)
-   - Seeds session state from full message history if needed
-   - Provides fallback context extraction from all visible messages
-   - Ensures rules apply even if initial context wasn't captured by tool hooks
-
-4. **`experimental.chat.system.transform`** - Rule injection and filtering
-   - Fires before each LLM system prompt is constructed
    - Receives full runtime filter context: model, agent, command, project type, git branch, OS, and CI environment
    - Reads discovered rule files and filters based on:
      - Extracted file paths from session state (`globs`)
@@ -594,26 +585,38 @@ This plugin uses OpenCode's hook system for incremental, stateful rule injection
      - Available tool IDs (`tools`)
      - Runtime environment (model, agent, command, project, branch, OS, CI)
    - Command is inferred from the leading slash token (first token) of the latest user prompt
-   - Appends formatted rules to the system prompt
+   - Appends matching rules to the user message as one synthetic text part per rule (id prefix `prt_rules_`) before opencode persists it
+   - Synthetic parts are hidden in the TUI but included in provider requests, keeping the system prompt byte-stable across requests for provider prompt caching
+   - Content-hash dedup keys (`${relativePath}:${sha256-16(content)}`) ensure rules already in history are never re-appended
 
-5. **`experimental.session.compacting`** - Compaction context preservation
+3. **`experimental.chat.messages.transform`** - One-time seeding fallback and transient hook delivery
+   - Fires before each model request; history seeding runs only on the first
+     call (gated by seededFromHistory), while transient hook delivery and
+     post-compaction rescans run on every request
+   - Seeds session state from full message history if needed
+   - Rebuilds dedup key sets from client history when a session is resumed
+   - Delivers pending hook injections immediately as a transient synthetic user message (`prt_hook_transient_`) appended to the very next model request - never persisted
+   - After compaction, rescans history and empties the injection key sets so the next user message re-appends all currently-matched rules
+
+4. **`experimental.session.compacting`** - Compaction context preservation
    - Fires when a session is compacted (summarized)
    - Injects current context paths into the compaction context
-   - Prevents rules from being lost during session compression
+   - Sets `needsRuleRescan` (unconditionally, before any context-path early return) so rules are re-appended after compaction
 
-6. **`tool.execute.after`** - Post-execution corrective guidance
+5. **`tool.execute.after`** - Post-execution corrective guidance
    - Fires after each tool completes
    - Evaluates `PostToolUse` hooks for reactive rule triggering
    - Queues corrective rule content into pending hook injections
-   - Content is delivered on the next `experimental.chat.system.transform`
+   - Durable hook injections are delivered as synthetic parts (id `prt_hook_<hash>`) on the next user message via `chat.message` so they remain in session history
 
 ### Experimental API Notice
 
 This plugin depends on experimental OpenCode APIs:
 
-- `experimental.chat.messages.transform` (fallback seeding)
-- `experimental.chat.system.transform` (rule injection)
+- `experimental.chat.messages.transform` (history seeding, transient hook delivery)
 - `experimental.session.compacting` (compaction context)
+
+It also uses the stable `chat.message` hook for synthetic-part rule delivery.
 
 These APIs may change in future OpenCode versions. Check OpenCode release notes when upgrading.
 
