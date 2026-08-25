@@ -1,4 +1,9 @@
-import { readAndFormatRules, type RuleFilterContext } from './rule-filter.js';
+import {
+  matchRules,
+  readAndFormatRules,
+  type RuleFilterContext,
+  type MatchedRuleEntry,
+} from './rule-filter.js';
 import { extractFilePathsFromMessages } from './message-paths.js';
 import { type DiscoveredRule, getCachedRule } from './rule-discovery.js';
 import {
@@ -25,7 +30,15 @@ import {
 } from './runtime-chat.js';
 import { writeActiveRulesState } from './active-rules-state.js';
 import { evaluateHooks, serializeToolArgs } from './rule-hooks.js';
-import { scanInjectedParts } from './synthetic-injection.js';
+import {
+  buildRulePart,
+  buildHookInjectionPart,
+  hashContent,
+  ruleKeyFor,
+  scanInjectedParts,
+  type InjectedPartsScan,
+  type SyntheticPart,
+} from './synthetic-injection.js';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -53,6 +66,12 @@ interface OpenCodeClient {
     status?: (args: {
       query: { directory: string };
     }) => Promise<{ connected?: Array<{ id: string }> }>;
+  };
+  session?: {
+    messages?: (args: {
+      path: { id: string };
+      query?: { directory?: string };
+    }) => Promise<{ data?: Array<{ info?: unknown; parts?: unknown[] }> }>;
   };
 }
 
@@ -248,12 +267,175 @@ export class OpenCodeRulesRuntime {
     input: ChatMessageInput,
     output: ChatMessageOutput
   ): Promise<void> {
-    updateSessionFromChatMessage(
-      input,
-      output,
-      this.sessionStore,
-      this.debugLog
-    );
+    try {
+      const captured = updateSessionFromChatMessage(
+        input,
+        output,
+        this.sessionStore,
+        this.debugLog
+      );
+      const sessionID = input?.sessionID;
+      if (!captured || !sessionID) {
+        return;
+      }
+
+      // 1. Merge file paths mentioned in this message into session context
+      if (output.parts && output.parts.length > 0) {
+        const paths = extractFilePathsFromMessages([
+          { role: 'user', parts: output.parts as never[] },
+        ]);
+        if (paths.length > 0) {
+          this.sessionStore.upsert(sessionID, state => {
+            for (const p of paths) {
+              state.contextPaths.add(
+                normalizeContextPath(p, this.projectDirectory)
+              );
+            }
+          });
+        }
+      }
+
+      // 2. First message of a session run: rebuild injection keys from
+      //    persisted history so restarts never duplicate parts.
+      const initialState = this.sessionStore.get(sessionID);
+      if (initialState && !initialState.seededFromHistory) {
+        const scanned = await this.scanHistoryFromClient(sessionID);
+        if (scanned === undefined) {
+          this.sessionStore.upsert(sessionID, state => {
+            state.needsRuleRescan = true;
+          });
+          this.debugLog(
+            `History fetch failed for ${sessionID} - skipping injection this turn`
+          );
+          return;
+        }
+        this.sessionStore.upsert(sessionID, state => {
+          state.injectedRuleKeys = new Set(scanned.ruleKeys);
+          state.injectedHookHashes = new Set(scanned.hookHashes);
+        });
+      }
+
+      // 3. Never append while a rescan is pending (history keys unknown/stale)
+      const state = this.sessionStore.get(sessionID);
+      if (!state || state.needsRuleRescan) {
+        this.debugLog(
+          `Session ${sessionID} needs rule rescan - skipping injection this turn`
+        );
+        return;
+      }
+
+      // 4. Rule matching (skipped for messages without non-synthetic text)
+      let matched: MatchedRuleEntry[] = [];
+      if (captured.userPrompt) {
+        const contextPaths = Array.from(state.contextPaths).sort((a, b) =>
+          a.localeCompare(b)
+        );
+        const availableToolIDs = await this.queryAvailableToolIDs();
+
+        const filterContext: RuleFilterContext = await buildFilterContext({
+          contextFilePaths: contextPaths,
+          userPrompt: captured.userPrompt,
+          availableToolIDs,
+          modelID: captured.modelID,
+          agentType: captured.agentType,
+          projectDirectory: this.projectDirectory,
+          debugLog: this.debugLog,
+        });
+
+        matched = await matchRules(this.ruleFiles, filterContext);
+      }
+
+      // 5. Append one synthetic part per not-yet-injected rule
+      const newParts: SyntheticPart[] = [];
+      const newRuleKeys: string[] = [];
+      for (const rule of matched) {
+        const key = ruleKeyFor(rule.relativePath, rule.strippedContent);
+        if (state.injectedRuleKeys.has(key) || newRuleKeys.includes(key)) {
+          continue;
+        }
+        newParts.push(buildRulePart(rule.relativePath, rule.strippedContent));
+        newRuleKeys.push(key);
+      }
+
+      // 6. Flush queued hook injections as durable parts (content-hash dedup)
+      const newHookHashes: string[] = [];
+      const pending = state.pendingHookInjections ?? [];
+      for (const content of new Set(pending)) {
+        const hash = hashContent(content);
+        if (
+          state.injectedHookHashes.has(hash) ||
+          newHookHashes.includes(hash)
+        ) {
+          continue;
+        }
+        newParts.push(buildHookInjectionPart(content));
+        newHookHashes.push(hash);
+      }
+
+      if (newParts.length > 0) {
+        if (!output.parts) {
+          output.parts = [];
+        }
+        output.parts.push(...newParts);
+      }
+
+      this.sessionStore.upsert(sessionID, s => {
+        for (const key of newRuleKeys) {
+          s.injectedRuleKeys.add(key);
+        }
+        for (const hash of newHookHashes) {
+          s.injectedHookHashes.add(hash);
+        }
+        s.pendingHookInjections = [];
+        // Transitional bridge: suppress the legacy system.transform path
+        // until it is deleted. Removed together with onSystemTransform.
+        s.rulesInjected = true;
+      });
+
+      if (captured.userPrompt) {
+        await writeActiveRulesState(
+          sessionID,
+          matched.map(r => r.filePath)
+        );
+      }
+
+      this.debugLog(
+        `Appended ${newParts.length} synthetic part(s) for session ${sessionID}`
+      );
+    } catch (error) {
+      this.debugLog(`chat.message handler failed: ${formatError(error)}`);
+    }
+  }
+
+  /** Fetch persisted history via the client and scan it for injected parts.
+   * Returns undefined when the fetch fails (history state unknown). */
+  private async scanHistoryFromClient(
+    sessionID: string
+  ): Promise<InjectedPartsScan | undefined> {
+    const fetchHistory = this.client.session?.messages;
+    if (!fetchHistory) {
+      // Client without the session API (older host or test mock):
+      // assume a fresh session with empty history.
+      this.debugLog(
+        `Client lacks session.messages - assuming empty history for ${sessionID}`
+      );
+      return {
+        ruleKeys: new Set<string>(),
+        hookHashes: new Set<string>(),
+        ruleRelativePaths: new Set<string>(),
+      };
+    }
+    try {
+      const result = await fetchHistory({
+        path: { id: sessionID },
+        query: { directory: this.directory },
+      });
+      const messages = (result?.data ?? []) as MessageWithInfo[];
+      return scanInjectedParts(messages);
+    } catch (error) {
+      logWarning('Failed to fetch session history', error);
+      return undefined;
+    }
   }
 
   private async onSystemTransform(

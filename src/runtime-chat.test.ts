@@ -95,4 +95,41 @@ describe('updateSessionFromChatMessage', () => {
     expect(store.get('ses_assistant')?.lastAgentType).toBe('existing-agent');
     expect(store.get('ses_assistant')?.lastModelID).toBe('existing-model');
   });
+
+  it('returns captured prompt, model, and agent for user messages', () => {
+    const store = new SessionStore();
+
+    const captured = updateSessionFromChatMessage(
+      { sessionID: 'ses_cap', model: { modelID: 'fallback-model' } },
+      {
+        message: {
+          role: 'user',
+          agent: 'build',
+          model: { modelID: 'claude-opus' },
+        },
+        parts: [{ type: 'text', text: 'hello' }],
+      },
+      store,
+      vi.fn()
+    );
+
+    expect(captured).toEqual({
+      userPrompt: 'hello',
+      modelID: 'claude-opus',
+      agentType: 'build',
+    });
+  });
+
+  it('returns undefined for non-user messages', () => {
+    const store = new SessionStore();
+
+    const captured = updateSessionFromChatMessage(
+      { sessionID: 'ses_asst' },
+      { message: { role: 'assistant' }, parts: [] },
+      store,
+      vi.fn()
+    );
+
+    expect(captured).toBeUndefined();
+  });
 });

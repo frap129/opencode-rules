@@ -14,7 +14,18 @@ export interface ChatMessageOutput {
     agent?: string;
     model?: { modelID?: string };
   };
-  parts?: Array<{ type?: string; text?: string; synthetic?: boolean }>;
+  parts?: Array<{
+    id?: string;
+    type?: string;
+    text?: string;
+    synthetic?: boolean;
+  }>;
+}
+
+export interface CapturedChatContext {
+  userPrompt: string;
+  modelID?: string;
+  agentType?: string;
 }
 
 /**
@@ -26,15 +37,15 @@ export function updateSessionFromChatMessage(
   output: ChatMessageOutput,
   sessionStore: SessionStore,
   debugLog: DebugLog
-): void {
+): CapturedChatContext | undefined {
   const sessionID = input?.sessionID;
   if (!sessionID) {
     debugLog('No sessionID in chat.message hook input');
-    return;
+    return undefined;
   }
 
   if (output?.message?.role !== 'user') {
-    return;
+    return undefined;
   }
 
   const userPrompt = output.parts ? extractTextFromParts(output.parts) : '';
@@ -58,4 +69,13 @@ export function updateSessionFromChatMessage(
   debugLog(
     `Updated session ${sessionID} from chat.message (model=${modelID ?? 'none'}, agent=${agent ?? 'none'})`
   );
+
+  const captured: CapturedChatContext = { userPrompt };
+  if (modelID !== undefined) {
+    captured.modelID = modelID;
+  }
+  if (agent !== undefined) {
+    captured.agentType = agent;
+  }
+  return captured;
 }

@@ -108,6 +108,7 @@ interface MockPluginInput {
   testDir: string;
   toolIds?: string[];
   mcpStatus?: Record<string, { status: string }>;
+  history?: Array<{ info?: unknown; parts?: unknown[] }>;
 }
 
 /**
@@ -118,6 +119,11 @@ export function createMockPluginInput(opts: MockPluginInput): {
     tool: { ids: () => Promise<{ data: string[] }> };
     mcp?: {
       status: () => Promise<{ data: Record<string, { status: string }> }>;
+    };
+    session: {
+      messages: () => Promise<{
+        data: Array<{ info?: unknown; parts?: unknown[] }>;
+      }>;
     };
   };
   project: Record<string, unknown>;
@@ -131,8 +137,14 @@ export function createMockPluginInput(opts: MockPluginInput): {
     mcp?: {
       status: () => Promise<{ data: Record<string, { status: string }> }>;
     };
+    session: {
+      messages: () => Promise<{
+        data: Array<{ info?: unknown; parts?: unknown[] }>;
+      }>;
+    };
   } = {
     tool: { ids: async () => ({ data: opts.toolIds ?? [] }) },
+    session: { messages: async () => ({ data: opts.history ?? [] }) },
   };
 
   if (opts.mcpStatus) {

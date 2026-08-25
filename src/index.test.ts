@@ -28,6 +28,16 @@ import {
   type CiEnvSnapshot,
 } from './test-fixtures.js';
 
+type ChatMessageOutputLike = {
+  message: { role: string; model?: { modelID: string }; agent?: string };
+  parts: Array<{
+    id?: string;
+    type?: string;
+    text?: string;
+    synthetic?: boolean;
+  }>;
+};
+
 // Retained plugin-level tests with complex runtime filter context
 describe('Runtime filter context integration (plugin-level)', () => {
   let savedEnvXDG: string | undefined;
@@ -88,26 +98,22 @@ Model-specific guidelines.`
 
     const chatMessage = hooks['chat.message'] as (
       input: { sessionID: string; model?: { modelID: string } },
-      output: { message: { role: string }; parts: unknown[] }
+      output: ChatMessageOutputLike
     ) => Promise<void>;
+    const output: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'hello' }],
+    };
     await chatMessage(
       { sessionID: 'ses_model_test', model: { modelID: 'claude-opus' } },
-      {
-        message: { role: 'user' },
-        parts: [{ type: 'text', text: 'hello' }],
-      }
+      output
     );
 
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: { sessionID?: string },
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform(
-      { sessionID: 'ses_model_test' },
-      { system: 'Base prompt.' }
-    );
-
-    expect(result.system).toContain('Model-specific guidelines');
+    const injectedText = output.parts
+      .filter(p => p.synthetic)
+      .map(p => p.text)
+      .join('\n');
+    expect(injectedText).toContain('Model-specific guidelines');
   });
 
   it('should include agent-conditional rule when session has matching agentType', async () => {
@@ -138,26 +144,22 @@ Agent-specific guidelines.`
 
     const chatMessage = hooks['chat.message'] as (
       input: { sessionID: string; agent?: string },
-      output: { message: { role: string }; parts: unknown[] }
+      output: ChatMessageOutputLike
     ) => Promise<void>;
+    const output: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'hello' }],
+    };
     await chatMessage(
       { sessionID: 'ses_agent_test', agent: 'programmer' },
-      {
-        message: { role: 'user' },
-        parts: [{ type: 'text', text: 'hello' }],
-      }
+      output
     );
 
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: { sessionID?: string },
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform(
-      { sessionID: 'ses_agent_test' },
-      { system: 'Base prompt.' }
-    );
-
-    expect(result.system).toContain('Agent-specific guidelines');
+    const injectedText = output.parts
+      .filter(p => p.synthetic)
+      .map(p => p.text)
+      .join('\n');
+    expect(injectedText).toContain('Agent-specific guidelines');
   });
 
   it('should evaluate model and agent rules from output.message context', async () => {
@@ -201,38 +203,24 @@ Nonmatching output context.`
 
     const chatMessage = hooks['chat.message'] as (
       input: { sessionID: string },
-      output: {
-        message: {
-          role: string;
-          model: { modelID: string };
-          agent: string;
-        };
-        parts: unknown[];
-      }
+      output: ChatMessageOutputLike
     ) => Promise<void>;
-    await chatMessage(
-      { sessionID: 'ses_output_context' },
-      {
-        message: {
-          role: 'user',
-          model: { modelID: 'output-model' },
-          agent: 'output-agent',
-        },
-        parts: [{ type: 'text', text: 'hello' }],
-      }
-    );
+    const output: ChatMessageOutputLike = {
+      message: {
+        role: 'user',
+        model: { modelID: 'output-model' },
+        agent: 'output-agent',
+      },
+      parts: [{ type: 'text', text: 'hello' }],
+    };
+    await chatMessage({ sessionID: 'ses_output_context' }, output);
 
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: { sessionID?: string },
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform(
-      { sessionID: 'ses_output_context' },
-      { system: 'Base prompt.' }
-    );
-
-    expect(result.system).toContain('Matching output context.');
-    expect(result.system).not.toContain('Nonmatching output context.');
+    const injectedText = output.parts
+      .filter(p => p.synthetic)
+      .map(p => p.text)
+      .join('\n');
+    expect(injectedText).toContain('Matching output context.');
+    expect(injectedText).not.toContain('Nonmatching output context.');
   });
 
   it('should include command-conditional rule when user prompt starts with matching slash command', async () => {
@@ -263,26 +251,19 @@ Planning guidelines.`
 
     const chatMessage = hooks['chat.message'] as (
       input: { sessionID: string },
-      output: { message: { role: string }; parts: unknown[] }
+      output: ChatMessageOutputLike
     ) => Promise<void>;
-    await chatMessage(
-      { sessionID: 'ses_cmd_test' },
-      {
-        message: { role: 'user' },
-        parts: [{ type: 'text', text: '/plan implement a new feature' }],
-      }
-    );
+    const output: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: '/plan implement a new feature' }],
+    };
+    await chatMessage({ sessionID: 'ses_cmd_test' }, output);
 
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: { sessionID?: string },
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform(
-      { sessionID: 'ses_cmd_test' },
-      { system: 'Base prompt.' }
-    );
-
-    expect(result.system).toContain('Planning guidelines');
+    const injectedText = output.parts
+      .filter(p => p.synthetic)
+      .map(p => p.text)
+      .join('\n');
+    expect(injectedText).toContain('Planning guidelines');
   });
 
   it('should include os-conditional rule when current platform matches', async () => {
@@ -391,30 +372,26 @@ All dimensions must match.`
 
     const chatMessage = hooks['chat.message'] as (
       input: { sessionID: string; model?: { modelID: string }; agent?: string },
-      output: { message: { role: string }; parts: unknown[] }
+      output: ChatMessageOutputLike
     ) => Promise<void>;
+    const output: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: '/plan implement something' }],
+    };
     await chatMessage(
       {
         sessionID: 'ses_all',
         model: { modelID: 'claude-opus' },
         agent: 'programmer',
       },
-      {
-        message: { role: 'user' },
-        parts: [{ type: 'text', text: '/plan implement something' }],
-      }
+      output
     );
 
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: { sessionID?: string },
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform(
-      { sessionID: 'ses_all' },
-      { system: 'Base prompt.' }
-    );
-
-    expect(result.system).toContain('All dimensions must match');
+    const injectedText = output.parts
+      .filter(p => p.synthetic)
+      .map(p => p.text)
+      .join('\n');
+    expect(injectedText).toContain('All dimensions must match');
   });
 
   it('should exclude match: all rule when one dimension is missing', async () => {
