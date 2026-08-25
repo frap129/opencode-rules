@@ -11,6 +11,7 @@ import {
 } from 'solid-js';
 import type { TuiPluginApi, TuiTheme } from '@opencode-ai/plugin/tui';
 import { loadSidebarRules, type SidebarRuleEntry } from '../data/rules.js';
+import { createRulesLoadCoordinator } from '../data/rules-load-coordinator.js';
 import type { RuleMetadata } from '../../src/utils.js';
 
 const metadataFieldDescriptors: Array<{
@@ -161,42 +162,29 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
     return props.api.state.path.directory ?? null;
   };
 
-  // Monotonic counter to detect stale async results
-  let requestId = 0;
   // Debounce timer for event-driven refresh
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
-  async function loadRules(options: { resetUi?: boolean } = {}): Promise<void> {
-    const thisRequest = ++requestId;
-    const dir = resolveProjectDir();
-    const sessionId = props.sessionId;
-
-    if (options.resetUi) {
-      setLastDir(dir);
-      setLastSessionId(sessionId);
+  const rulesLoadCoordinator = createRulesLoadCoordinator({
+    load: target => loadSidebarRules(target.projectDir, target.sessionId),
+    onReset: target => {
+      setLastDir(target.projectDir);
+      setLastSessionId(target.sessionId);
       setStatus('loading');
-    } else if (status() === 'loading') {
-      // Skip refresh if initial load is still in flight
-      return;
-    }
-
-    try {
-      const result = await loadSidebarRules(dir, sessionId);
-      // Discard if a newer request started
-      if (requestId !== thisRequest) return;
+    },
+    onResult: result => {
       setRules(result.rules);
       setSkippedCount(result.skippedCount);
       setHasEvaluationState(result.hasEvaluationState);
       setStatus('loaded');
-    } catch (err) {
-      // Discard if a newer request started
-      if (requestId !== thisRequest) return;
-      console.error('[opencode-rules] Failed to load rules:', err);
-      if (options.resetUi) {
+    },
+    onError: (error, _target, reset) => {
+      console.error('[opencode-rules] Failed to load rules:', error);
+      if (reset) {
         setStatus('error');
       }
-    }
-  }
+    },
+  });
 
   // Effect 1: Initial load on session/directory change
   createEffect(() => {
@@ -214,7 +202,10 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
       setExpandedIndex(null);
       setProjectOpen(false);
       setGlobalOpen(false);
-      void loadRules({ resetUi: true });
+      rulesLoadCoordinator.reset({
+        projectDir: currentDir,
+        sessionId: currentSessionId,
+      });
     }
   });
 
@@ -222,7 +213,7 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
   createEffect(() => {
     const counter = refreshCounter();
     if (counter > 0) {
-      void loadRules();
+      rulesLoadCoordinator.refresh();
     }
   });
 
@@ -263,6 +254,7 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
     if (debounceTimer !== null) {
       clearTimeout(debounceTimer);
     }
+    rulesLoadCoordinator.dispose();
     unsubMessageUpdated();
     unsubSessionStatus();
   });
