@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import path from 'node:path';
-import { writeFileSync, utimesSync } from 'node:fs';
+import { writeFileSync, mkdirSync, utimesSync } from 'node:fs';
 import { readAndFormatRules, clearRuleCache } from './utils.js';
 import { matchRules } from './rule-filter.js';
 import {
@@ -16,6 +16,8 @@ import {
   toRules,
   createMockPluginInput,
 } from './test-fixtures.js';
+import { buildRulePart } from './synthetic-injection.js';
+import { _setStateDirForTesting } from './active-rules-state.js';
 import { __testOnly } from './index.js';
 
 type ChatMessageOutputLike = {
@@ -1360,5 +1362,257 @@ MCP Context7 rule content`;
       .map(p => p.text)
       .join('\n');
     expect(syntheticText).toContain('MCP Context7 rule content');
+  });
+});
+
+describe('Synthetic-part delivery lifecycle', () => {
+  let savedEnvXDG: string | undefined;
+  let savedEnvConfigDir: string | undefined;
+  let stateDir: string;
+
+  beforeEach(() => {
+    setupTestDirs();
+    savedEnvXDG = process.env.XDG_CONFIG_HOME;
+    savedEnvConfigDir = process.env.OPENCODE_CONFIG_DIR;
+    delete process.env.OPENCODE_CONFIG_DIR;
+    const { testDir } = getTestDirs();
+    stateDir = path.join(testDir, 'state');
+    mkdirSync(stateDir, { recursive: true });
+    _setStateDirForTesting(stateDir);
+    clearRuleCache();
+  });
+
+  afterEach(async () => {
+    teardownTestDirs();
+    _setStateDirForTesting(null);
+    vi.resetAllMocks();
+    __testOnly.resetSessionState();
+    if (savedEnvXDG === undefined) {
+      delete process.env.XDG_CONFIG_HOME;
+    } else {
+      process.env.XDG_CONFIG_HOME = savedEnvXDG;
+    }
+    if (savedEnvConfigDir === undefined) {
+      delete process.env.OPENCODE_CONFIG_DIR;
+    } else {
+      process.env.OPENCODE_CONFIG_DIR = savedEnvConfigDir;
+    }
+  });
+
+  it('full turn: rules persist once, hook fires mid-turn, delivered transiently then durably', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    writeFileSync(
+      path.join(globalRulesDir, 'always.md'),
+      '# Always Apply\nPersistent rule body.'
+    );
+    writeFileSync(
+      path.join(globalRulesDir, 'lint-hook.mdc'),
+      `---\nhooks:\n  - type: PreToolUse\n    tool: bash\n    match: "eslint"\n---\n\nMind the linter.`
+    );
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+    const chatMessage = hooks['chat.message'] as (
+      input: { sessionID: string },
+      output: {
+        message: { role: string };
+        parts: Array<{ id?: string; synthetic?: boolean; text?: string }>;
+      }
+    ) => Promise<void>;
+    const before = hooks['tool.execute.before'] as (
+      input: { tool: string; sessionID: string; callID: string },
+      output: { args: Record<string, unknown> }
+    ) => Promise<void>;
+    const messagesTransform = hooks['experimental.chat.messages.transform'] as (
+      input: unknown,
+      output: { messages: unknown[] }
+    ) => Promise<{ messages: unknown[] }>;
+
+    // Turn 1: user message — rule part persisted
+    const turn1: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'run the linter' }],
+    };
+    await chatMessage({ sessionID: 'ses_life' }, turn1);
+    const turn1Synthetic = turn1.parts.filter(p => p.synthetic);
+    expect(turn1Synthetic).toHaveLength(2);
+    expect(turn1Synthetic.map(p => p.text)).toContain(
+      '## always.md\n\n# Always Apply\nPersistent rule body.'
+    );
+    expect(turn1Synthetic.map(p => p.text)).not.toContain('Mind the linter.');
+
+    // Mid-turn: hook fires on a tool call
+    await before(
+      { tool: 'bash', sessionID: 'ses_life', callID: 'call_1' },
+      { args: { command: 'npx eslint src/' } }
+    );
+
+    // Next dispatch within the turn: transient delivery at the tail
+    const dispatch: Array<Record<string, unknown>> = [
+      {
+        info: { id: 'msg_u1', role: 'user', sessionID: 'ses_life' },
+        parts: [...turn1.parts],
+      },
+      {
+        info: { id: 'msg_a1', role: 'assistant', sessionID: 'ses_life' },
+        parts: [{ type: 'text', text: 'running tools...' }],
+      },
+    ];
+    await messagesTransform({}, { messages: dispatch });
+    expect(dispatch).toHaveLength(3);
+    const transient = dispatch[2] as {
+      parts: Array<{ id?: string; synthetic?: boolean; text?: string }>;
+    };
+    expect(transient.parts.some(p => p.text === 'Mind the linter.')).toBe(true);
+
+    // Turn 2: user message — hook text lands durably, rule not duplicated
+    const turn2: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'thanks' }],
+    };
+    await chatMessage({ sessionID: 'ses_life' }, turn2);
+    const syntheticIds = turn2.parts.filter(p => p.synthetic).map(p => p.id);
+    expect(syntheticIds.some(id => id?.startsWith('prt_rules_'))).toBe(false);
+    expect(syntheticIds.some(id => id?.startsWith('prt_hook_'))).toBe(true);
+    const durableHook = turn2.parts.find(
+      p => p.synthetic && p.id?.startsWith('prt_hook_')
+    );
+    expect(durableHook?.text).toBe('Mind the linter.');
+
+    // Post-durable dispatch: transient injection suppressed (durable part present)
+    const dispatch2: Array<Record<string, unknown>> = [
+      {
+        info: { id: 'msg_u2', role: 'user', sessionID: 'ses_life' },
+        parts: [...turn1.parts],
+      },
+      {
+        info: { id: 'msg_u3', role: 'user', sessionID: 'ses_life' },
+        parts: [...turn2.parts],
+      },
+    ];
+    await messagesTransform({}, { messages: dispatch2 });
+    expect(dispatch2).toHaveLength(2);
+  });
+
+  it('restart: history scan suppresses duplicate rule parts on first new message', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    writeFileSync(
+      path.join(globalRulesDir, 'persisted.md'),
+      'Persisted rule body.'
+    );
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    // Simulated persisted history from before the restart
+    const history = [
+      {
+        info: { id: 'msg_u0', role: 'user', sessionID: 'ses_restart' },
+        parts: [
+          { type: 'text', text: 'original question' },
+          buildRulePart('persisted.md', 'Persisted rule body.'),
+        ],
+      },
+    ];
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({
+      testDir,
+      history,
+    });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+    const chatMessage = hooks['chat.message'] as (
+      input: { sessionID: string },
+      output: {
+        message: { role: string };
+        parts: Array<{ synthetic?: boolean }>;
+      }
+    ) => Promise<void>;
+
+    const output: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'continuing after restart' }],
+    };
+    await chatMessage({ sessionID: 'ses_restart' }, output);
+
+    expect(output.parts.filter(p => p.synthetic)).toHaveLength(0);
+  });
+
+  it('compaction: rules re-appended on the next user message after compaction', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    writeFileSync(
+      path.join(globalRulesDir, 'always.md'),
+      '# Always Apply\nCompaction survivor.'
+    );
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const {
+      default: { server: plugin },
+      __testOnly,
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+    const chatMessage = hooks['chat.message'] as (
+      input: { sessionID: string },
+      output: {
+        message: { role: string };
+        parts: Array<{ id?: string; synthetic?: boolean; text?: string }>;
+      }
+    ) => Promise<void>;
+    const messagesTransform = hooks['experimental.chat.messages.transform'] as (
+      input: unknown,
+      output: { messages: unknown[] }
+    ) => Promise<{ messages: unknown[] }>;
+    const compacting = hooks['experimental.session.compacting'] as (
+      input: { sessionID: string },
+      output: { context: string[] }
+    ) => Promise<void>;
+
+    // Turn 1: rule part injected
+    const turn1: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'first' }],
+    };
+    await chatMessage({ sessionID: 'ses_comp' }, turn1);
+    expect(turn1.parts.filter(p => p.synthetic)).toHaveLength(1);
+
+    // Compaction fires (empty contextPaths is fine — flag set unconditionally)
+    await compacting({ sessionID: 'ses_comp' }, { context: [] });
+
+    // Post-compaction dispatch: rescan runs, keys emptied
+    await messagesTransform(
+      {},
+      {
+        messages: [
+          {
+            info: { id: 'msg_u1', role: 'user', sessionID: 'ses_comp' },
+            parts: [{ type: 'text', text: 'first' }],
+          },
+        ],
+      }
+    );
+    expect(
+      __testOnly.getSessionStateSnapshot('ses_comp')?.injectedRuleKeys.size
+    ).toBe(0);
+
+    // Turn 2: rule re-appended
+    const turn2: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'second' }],
+    };
+    await chatMessage({ sessionID: 'ses_comp' }, turn2);
+    const reappended = turn2.parts.filter(p => p.synthetic);
+    expect(reappended).toHaveLength(1);
+    expect(reappended[0]?.text).toContain('Compaction survivor.');
   });
 });
