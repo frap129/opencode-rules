@@ -9,6 +9,7 @@ import {
   extractTextFromParts,
   MessageWithInfo,
 } from './message-context.js';
+import { extractFilePathsFromMessages } from './message-paths.js';
 
 describe('message-context', () => {
   it('sanitizes control characters and truncates', () => {
@@ -23,11 +24,11 @@ describe('message-context', () => {
   it('extracts latest non-synthetic user prompt', () => {
     const prompt = extractLatestUserPrompt([
       {
-        role: 'user',
+        info: { role: 'user' },
         parts: [{ type: 'text', text: 'older', synthetic: true }],
       },
       {
-        role: 'user',
+        info: { role: 'user' },
         parts: [{ type: 'text', text: 'hello world' }],
       },
     ]);
@@ -38,7 +39,7 @@ describe('message-context', () => {
 describe('filterValidMessages', () => {
   it('passes through messages with role and parts', () => {
     const messages: MessageWithInfo[] = [
-      { role: 'user', parts: [{ type: 'text', text: 'hello' }] },
+      { info: { role: 'user' }, parts: [{ type: 'text', text: 'hello' }] },
     ];
     const result = filterValidMessages(messages);
     expect(result).toEqual([
@@ -54,21 +55,21 @@ describe('filterValidMessages', () => {
   });
 
   it('filters out messages with missing parts', () => {
-    const messages: MessageWithInfo[] = [{ role: 'user' }];
+    const messages: MessageWithInfo[] = [{ info: { role: 'user' } }];
     expect(filterValidMessages(messages)).toEqual([]);
   });
 
   it('filters out messages with empty parts array', () => {
-    const messages: MessageWithInfo[] = [{ role: 'user', parts: [] }];
+    const messages: MessageWithInfo[] = [{ info: { role: 'user' }, parts: [] }];
     expect(filterValidMessages(messages)).toEqual([]);
   });
 
   it('handles mixed valid and invalid messages', () => {
     const messages: MessageWithInfo[] = [
-      { role: 'user', parts: [{ type: 'text', text: 'hi' }] },
-      { role: 'assistant' },
+      { info: { role: 'user' }, parts: [{ type: 'text', text: 'hi' }] },
+      { info: { role: 'assistant' } },
       { parts: [{ type: 'text', text: 'x' }] },
-      { role: 'user', parts: [{ type: 'text', text: 'bye' }] },
+      { info: { role: 'user' }, parts: [{ type: 'text', text: 'bye' }] },
     ];
     const result = filterValidMessages(messages);
     expect(result).toHaveLength(2);
@@ -168,5 +169,25 @@ describe('extractSlashCommand', () => {
     expect(extractSlashCommand('//plan')).toBe('//plan');
     // Slash with only punctuation is still valid (length > 1)
     expect(extractSlashCommand('/!')).toBe('/!');
+  });
+});
+
+describe('extractFilePathsFromMessages synthetic skip', () => {
+  it('skips synthetic parts when scanning text for paths', () => {
+    const paths = extractFilePathsFromMessages([
+      {
+        role: 'user',
+        parts: [
+          { type: 'text', text: 'check src/real/File.ts please' },
+          {
+            type: 'text',
+            text: '## rule.md\n\nMention src/fake/RuleBody.ts in prose',
+            synthetic: true,
+          },
+        ],
+      },
+    ]);
+    expect(paths).toContain('src/real/File.ts');
+    expect(paths).not.toContain('src/fake/RuleBody.ts');
   });
 });

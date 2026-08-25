@@ -893,7 +893,7 @@ Use React best practices for components.`
     const messagesOutput = {
       messages: [
         {
-          role: 'assistant',
+          info: { role: 'assistant' },
           parts: [
             {
               sessionID: testSessionID,
@@ -954,7 +954,7 @@ Use React best practices for components.`
     const messagesOutput = {
       messages: [
         {
-          role: 'assistant',
+          info: { role: 'assistant' },
           parts: [
             {
               sessionID: testSessionID,
@@ -1019,7 +1019,7 @@ Special rule content.`
     const messagesOutput = {
       messages: [
         {
-          role: 'user',
+          info: { role: 'user' },
           parts: [
             {
               sessionID: testSessionID,

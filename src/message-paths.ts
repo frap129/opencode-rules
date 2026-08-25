@@ -16,6 +16,7 @@ interface ToolInvocationPart {
 interface TextPart {
   type: 'text';
   text: string;
+  synthetic?: boolean;
 }
 
 export type MessagePart = ToolInvocationPart | TextPart | { type: string };
@@ -37,6 +38,8 @@ export function extractFilePathsFromMessages(messages: Message[]): string[] {
 
   for (const message of messages) {
     for (const part of message.parts) {
+      if ((part as { synthetic?: boolean }).synthetic) continue;
+
       // Extract from tool invocations
       if (part.type === 'tool-invocation') {
         const toolPart = part as ToolInvocationPart;

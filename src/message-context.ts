@@ -10,11 +10,12 @@ export interface MessagePartWithSession {
 }
 
 export interface MessageWithInfo {
-  role?: string;
-  parts?: MessagePartWithSession[];
   info?: {
+    id?: string;
+    role?: string;
     sessionID?: string;
   };
+  parts?: MessagePartWithSession[];
 }
 
 /**
@@ -93,7 +94,7 @@ export function extractLatestUserPrompt(
 ): string | undefined {
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i];
-    if (message.role !== 'user') continue;
+    if (message.info?.role !== 'user') continue;
     const parts = message.parts || [];
 
     const userPrompt = extractTextFromParts(parts);
@@ -112,13 +113,14 @@ export function extractLatestUserPrompt(
 export function filterValidMessages(messages: MessageWithInfo[]): Message[] {
   const result: Message[] = [];
   for (const msg of messages) {
+    const role = msg.info?.role;
     if (
-      typeof msg.role === 'string' &&
+      typeof role === 'string' &&
       Array.isArray(msg.parts) &&
       msg.parts.length > 0
     ) {
       result.push({
-        role: msg.role,
+        role,
         parts: msg.parts as MessagePart[],
       });
     }

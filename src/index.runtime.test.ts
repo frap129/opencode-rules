@@ -447,7 +447,7 @@ describe('OpenCodeRulesPlugin', () => {
 
     const originalMessages = [
       {
-        role: 'user',
+        info: { role: 'user' },
         parts: [{ sessionID: 'test-123', type: 'text', text: 'Hello' }],
       },
     ];
