@@ -11,6 +11,9 @@ export interface SessionState {
   rulesInjected?: boolean;
   lastInjectedAt?: number;
   pendingHookInjections?: string[];
+  injectedRuleKeys: Set<string>;
+  injectedHookHashes: Set<string>;
+  needsRuleRescan: boolean;
 }
 
 interface SessionStoreOptions {
@@ -44,6 +47,8 @@ export class SessionStore {
     const snapshot: SessionState = {
       ...s,
       contextPaths: new Set(s.contextPaths),
+      injectedRuleKeys: new Set(s.injectedRuleKeys),
+      injectedHookHashes: new Set(s.injectedHookHashes),
     };
     if (s.pendingHookInjections) {
       snapshot.pendingHookInjections = [...s.pendingHookInjections];
@@ -125,6 +130,9 @@ export class SessionStore {
       lastUpdated: ++this.tick,
       seededFromHistory: false,
       seedCount: 0,
+      injectedRuleKeys: new Set<string>(),
+      injectedHookHashes: new Set<string>(),
+      needsRuleRescan: false,
     };
   }
 }

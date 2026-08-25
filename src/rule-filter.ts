@@ -183,24 +183,40 @@ export interface RuleFilterContext {
 }
 
 /**
- * Read and format rule files for system prompt injection
+ * A single rule file that matched the runtime context
+ */
+export interface MatchedRuleEntry {
+  /** Absolute path to the rule file */
+  filePath: string;
+  /** Relative path from the rules directory root (for unique headings) */
+  relativePath: string;
+  /** Rule content with frontmatter stripped */
+  strippedContent: string;
+}
+
+/**
+ * Match discovered rule files against the runtime context.
+ * Unconditional rules are always included; conditional rules are
+ * included when their declared checks pass (match: any|all).
+ * Unreadable rules are skipped. Entry order follows discovery order.
+ *
  * @param files - Array of discovered rule files with paths
  * @param context - Optional RuleFilterContext for conditional rule matching
  */
-export async function readAndFormatRules(
+export async function matchRules(
   files: DiscoveredRule[],
   context: RuleFilterContext = {}
-): Promise<FilterResult> {
+): Promise<MatchedRuleEntry[]> {
   if (files.length === 0) {
-    return { formattedRules: '', matchedPaths: [] };
+    return [];
   }
 
-  const ruleContents: string[] = [];
-  const matchedPaths: string[] = [];
   const availableToolSet =
     context.availableToolIDs && context.availableToolIDs.length > 0
       ? new Set(context.availableToolIDs)
       : undefined;
+
+  const matched: MatchedRuleEntry[] = [];
 
   for (const { filePath, relativePath } of files) {
     // Use cached rule data with mtime-based invalidation
@@ -238,18 +254,31 @@ export async function readAndFormatRules(
       );
     }
 
-    ruleContents.push(`## ${relativePath}\n\n${strippedContent}`);
-    matchedPaths.push(filePath);
+    matched.push({ filePath, relativePath, strippedContent });
   }
 
-  if (ruleContents.length === 0) {
+  return matched;
+}
+
+/**
+ * Read and format rule files for system prompt injection
+ * @param files - Array of discovered rule files with paths
+ * @param context - Optional RuleFilterContext for conditional rule matching
+ */
+export async function readAndFormatRules(
+  files: DiscoveredRule[],
+  context: RuleFilterContext = {}
+): Promise<FilterResult> {
+  const matched = await matchRules(files, context);
+  if (matched.length === 0) {
     return { formattedRules: '', matchedPaths: [] };
   }
-
   return {
     formattedRules:
       `# OpenCode Rules\n\nPlease follow the following rules:\n\n` +
-      ruleContents.join('\n\n---\n\n'),
-    matchedPaths,
+      matched
+        .map(m => `## ${m.relativePath}\n\n${m.strippedContent}`)
+        .join('\n\n---\n\n'),
+    matchedPaths: matched.map(m => m.filePath),
   };
 }

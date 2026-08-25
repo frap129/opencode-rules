@@ -8,6 +8,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import path from 'node:path';
 import { writeFileSync, utimesSync } from 'node:fs';
 import { readAndFormatRules, clearRuleCache } from './utils.js';
+import { matchRules } from './rule-filter.js';
 import {
   setupTestDirs,
   teardownTestDirs,
@@ -414,6 +415,81 @@ All dimensions must match.`
       const result = await readAndFormatRules(rules);
       expect(result.formattedRules).toContain('Test Content');
     });
+  });
+});
+
+describe('matchRules', () => {
+  let savedEnvXDG: string | undefined;
+  let savedEnvConfigDir: string | undefined;
+
+  beforeEach(() => {
+    setupTestDirs();
+    savedEnvXDG = process.env.XDG_CONFIG_HOME;
+    savedEnvConfigDir = process.env.OPENCODE_CONFIG_DIR;
+    delete process.env.OPENCODE_CONFIG_DIR;
+    clearRuleCache();
+  });
+
+  afterEach(() => {
+    teardownTestDirs();
+    if (savedEnvXDG === undefined) {
+      delete process.env.XDG_CONFIG_HOME;
+    } else {
+      process.env.XDG_CONFIG_HOME = savedEnvXDG;
+    }
+    if (savedEnvConfigDir === undefined) {
+      delete process.env.OPENCODE_CONFIG_DIR;
+    } else {
+      process.env.OPENCODE_CONFIG_DIR = savedEnvConfigDir;
+    }
+  });
+
+  it('returns per-rule entries with stripped content', async () => {
+    const { globalRulesDir } = getTestDirs();
+    const rulePath = path.join(globalRulesDir, 'entry.md');
+    writeFileSync(rulePath, '# Entry Rule\nBody text');
+
+    const entries = await matchRules(toRules([rulePath]));
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.filePath).toBe(rulePath);
+    expect(entries[0]?.relativePath).toBe('entry.md');
+    expect(entries[0]?.strippedContent).toBe('# Entry Rule\nBody text');
+  });
+
+  it('filters conditional rules using the runtime context', async () => {
+    const { globalRulesDir } = getTestDirs();
+    const matchPath = path.join(globalRulesDir, 'kw-match.mdc');
+    const skipPath = path.join(globalRulesDir, 'kw-skip.mdc');
+    writeFileSync(
+      matchPath,
+      `---
+keywords:
+  - testing
+---
+
+Matched content.`
+    );
+    writeFileSync(
+      skipPath,
+      `---
+keywords:
+  - database
+---
+
+Skipped content.`
+    );
+
+    const entries = await matchRules(toRules([matchPath, skipPath]), {
+      userPrompt: 'please add testing for this',
+    });
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.relativePath).toBe('kw-match.mdc');
+  });
+
+  it('returns an empty array for no files', async () => {
+    expect(await matchRules([])).toEqual([]);
   });
 });
 
