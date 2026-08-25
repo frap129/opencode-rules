@@ -9,7 +9,11 @@ export interface ChatMessageInput {
 }
 
 export interface ChatMessageOutput {
-  message?: { role?: string };
+  message?: {
+    role?: string;
+    agent?: string;
+    model?: { modelID?: string };
+  };
   parts?: Array<{ type?: string; text?: string; synthetic?: boolean }>;
 }
 
@@ -34,6 +38,8 @@ export function updateSessionFromChatMessage(
   }
 
   const userPrompt = output.parts ? extractTextFromParts(output.parts) : '';
+  const modelID = output.message.model?.modelID ?? input.model?.modelID;
+  const agent = output.message.agent ?? input.agent;
 
   sessionStore.upsert(sessionID, state => {
     if (userPrompt) {
@@ -41,15 +47,15 @@ export function updateSessionFromChatMessage(
       state.rulesInjected = false;
     }
 
-    if (input.model?.modelID) {
-      state.lastModelID = input.model.modelID;
+    if (modelID) {
+      state.lastModelID = modelID;
     }
-    if (input.agent) {
-      state.lastAgentType = input.agent;
+    if (agent) {
+      state.lastAgentType = agent;
     }
   });
 
   debugLog(
-    `Updated session ${sessionID} from chat.message (model=${input.model?.modelID ?? 'none'}, agent=${input.agent ?? 'none'})`
+    `Updated session ${sessionID} from chat.message (model=${modelID ?? 'none'}, agent=${agent ?? 'none'})`
   );
 }

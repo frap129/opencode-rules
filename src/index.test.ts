@@ -160,6 +160,81 @@ Agent-specific guidelines.`
     expect(result.system).toContain('Agent-specific guidelines');
   });
 
+  it('should evaluate model and agent rules from output.message context', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    writeFileSync(
+      path.join(globalRulesDir, 'matching-context.mdc'),
+      `---
+model:
+  - output-model
+agent:
+  - output-agent
+---
+
+Matching output context.`
+    );
+    writeFileSync(
+      path.join(globalRulesDir, 'nonmatching-context.mdc'),
+      `---
+model:
+  - another-model
+agent:
+  - another-agent
+---
+
+Nonmatching output context.`
+    );
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockClient = { tool: { ids: vi.fn(async () => ({ data: [] })) } };
+    const hooks = await plugin({
+      client: mockClient as unknown,
+      project: {},
+      directory: testDir,
+      worktree: testDir,
+      $: {},
+      serverUrl: new URL('http://localhost'),
+    } as Parameters<typeof plugin>[0]);
+
+    const chatMessage = hooks['chat.message'] as (
+      input: { sessionID: string },
+      output: {
+        message: {
+          role: string;
+          model: { modelID: string };
+          agent: string;
+        };
+        parts: unknown[];
+      }
+    ) => Promise<void>;
+    await chatMessage(
+      { sessionID: 'ses_output_context' },
+      {
+        message: {
+          role: 'user',
+          model: { modelID: 'output-model' },
+          agent: 'output-agent',
+        },
+        parts: [{ type: 'text', text: 'hello' }],
+      }
+    );
+
+    const systemTransform = hooks['experimental.chat.system.transform'] as (
+      input: { sessionID?: string },
+      output: { system: string }
+    ) => Promise<{ system: string }>;
+    const result = await systemTransform(
+      { sessionID: 'ses_output_context' },
+      { system: 'Base prompt.' }
+    );
+
+    expect(result.system).toContain('Matching output context.');
+    expect(result.system).not.toContain('Nonmatching output context.');
+  });
+
   it('should include command-conditional rule when user prompt starts with matching slash command', async () => {
     const { testDir, globalRulesDir } = getTestDirs();
     writeFileSync(
