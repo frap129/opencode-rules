@@ -2,14 +2,10 @@ export interface SessionState {
   contextPaths: Set<string>;
   lastUserPrompt?: string;
   lastUpdated: number;
-  isCompacting?: boolean;
-  compactingSince?: number;
   seededFromHistory: boolean;
   seedCount?: number;
   lastModelID?: string;
   lastAgentType?: string;
-  rulesInjected?: boolean;
-  lastInjectedAt?: number;
   pendingHookInjections?: string[];
   injectedRuleKeys: Set<string>;
   injectedHookHashes: Set<string>;
@@ -89,38 +85,6 @@ export class SessionStore {
         this.stateMap.delete(oldestID);
       }
     }
-  }
-
-  markCompacting(sessionID: string, nowMs: number): void {
-    this.upsert(sessionID, state => {
-      state.isCompacting = true;
-      state.compactingSince = nowMs;
-    });
-  }
-
-  shouldSkipInjection(
-    sessionID: string,
-    nowMs: number,
-    ttlMs = 30_000
-  ): boolean {
-    const state = this.stateMap.get(sessionID);
-    if (!state?.isCompacting) return false;
-
-    // Preserve existing behavior: missing timestamp means "still compacting".
-    if (!state.compactingSince) {
-      return true;
-    }
-
-    const expired = nowMs - state.compactingSince > ttlMs;
-    if (!expired) {
-      return true;
-    }
-
-    this.upsert(sessionID, s => {
-      s.isCompacting = false;
-    });
-
-    return false;
   }
 
   private createDefaultState(): SessionState {

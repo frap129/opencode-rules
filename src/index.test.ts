@@ -293,13 +293,21 @@ Platform-specific guidelines.`
       serverUrl: new URL('http://localhost'),
     } as Parameters<typeof plugin>[0]);
 
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: unknown,
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform({}, { system: 'Base prompt.' });
+    const chatMessage = hooks['chat.message'] as (
+      input: { sessionID: string },
+      output: ChatMessageOutputLike
+    ) => Promise<void>;
+    const message: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'hello' }],
+    };
+    await chatMessage({ sessionID: 'ses_os' }, message);
 
-    expect(result.system).toContain('Platform-specific guidelines');
+    const injectedText = message.parts
+      .filter(p => p.synthetic)
+      .map(p => p.text)
+      .join('\n');
+    expect(injectedText).toContain('Platform-specific guidelines');
   });
 
   it('should NOT include ci:true rule when CI="false" even with GITHUB_ACTIONS set', async () => {
@@ -330,13 +338,21 @@ CI-authoritative guidelines.`
       serverUrl: new URL('http://localhost'),
     } as Parameters<typeof plugin>[0]);
 
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: unknown,
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform({}, { system: 'Base prompt.' });
+    const chatMessage = hooks['chat.message'] as (
+      input: { sessionID: string },
+      output: ChatMessageOutputLike
+    ) => Promise<void>;
+    const message: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'hello' }],
+    };
+    await chatMessage({ sessionID: 'ses_ci_auth' }, message);
 
-    expect(result.system).not.toContain('CI-authoritative guidelines');
+    const injectedText = message.parts
+      .filter(p => p.synthetic)
+      .map(p => p.text)
+      .join('\n');
+    expect(injectedText).not.toContain('CI-authoritative guidelines');
   });
 
   it('should combine model, agent, and command filters with match: all', async () => {
@@ -427,30 +443,26 @@ All dimensions must match.`
 
     const chatMessage = hooks['chat.message'] as (
       input: { sessionID: string; model?: { modelID: string }; agent?: string },
-      output: { message: { role: string }; parts: unknown[] }
+      output: ChatMessageOutputLike
     ) => Promise<void>;
+    const output: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'just a regular prompt' }],
+    };
     await chatMessage(
       {
         sessionID: 'ses_fail',
         model: { modelID: 'claude-opus' },
         agent: 'programmer',
       },
-      {
-        message: { role: 'user' },
-        parts: [{ type: 'text', text: 'just a regular prompt' }],
-      }
+      output
     );
 
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: { sessionID?: string },
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform(
-      { sessionID: 'ses_fail' },
-      { system: 'Base prompt.' }
-    );
-
-    expect(result.system).not.toContain('All dimensions must match');
+    const injectedText = output.parts
+      .filter(p => p.synthetic)
+      .map(p => p.text)
+      .join('\n');
+    expect(injectedText).not.toContain('All dimensions must match');
   });
 
   it('should include project-conditional rule when project has matching tags', async () => {
@@ -483,13 +495,21 @@ Node.js project guidelines.`
       serverUrl: new URL('http://localhost'),
     } as Parameters<typeof plugin>[0]);
 
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: unknown,
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform({}, { system: 'Base prompt.' });
+    const chatMessage = hooks['chat.message'] as (
+      input: { sessionID: string },
+      output: ChatMessageOutputLike
+    ) => Promise<void>;
+    const message: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'hello' }],
+    };
+    await chatMessage({ sessionID: 'ses_proj_tags' }, message);
 
-    expect(result.system).toContain('Node.js project guidelines');
+    const injectedText = message.parts
+      .filter(p => p.synthetic)
+      .map(p => p.text)
+      .join('\n');
+    expect(injectedText).toContain('Node.js project guidelines');
   });
 
   it('should include branch-conditional rule when getGitBranch returns matching branch', async () => {
@@ -524,13 +544,21 @@ Feature branch guidelines.`
         serverUrl: new URL('http://localhost'),
       } as Parameters<typeof plugin>[0]);
 
-      const systemTransform = hooks['experimental.chat.system.transform'] as (
-        input: unknown,
-        output: { system: string }
-      ) => Promise<{ system: string }>;
-      const result = await systemTransform({}, { system: 'Base prompt.' });
+      const chatMessage = hooks['chat.message'] as (
+        input: { sessionID: string },
+        output: ChatMessageOutputLike
+      ) => Promise<void>;
+      const message: ChatMessageOutputLike = {
+        message: { role: 'user' },
+        parts: [{ type: 'text', text: 'hello' }],
+      };
+      await chatMessage({ sessionID: 'ses_branch' }, message);
 
-      expect(result.system).toContain('Feature branch guidelines');
+      const injectedText = message.parts
+        .filter(p => p.synthetic)
+        .map(p => p.text)
+        .join('\n');
+      expect(injectedText).toContain('Feature branch guidelines');
       expect(getGitBranchSpy).toHaveBeenCalled();
     } finally {
       getGitBranchSpy.mockRestore();
@@ -567,11 +595,15 @@ Feature branch guidelines.`
         serverUrl: new URL('http://localhost'),
       } as Parameters<typeof plugin>[0]);
 
-      const systemTransform = hooks['experimental.chat.system.transform'] as (
-        input: unknown,
-        output: { system: string }
-      ) => Promise<{ system: string }>;
-      await systemTransform({}, { system: 'Base prompt.' });
+      const chatMessage = hooks['chat.message'] as (
+        input: { sessionID: string },
+        output: ChatMessageOutputLike
+      ) => Promise<void>;
+      const message: ChatMessageOutputLike = {
+        message: { role: 'user' },
+        parts: [{ type: 'text', text: 'hello' }],
+      };
+      await chatMessage({ sessionID: 'ses_toolwarn' }, message);
 
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining('Warning: Failed to query tool IDs')
@@ -602,13 +634,21 @@ Feature branch guidelines.`
       serverUrl: new URL('http://localhost'),
     } as Parameters<typeof plugin>[0]);
 
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: unknown,
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform({}, { system: 'Base prompt.' });
+    const chatMessage = hooks['chat.message'] as (
+      input: { sessionID: string },
+      output: ChatMessageOutputLike
+    ) => Promise<void>;
+    const message: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'hello' }],
+    };
+    await chatMessage({ sessionID: 'ses_tags_fail' }, message);
 
-    expect(result.system).toContain('Always apply this rule');
+    const injectedText = message.parts
+      .filter(p => p.synthetic)
+      .map(p => p.text)
+      .join('\n');
+    expect(injectedText).toContain('Always apply this rule');
   });
 
   it('should not throw when git branch detection fails', async () => {
@@ -635,13 +675,21 @@ Feature branch guidelines.`
       serverUrl: new URL('http://localhost'),
     } as Parameters<typeof plugin>[0]);
 
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: unknown,
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform({}, { system: 'Base prompt.' });
+    const chatMessage = hooks['chat.message'] as (
+      input: { sessionID: string },
+      output: ChatMessageOutputLike
+    ) => Promise<void>;
+    const message: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'hello' }],
+    };
+    await chatMessage({ sessionID: 'ses_branch_fail' }, message);
 
-    expect(result.system).toContain('Always apply this rule');
+    const injectedText = message.parts
+      .filter(p => p.synthetic)
+      .map(p => p.text)
+      .join('\n');
+    expect(injectedText).toContain('Always apply this rule');
   });
 });
 

@@ -55,7 +55,6 @@ export function updateSessionFromChatMessage(
   sessionStore.upsert(sessionID, state => {
     if (userPrompt) {
       state.lastUserPrompt = userPrompt;
-      state.rulesInjected = false;
     }
 
     if (modelID) {

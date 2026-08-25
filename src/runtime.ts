@@ -1,6 +1,5 @@
 import {
   matchRules,
-  readAndFormatRules,
   type RuleFilterContext,
   type MatchedRuleEntry,
 } from './rule-filter.js';
@@ -49,14 +48,6 @@ interface MessagesTransformOutput {
   messages: MessageWithInfo[];
 }
 
-interface SystemTransformInput {
-  sessionID?: string;
-}
-
-interface SystemTransformOutput {
-  system?: string | string[];
-}
-
 interface OpenCodeClient {
   tool?: {
     ids?: (args: {
@@ -83,7 +74,6 @@ interface OpenCodeRulesRuntimeOptions {
   ruleFiles: DiscoveredRule[];
   sessionStore: SessionStore;
   debugLog?: DebugLog;
-  now?: () => number;
 }
 
 export class OpenCodeRulesRuntime {
@@ -93,7 +83,6 @@ export class OpenCodeRulesRuntime {
   private ruleFiles: DiscoveredRule[];
   private sessionStore: SessionStore;
   private debugLog: DebugLog;
-  private now: () => number;
 
   constructor(opts: OpenCodeRulesRuntimeOptions) {
     this.client = opts.client as OpenCodeClient;
@@ -102,7 +91,6 @@ export class OpenCodeRulesRuntime {
     this.ruleFiles = opts.ruleFiles;
     this.sessionStore = opts.sessionStore;
     this.debugLog = opts.debugLog ?? createDebugLog();
-    this.now = opts.now ?? (() => Date.now());
   }
 
   createHooks(): Record<string, unknown> {
@@ -112,7 +100,6 @@ export class OpenCodeRulesRuntime {
       'experimental.chat.messages.transform':
         this.onMessagesTransform.bind(this),
       'chat.message': this.onChatMessage.bind(this),
-      'experimental.chat.system.transform': this.onSystemTransform.bind(this),
       'experimental.session.compacting': this.onSessionCompacting.bind(this),
     };
   }
@@ -446,9 +433,6 @@ export class OpenCodeRulesRuntime {
           s.injectedHookHashes.add(hash);
         }
         s.pendingHookInjections = [];
-        // Transitional bridge: suppress the legacy system.transform path
-        // until it is deleted. Removed together with onSystemTransform.
-        s.rulesInjected = true;
       });
 
       if (captured.userPrompt) {
@@ -495,122 +479,6 @@ export class OpenCodeRulesRuntime {
       logWarning('Failed to fetch session history', error);
       return undefined;
     }
-  }
-
-  private async onSystemTransform(
-    hookInput: SystemTransformInput,
-    output: SystemTransformOutput | null
-  ): Promise<SystemTransformOutput> {
-    const sessionID = hookInput?.sessionID;
-    const sessionState = sessionID
-      ? this.sessionStore.get(sessionID)
-      : undefined;
-
-    // 1. Check compaction gate (must happen before rule injection — otherwise
-    //    the static-rule path could inject during a compacting window).
-    if (sessionID) {
-      const skip = this.sessionStore.shouldSkipInjection(
-        sessionID,
-        this.now(),
-        30_000
-      );
-      if (skip) {
-        this.debugLog(
-          `Session ${sessionID} is compacting - skipping rule injection`
-        );
-        return output ?? {};
-      }
-    }
-
-    // 2. Decide whether to process static rules.
-    //    Static rules are gated by rulesInjected (set by the chat.message bridge).
-    const skipStaticRules = sessionState?.rulesInjected ?? false;
-
-    let formattedRules: string | undefined;
-
-    if (!skipStaticRules) {
-      const contextPaths = sessionState
-        ? Array.from(sessionState.contextPaths).sort((a, b) =>
-            a.localeCompare(b)
-          )
-        : [];
-      const userPrompt = sessionState?.lastUserPrompt;
-
-      const availableToolIDs = await this.queryAvailableToolIDs();
-
-      const filterContext: RuleFilterContext = await buildFilterContext({
-        contextFilePaths: contextPaths,
-        userPrompt,
-        availableToolIDs,
-        modelID: sessionState?.lastModelID,
-        agentType: sessionState?.lastAgentType,
-        projectDirectory: this.projectDirectory,
-        debugLog: this.debugLog,
-      });
-
-      const result = await readAndFormatRules(this.ruleFiles, filterContext);
-      formattedRules = result.formattedRules;
-
-      if (sessionID) {
-        await writeActiveRulesState(sessionID, result.matchedPaths);
-      }
-    } else {
-      this.debugLog(
-        `Session ${sessionID} already has rules injected - skipping static rule injection`
-      );
-    }
-
-    // 3. Build combined system content from static rules
-    const systemParts: string[] = [];
-
-    if (formattedRules) {
-      systemParts.push(formattedRules);
-    }
-
-    if (systemParts.length === 0) {
-      this.debugLog('No applicable rules for current context');
-      return output ?? {};
-    }
-
-    this.debugLog('Injecting rules into system prompt');
-    const combinedSystem = systemParts.join('\n\n---\n\n');
-
-    if (!output) {
-      if (sessionID) {
-        this.sessionStore.upsert(sessionID, state => {
-          state.rulesInjected = true;
-          state.lastInjectedAt = this.now();
-        });
-      }
-      return { system: combinedSystem };
-    }
-
-    if (Array.isArray(output.system)) {
-      // opencode passes this output object to every system-transform hook and
-      // ignores hook return values, so mutate the backing array in place;
-      // rebinding output.system to a string is discarded by opencode and
-      // breaks sibling plugins that call .join() on it.
-      const existing = output.system.join('\n\n');
-      const consolidated =
-        existing.length > 0
-          ? `${existing}\n\n${combinedSystem}`
-          : combinedSystem;
-      output.system.length = 0;
-      output.system.push(consolidated);
-    } else {
-      output.system = output.system
-        ? `${output.system}\n\n${combinedSystem}`
-        : combinedSystem;
-    }
-
-    if (sessionID) {
-      this.sessionStore.upsert(sessionID, state => {
-        state.rulesInjected = true;
-        state.lastInjectedAt = this.now();
-      });
-    }
-
-    return output;
   }
 
   private async queryAvailableToolIDs(): Promise<string[]> {

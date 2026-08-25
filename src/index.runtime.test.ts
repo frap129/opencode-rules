@@ -218,8 +218,8 @@ describe('OpenCodeRulesPlugin', () => {
     expect(typeof hooks['experimental.chat.messages.transform']).toBe(
       'function'
     );
-    expect(hooks['experimental.chat.system.transform']).toBeDefined();
-    expect(typeof hooks['experimental.chat.system.transform']).toBe('function');
+    expect(hooks['chat.message']).toBeDefined();
+    expect(typeof hooks['chat.message']).toBe('function');
   });
 
   it('should return transform hooks when rules exist', async () => {
@@ -236,15 +236,12 @@ describe('OpenCodeRulesPlugin', () => {
       mockInput as unknown as Parameters<typeof plugin>[0]
     );
     expect(hooks['experimental.chat.messages.transform']).toBeDefined();
-    expect(hooks['experimental.chat.system.transform']).toBeDefined();
+    expect(hooks['chat.message']).toBeDefined();
   });
 
-  it('should inject rules into system prompt via system.transform hook', async () => {
+  it('does not register experimental.chat.system.transform', async () => {
     const { testDir, globalRulesDir } = getTestDirs();
-    writeFileSync(
-      path.join(globalRulesDir, 'rule.md'),
-      '# Test Rule\nDo this always'
-    );
+    writeFileSync(path.join(globalRulesDir, 'rule.md'), '# Test Rule');
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
     const {
@@ -255,193 +252,11 @@ describe('OpenCodeRulesPlugin', () => {
     const hooks = await plugin(
       mockInput as unknown as Parameters<typeof plugin>[0]
     );
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: unknown,
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform(
-      {},
-      { system: 'You are a helpful assistant.' }
-    );
-
-    expect(result.system).toContain('You are a helpful assistant.');
-    expect(result.system).toContain('OpenCode Rules');
-    expect(result.system).toContain('Test Rule');
+    expect(hooks['experimental.chat.system.transform']).toBeUndefined();
+    expect(hooks['chat.message']).toBeDefined();
   });
 
-  it('should append rules to existing system prompt', async () => {
-    const { testDir, globalRulesDir } = getTestDirs();
-    writeFileSync(path.join(globalRulesDir, 'rule.md'), '# My Rule');
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: unknown,
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform(
-      {},
-      { system: 'Original system prompt.' }
-    );
-
-    expect(result.system).toMatch(/^Original system prompt\./);
-    expect(result.system).toContain('My Rule');
-  });
-
-  it('should handle empty system prompt', async () => {
-    const { testDir, globalRulesDir } = getTestDirs();
-    writeFileSync(path.join(globalRulesDir, 'rule.md'), '# Rule Content');
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: unknown,
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform({}, { system: '' });
-
-    expect(result.system).toContain('OpenCode Rules');
-    expect(result.system).toContain('Rule Content');
-  });
-
-  it('should consolidate array system messages in place', async () => {
-    const { testDir, globalRulesDir } = getTestDirs();
-    writeFileSync(path.join(globalRulesDir, 'rule.md'), '# My Rule');
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: unknown,
-      output: { system: string[] }
-    ) => Promise<{ system: string[] }>;
-    const output = { system: ['First message.', 'Second message.'] };
-    const result = await systemTransform({}, output);
-
-    expect(result).toBe(output);
-    expect(result.system).toBe(output.system);
-    expect(result.system).toHaveLength(1);
-    expect(result.system[0]).toMatch(
-      /^First message\.\n\nSecond message\.\n\n/
-    );
-    expect(result.system[0]).toContain('My Rule');
-  });
-
-  it('should handle empty array system messages', async () => {
-    const { testDir, globalRulesDir } = getTestDirs();
-    writeFileSync(path.join(globalRulesDir, 'rule.md'), '# My Rule');
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: unknown,
-      output: { system: string[] }
-    ) => Promise<{ system: string[] }>;
-    const output = { system: [] };
-    const result = await systemTransform({}, output);
-
-    expect(result).toBe(output);
-    expect(result.system).toBe(output.system);
-    expect(result.system).toHaveLength(1);
-    expect(result.system[0]).toMatch(/^# OpenCode Rules/);
-    expect(result.system[0]).not.toMatch(/^\n\n/);
-
-    const whitespaceOnly = { system: [' ', ''] };
-    await systemTransform({}, whitespaceOnly);
-    expect(whitespaceOnly.system).toHaveLength(1);
-    expect(whitespaceOnly.system[0]).toContain('My Rule');
-  });
-
-  it('should handle single-element array system message', async () => {
-    const { testDir, globalRulesDir } = getTestDirs();
-    writeFileSync(path.join(globalRulesDir, 'rule.md'), '# My Rule');
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: unknown,
-      output: { system: string[] }
-    ) => Promise<{ system: string[] }>;
-    const output = { system: ['Only message.'] };
-    const result = await systemTransform({}, output);
-
-    expect(result).toBe(output);
-    expect(result.system).toBe(output.system);
-    expect(result.system).toHaveLength(1);
-    expect(result.system[0]).toMatch(/^Only message\.\n\n/);
-    expect(result.system[0]).toContain('My Rule');
-  });
-
-  it('should keep system joinable for sibling plugins across sequential invocations', async () => {
-    const { testDir, globalRulesDir } = getTestDirs();
-    writeFileSync(path.join(globalRulesDir, 'rule.md'), '# My Rule');
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: unknown,
-      output: { system: string[] }
-    ) => Promise<{ system: string[] }>;
-    const output = { system: ['Base prompt.'] };
-    await systemTransform({}, output);
-
-    expect(typeof output.system.join).toBe('function');
-    const joined = output.system.join('\n');
-    expect(joined).toContain('Base prompt.');
-    expect(joined).toContain('My Rule');
-
-    output.system.push('Sibling message.');
-    const second = await systemTransform({}, output);
-
-    expect(second).toBe(output);
-    expect(second.system).toHaveLength(1);
-    expect(second.system[0]).toMatch(
-      /^Base prompt\.[\s\S]*My Rule[\s\S]*Sibling message\./
-    );
-  });
-
-  it('should not modify messages in messages.transform hook', async () => {
+  it('modifies messages only by appending transient synthetic parts', async () => {
     const { testDir, globalRulesDir } = getTestDirs();
     writeFileSync(path.join(globalRulesDir, 'rule.md'), '# Rule');
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
@@ -467,6 +282,7 @@ describe('OpenCodeRulesPlugin', () => {
     ) => Promise<{ messages: unknown[] }>;
     const result = await messagesTransform({}, { messages: originalMessages });
 
+    // No pending hook injections: nothing appended, nothing mutated.
     expect(result.messages).toEqual(originalMessages);
   });
 
@@ -1030,50 +846,16 @@ describe('SessionState', () => {
       { args: { filePath: 'src/components/Button.tsx' } }
     );
 
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: { sessionID?: string },
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform(
-      { sessionID: 'ses_1' },
-      { system: 'Base prompt.' }
+    const chatMessage = hooks['chat.message'] as ChatMessageHook;
+    const output: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'check this' }],
+    };
+    await chatMessage({ sessionID: 'ses_1' }, output);
+
+    expect(output.parts.filter(p => p.synthetic)[0]?.text).toContain(
+      'React best practices'
     );
-
-    expect(result.system).toContain('React best practices');
-  });
-
-  it('skips full rule injection when session is compacting', async () => {
-    const { testDir, globalRulesDir } = getTestDirs();
-    writeFileSync(
-      path.join(globalRulesDir, 'always.md'),
-      '# Always\nAlways apply this'
-    );
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
-    const {
-      default: { server: plugin },
-      __testOnly,
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-
-    __testOnly.upsertSessionState(
-      'ses_compact',
-      s => void (s.isCompacting = true)
-    );
-
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: { sessionID?: string },
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform(
-      { sessionID: 'ses_compact' },
-      { system: 'Base prompt.' }
-    );
-
-    expect(result.system).toBe('Base prompt.');
   });
 });
 
@@ -1500,13 +1282,18 @@ describe('CI environment detection', () => {
       mockInput as unknown as Parameters<typeof plugin>[0]
     );
 
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: unknown,
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform({}, { system: 'Base prompt.' });
+    const chatMessage = hooks['chat.message'] as ChatMessageHook;
+    const output: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'hello' }],
+    };
+    await chatMessage({ sessionID: 'ses_ci_1' }, output);
 
-    expect(result.system).toContain('CI-specific guidelines');
+    const synthetic = output.parts
+      .filter(p => p.synthetic)
+      .map(p => p.text)
+      .join('\n');
+    expect(synthetic).toContain('CI-specific guidelines');
   });
 
   it('should NOT include ci:true rule when CI env var is "false"', async () => {
@@ -1528,13 +1315,18 @@ describe('CI environment detection', () => {
       mockInput as unknown as Parameters<typeof plugin>[0]
     );
 
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: unknown,
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform({}, { system: 'Base prompt.' });
+    const chatMessage = hooks['chat.message'] as ChatMessageHook;
+    const output: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'hello' }],
+    };
+    await chatMessage({ sessionID: 'ses_ci_2' }, output);
 
-    expect(result.system).not.toContain('CI-only guidelines');
+    const synthetic = output.parts
+      .filter(p => p.synthetic)
+      .map(p => p.text)
+      .join('\n');
+    expect(synthetic).not.toContain('CI-only guidelines');
   });
 
   it('should NOT include ci:true rule when CI env var is "0"', async () => {
@@ -1556,13 +1348,18 @@ describe('CI environment detection', () => {
       mockInput as unknown as Parameters<typeof plugin>[0]
     );
 
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: unknown,
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform({}, { system: 'Base prompt.' });
+    const chatMessage = hooks['chat.message'] as ChatMessageHook;
+    const output: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'hello' }],
+    };
+    await chatMessage({ sessionID: 'ses_ci_3' }, output);
 
-    expect(result.system).not.toContain('CI-zero guidelines');
+    const synthetic = output.parts
+      .filter(p => p.synthetic)
+      .map(p => p.text)
+      .join('\n');
+    expect(synthetic).not.toContain('CI-zero guidelines');
   });
 
   it('should detect CI from provider vars when CI env var is not set', async () => {
@@ -1584,13 +1381,18 @@ describe('CI environment detection', () => {
       mockInput as unknown as Parameters<typeof plugin>[0]
     );
 
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: unknown,
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform({}, { system: 'Base prompt.' });
+    const chatMessage = hooks['chat.message'] as ChatMessageHook;
+    const output: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'hello' }],
+    };
+    await chatMessage({ sessionID: 'ses_ci_4' }, output);
 
-    expect(result.system).toContain('CI-fallback guidelines');
+    const synthetic = output.parts
+      .filter(p => p.synthetic)
+      .map(p => p.text)
+      .join('\n');
+    expect(synthetic).toContain('CI-fallback guidelines');
   });
 
   it('should NOT detect CI when BUILD_NUMBER is "false"', async () => {
@@ -1612,13 +1414,18 @@ describe('CI environment detection', () => {
       mockInput as unknown as Parameters<typeof plugin>[0]
     );
 
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: unknown,
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform({}, { system: 'Base prompt.' });
+    const chatMessage = hooks['chat.message'] as ChatMessageHook;
+    const output: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'hello' }],
+    };
+    await chatMessage({ sessionID: 'ses_ci_5' }, output);
 
-    expect(result.system).not.toContain('CI-build-number guidelines');
+    const synthetic = output.parts
+      .filter(p => p.synthetic)
+      .map(p => p.text)
+      .join('\n');
+    expect(synthetic).not.toContain('CI-build-number guidelines');
   });
 });
 

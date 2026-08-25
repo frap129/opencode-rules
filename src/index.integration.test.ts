@@ -18,6 +18,16 @@ import {
 } from './test-fixtures.js';
 import { __testOnly } from './index.js';
 
+type ChatMessageOutputLike = {
+  message: { role: string };
+  parts: Array<{
+    id?: string;
+    type?: string;
+    text?: string;
+    synthetic?: boolean;
+  }>;
+};
+
 describe('readAndFormatRules', () => {
   let savedEnvXDG: string | undefined;
   let savedEnvConfigDir: string | undefined;
@@ -984,24 +994,27 @@ Use React best practices for components.`
       ],
     };
 
-    const systemOutput = { system: 'Base prompt.' };
-
     const messagesTransform = hooks['experimental.chat.messages.transform'] as (
       input: unknown,
       output: { messages: unknown[] }
     ) => Promise<{ messages: unknown[] }>;
     await messagesTransform({}, messagesOutput);
 
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: { sessionID?: string },
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform(
-      { sessionID: testSessionID },
-      systemOutput
-    );
+    const chatMessage = hooks['chat.message'] as (
+      input: { sessionID: string },
+      output: ChatMessageOutputLike
+    ) => Promise<void>;
+    const output: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'hello' }],
+    };
+    await chatMessage({ sessionID: testSessionID }, output);
 
-    expect(result.system).toContain('React best practices');
+    const syntheticText = output.parts
+      .filter(p => p.synthetic)
+      .map(p => p.text)
+      .join('\n');
+    expect(syntheticText).toContain('React best practices');
   });
 
   it('should exclude conditional rule when message context does not match glob', async () => {
@@ -1045,24 +1058,27 @@ Use React best practices for components.`
       ],
     };
 
-    const systemOutput = { system: 'Base prompt.' };
-
     const messagesTransform = hooks['experimental.chat.messages.transform'] as (
       input: unknown,
       output: { messages: unknown[] }
     ) => Promise<{ messages: unknown[] }>;
     await messagesTransform({}, messagesOutput);
 
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: { sessionID?: string },
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform(
-      { sessionID: testSessionID },
-      systemOutput
-    );
+    const chatMessage = hooks['chat.message'] as (
+      input: { sessionID: string },
+      output: ChatMessageOutputLike
+    ) => Promise<void>;
+    const output: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'hello' }],
+    };
+    await chatMessage({ sessionID: testSessionID }, output);
 
-    expect(result.system).not.toContain('React best practices');
+    const syntheticText = output.parts
+      .filter(p => p.synthetic)
+      .map(p => p.text)
+      .join('\n');
+    expect(syntheticText).not.toContain('React best practices');
   });
 
   it('should include unconditional rules regardless of context', async () => {
@@ -1107,26 +1123,29 @@ Special rule content.`
       ],
     };
 
-    const systemOutput = { system: '' };
-
     const messagesTransform = hooks['experimental.chat.messages.transform'] as (
       input: unknown,
       output: { messages: unknown[] }
     ) => Promise<{ messages: unknown[] }>;
     await messagesTransform({}, messagesOutput);
 
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: { sessionID?: string },
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform(
-      { sessionID: testSessionID },
-      systemOutput
-    );
+    const chatMessage = hooks['chat.message'] as (
+      input: { sessionID: string },
+      output: ChatMessageOutputLike
+    ) => Promise<void>;
+    const output: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'hello' }],
+    };
+    await chatMessage({ sessionID: testSessionID }, output);
 
-    expect(result.system).toContain('Always Apply');
-    expect(result.system).toContain('This rule always applies');
-    expect(result.system).not.toContain('Special rule content');
+    const syntheticText = output.parts
+      .filter(p => p.synthetic)
+      .map(p => p.text)
+      .join('\n');
+    expect(syntheticText).toContain('Always Apply');
+    expect(syntheticText).toContain('This rule always applies');
+    expect(syntheticText).not.toContain('Special rule content');
   });
 });
 
@@ -1326,12 +1345,20 @@ MCP Context7 rule content`;
       mockInput as unknown as Parameters<typeof plugin>[0]
     );
 
-    const systemTransform = hooks['experimental.chat.system.transform'] as (
-      input: unknown,
-      output: { system: string }
-    ) => Promise<{ system: string }>;
-    const result = await systemTransform({}, { system: 'Base prompt.' });
+    const chatMessage = hooks['chat.message'] as (
+      input: { sessionID: string },
+      output: ChatMessageOutputLike
+    ) => Promise<void>;
+    const output: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'hello' }],
+    };
+    await chatMessage({ sessionID: 'ses_mcp' }, output);
 
-    expect(result.system).toContain('MCP Context7 rule content');
+    const syntheticText = output.parts
+      .filter(p => p.synthetic)
+      .map(p => p.text)
+      .join('\n');
+    expect(syntheticText).toContain('MCP Context7 rule content');
   });
 });
