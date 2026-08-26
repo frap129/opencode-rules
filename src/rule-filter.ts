@@ -4,11 +4,77 @@
 
 import { minimatch } from 'minimatch';
 import { createDebugLog } from './debug.js';
-import { getCachedRule, type DiscoveredRule } from './rule-discovery.js';
+import {
+  loadRuleSnapshots,
+  type DiscoveredRule,
+  type RuleSnapshot,
+} from './rule-discovery.js';
 import { hasConditions } from './rule-metadata.js';
 import type { RuleMetadata } from './rule-metadata.js';
 
 const debugLog = createDebugLog();
+
+/**
+ * Delivery lifetime of a matched rule. Durable rules are persisted as
+ * synthetic parts in session history; ephemeral rules are delivered only
+ * as request-scoped transient messages.
+ */
+export type RuleLifetime = 'durable' | 'ephemeral';
+
+/** The condition dimensions a rule can declare. */
+export type RuleConditionKind =
+  | 'globs'
+  | 'keywords'
+  | 'tools'
+  | 'model'
+  | 'agent'
+  | 'command'
+  | 'project'
+  | 'branch'
+  | 'os'
+  | 'ci';
+
+/** Result of evaluating a single declared condition. */
+export interface ConditionEvaluation {
+  kind: RuleConditionKind;
+  matched: boolean;
+  lifetime: RuleLifetime;
+}
+
+/** Session-durable condition kinds (everything except agent/model/branch/tools). */
+const DURABLE_KINDS: ReadonlySet<RuleConditionKind> = new Set([
+  'globs',
+  'keywords',
+  'command',
+  'project',
+  'os',
+  'ci',
+]);
+
+function lifetimeForKind(kind: RuleConditionKind): RuleLifetime {
+  return DURABLE_KINDS.has(kind) ? 'durable' : 'ephemeral';
+}
+
+/**
+ * Classify the delivery lifetime of a matched rule from its condition
+ * results. Unconditional rules are durable. `match: all` is ephemeral when
+ * any required condition is ephemeral; `match: any` is durable when at
+ * least one satisfied condition is durable.
+ */
+export function classifyRuleLifetime(
+  mode: 'any' | 'all',
+  results: readonly ConditionEvaluation[]
+): RuleLifetime {
+  if (results.length === 0) return 'durable';
+  if (mode === 'all') {
+    return results.some(result => result.lifetime === 'ephemeral')
+      ? 'ephemeral'
+      : 'durable';
+  }
+  return results.some(result => result.matched && result.lifetime === 'durable')
+    ? 'durable'
+    : 'ephemeral';
+}
 
 /**
  * Check if a file path matches any of the given glob patterns
@@ -52,78 +118,99 @@ export function toolsMatchAvailable(
 
 /**
  * Evaluate all declared condition checks for a rule against runtime context.
- * Returns an array of boolean match results (one per declared condition).
+ * Returns one evaluation per declared condition with its kind and lifetime.
  */
 function evaluateConditionChecks(
   metadata: RuleMetadata,
   context: RuleFilterContext,
   availableToolSet?: Set<string>
-): boolean[] {
-  const checks: boolean[] = [];
+): ConditionEvaluation[] {
+  const checks: ConditionEvaluation[] = [];
 
   if (metadata.globs) {
-    checks.push(
-      Boolean(
+    checks.push({
+      kind: 'globs',
+      matched: Boolean(
         context.contextFilePaths &&
         context.contextFilePaths.length > 0 &&
         context.contextFilePaths.some(contextPath =>
           fileMatchesGlobs(contextPath, metadata.globs!)
         )
-      )
-    );
+      ),
+      lifetime: lifetimeForKind('globs'),
+    });
   }
 
   if (metadata.keywords) {
-    checks.push(
-      Boolean(
+    checks.push({
+      kind: 'keywords',
+      matched: Boolean(
         context.userPrompt &&
         promptMatchesKeywords(context.userPrompt, metadata.keywords)
-      )
-    );
+      ),
+      lifetime: lifetimeForKind('keywords'),
+    });
   }
 
   if (metadata.tools) {
-    checks.push(
-      Boolean(
+    checks.push({
+      kind: 'tools',
+      matched: Boolean(
         availableToolSet &&
         metadata.tools.some(tool => availableToolSet.has(tool))
-      )
-    );
+      ),
+      lifetime: lifetimeForKind('tools'),
+    });
   }
 
   if (metadata.model) {
-    checks.push(
-      Boolean(context.modelID && metadata.model.includes(context.modelID))
-    );
+    checks.push({
+      kind: 'model',
+      matched: Boolean(
+        context.modelID && metadata.model.includes(context.modelID)
+      ),
+      lifetime: lifetimeForKind('model'),
+    });
   }
 
   if (metadata.agent) {
-    checks.push(
-      Boolean(context.agentType && metadata.agent.includes(context.agentType))
-    );
+    checks.push({
+      kind: 'agent',
+      matched: Boolean(
+        context.agentType && metadata.agent.includes(context.agentType)
+      ),
+      lifetime: lifetimeForKind('agent'),
+    });
   }
 
   if (metadata.command) {
-    checks.push(
-      Boolean(context.command && metadata.command.includes(context.command))
-    );
+    checks.push({
+      kind: 'command',
+      matched: Boolean(
+        context.command && metadata.command.includes(context.command)
+      ),
+      lifetime: lifetimeForKind('command'),
+    });
   }
 
   if (metadata.project) {
     const projectTags = context.projectTags;
-    checks.push(
-      Boolean(
+    checks.push({
+      kind: 'project',
+      matched: Boolean(
         projectTags &&
         projectTags.length > 0 &&
         metadata.project.some(tag => projectTags.includes(tag))
-      )
-    );
+      ),
+      lifetime: lifetimeForKind('project'),
+    });
   }
 
   if (metadata.branch) {
     const gitBranch = context.gitBranch;
-    checks.push(
-      Boolean(
+    checks.push({
+      kind: 'branch',
+      matched: Boolean(
         gitBranch &&
         metadata.branch.some(pattern => {
           if (pattern === gitBranch) return true;
@@ -133,16 +220,25 @@ function evaluateConditionChecks(
           }
           return false;
         })
-      )
-    );
+      ),
+      lifetime: lifetimeForKind('branch'),
+    });
   }
 
   if (metadata.os) {
-    checks.push(Boolean(context.os && metadata.os.includes(context.os)));
+    checks.push({
+      kind: 'os',
+      matched: Boolean(context.os && metadata.os.includes(context.os)),
+      lifetime: lifetimeForKind('os'),
+    });
   }
 
   if (metadata.ci !== undefined) {
-    checks.push(context.ci === metadata.ci);
+    checks.push({
+      kind: 'ci',
+      matched: context.ci === metadata.ci,
+      lifetime: lifetimeForKind('ci'),
+    });
   }
 
   return checks;
@@ -192,22 +288,26 @@ export interface MatchedRuleEntry {
   relativePath: string;
   /** Rule content with frontmatter stripped */
   strippedContent: string;
+  /** Per-condition evaluation results with delivery-lifetime provenance */
+  conditionResults: ConditionEvaluation[];
+  /** Delivery lifetime classification for this evaluation */
+  lifetime: RuleLifetime;
 }
 
 /**
- * Match discovered rule files against the runtime context.
- * Unconditional rules are always included; conditional rules are
- * included when their declared checks pass (match: any|all).
- * Unreadable rules are skipped. Entry order follows discovery order.
+ * Match already-loaded rule snapshots against the runtime context.
+ * Performs no filesystem I/O. Unconditional rules are always included;
+ * conditional rules are included when their declared checks pass
+ * (match: any|all). Entry order follows snapshot order.
  *
- * @param files - Array of discovered rule files with paths
+ * @param snapshots - Per-session rule snapshots from loadRuleSnapshots
  * @param context - Optional RuleFilterContext for conditional rule matching
  */
-export async function matchRules(
-  files: DiscoveredRule[],
+export function matchRuleSnapshots(
+  snapshots: readonly RuleSnapshot[],
   context: RuleFilterContext = {}
-): Promise<MatchedRuleEntry[]> {
-  if (files.length === 0) {
+): MatchedRuleEntry[] {
+  if (snapshots.length === 0) {
     return [];
   }
 
@@ -218,15 +318,12 @@ export async function matchRules(
 
   const matched: MatchedRuleEntry[] = [];
 
-  for (const { filePath, relativePath } of files) {
-    // Use cached rule data with mtime-based invalidation
-    const cachedRule = await getCachedRule(filePath);
-    if (!cachedRule) {
-      continue; // Error already logged by getCachedRule
-    }
-
-    const { metadata, strippedContent } = cachedRule;
-
+  for (const {
+    filePath,
+    relativePath,
+    metadata,
+    strippedContent,
+  } of snapshots) {
     const ruleHasConditions = hasConditions(metadata);
 
     if (ruleHasConditions && metadata) {
@@ -239,25 +336,60 @@ export async function matchRules(
       const mode = metadata.match ?? 'any';
       const shouldInclude =
         mode === 'all'
-          ? declaredChecks.every(Boolean)
-          : declaredChecks.some(Boolean);
+          ? declaredChecks.every(check => check.matched)
+          : declaredChecks.some(check => check.matched);
 
       if (!shouldInclude) {
         debugLog(
-          `Skipping conditional rule: ${relativePath} (match: ${mode}, checks: ${declaredChecks.join(', ')})`
+          `Skipping conditional rule: ${relativePath} (match: ${mode}, checks: ${declaredChecks
+            .map(check => `${check.kind}=${check.matched}`)
+            .join(', ')})`
         );
         continue;
       }
 
       debugLog(
-        `Including conditional rule: ${relativePath} (match: ${mode}, checks: ${declaredChecks.join(', ')})`
+        `Including conditional rule: ${relativePath} (match: ${mode}, checks: ${declaredChecks
+          .map(check => `${check.kind}=${check.matched}`)
+          .join(', ')})`
       );
-    }
 
-    matched.push({ filePath, relativePath, strippedContent });
+      matched.push({
+        filePath,
+        relativePath,
+        strippedContent,
+        conditionResults: declaredChecks,
+        lifetime: classifyRuleLifetime(mode, declaredChecks),
+      });
+    } else {
+      matched.push({
+        filePath,
+        relativePath,
+        strippedContent,
+        conditionResults: [],
+        lifetime: 'durable',
+      });
+    }
   }
 
   return matched;
+}
+
+/**
+ * Match discovered rule files against the runtime context.
+ * Loads current rule data from disk (mtime-cached) for legacy one-shot
+ * callers, then delegates to matchRuleSnapshots.
+ * Unreadable rules are skipped. Entry order follows discovery order.
+ *
+ * @param files - Array of discovered rule files with paths
+ * @param context - Optional RuleFilterContext for conditional rule matching
+ */
+export async function matchRules(
+  files: DiscoveredRule[],
+  context: RuleFilterContext = {}
+): Promise<MatchedRuleEntry[]> {
+  const snapshots = await loadRuleSnapshots(files);
+  return matchRuleSnapshots(snapshots, context);
 }
 
 /**

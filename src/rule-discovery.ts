@@ -152,6 +152,38 @@ export interface DiscoveredRule {
 }
 
 /**
+ * Immutable per-session snapshot of a discovered rule's parsed data.
+ * Captured once per process/session; file edits do not affect an
+ * existing session's snapshot.
+ */
+export interface RuleSnapshot extends DiscoveredRule {
+  /** Parsed frontmatter metadata (null when the file has none) */
+  metadata: RuleMetadata | null;
+  /** Content with frontmatter stripped */
+  strippedContent: string;
+}
+
+/**
+ * Load rule snapshots for the given discovered files, preserving discovery
+ * order and skipping unreadable rules (warnings are logged by getCachedRule).
+ */
+export async function loadRuleSnapshots(
+  files: readonly DiscoveredRule[]
+): Promise<RuleSnapshot[]> {
+  const snapshots: RuleSnapshot[] = [];
+  for (const file of files) {
+    const cachedRule = await getCachedRule(file.filePath);
+    if (!cachedRule) continue;
+    snapshots.push({
+      ...file,
+      metadata: cachedRule.metadata,
+      strippedContent: cachedRule.strippedContent,
+    });
+  }
+  return snapshots;
+}
+
+/**
  * Discover markdown rule files from standard directories
  * Searches recursively in:
  * - $OPENCODE_CONFIG_DIR/rules/ (highest priority)
