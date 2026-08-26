@@ -62,7 +62,7 @@
     },
     "./tui": {
       "types": "./dist/tui/index.d.ts",
-      "import": "./tui/index.tsx"
+      "import": "./dist/tui/index.js"
     }
   },
   "peerDependencies": {
