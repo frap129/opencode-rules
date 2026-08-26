@@ -2,11 +2,11 @@ import {
   matchRuleSnapshots,
   type RuleFilterContext,
   type MatchedRuleEntry,
+  type RuleLifetime,
 } from './rule-filter.js';
 import { extractFilePathsFromMessages } from './message-paths.js';
 import {
   loadRuleSnapshots,
-  getCachedRule,
   type DiscoveredRule,
   type RuleSnapshot,
 } from './rule-discovery.js';
@@ -245,6 +245,7 @@ export class OpenCodeRulesRuntime {
     }
 
     this.appendTransientHookInjections(sessionID, output.messages);
+    this.appendTransientEphemeralHookInjections(sessionID, output.messages);
 
     return output;
   }
@@ -425,6 +426,55 @@ export class OpenCodeRulesRuntime {
       presentIds.add(transient.info.id);
       presentIds.add(transient.parts[0]!.id);
     }
+  }
+
+  /** Append request-scoped synthetic user messages carrying ephemeral hook
+   * texts owned by ephemeral rules. Consumed only by transform; the queue
+   * is cleared after a successful or duplicate-free delivery and retained
+   * when no message can be transformed. */
+  private appendTransientEphemeralHookInjections(
+    sessionID: string,
+    messages: MessageWithInfo[]
+  ): void {
+    const state = this.sessionStore.get(sessionID);
+    if (!state?.pendingEphemeralHookInjections?.length) return;
+    const lastMessage = messages[messages.length - 1];
+    if (!lastMessage?.parts) return;
+
+    const pending = [...new Set(state.pendingEphemeralHookInjections)];
+    const presentIds = new Set<string>();
+    for (const message of messages) {
+      if (typeof message.info?.id === 'string') presentIds.add(message.info.id);
+      for (const part of message.parts ?? []) {
+        if (typeof part.id === 'string') presentIds.add(part.id);
+      }
+    }
+
+    for (const content of pending) {
+      const transient = buildTransientHookMessage(
+        content,
+        (lastMessage.info ?? {}) as Record<string, unknown>
+      );
+      const hash = hashContent(content);
+      if (
+        !presentIds.has(transient.info.id) &&
+        !presentIds.has(transient.parts[0]!.id) &&
+        !presentIds.has(`prt_hook_${hash}`)
+      ) {
+        transient.parts[0] = {
+          ...transient.parts[0]!,
+          sessionID,
+          messageID: transient.info.id,
+        };
+        messages.push(transient as MessageWithInfo);
+        presentIds.add(transient.info.id);
+        presentIds.add(transient.parts[0]!.id);
+      }
+    }
+
+    this.sessionStore.upsert(sessionID, next => {
+      next.pendingEphemeralHookInjections = [];
+    });
   }
 
   /** Rebuild injected-part tracking from the message array (history is ground truth). */
@@ -771,6 +821,21 @@ export class OpenCodeRulesRuntime {
     }
   }
 
+  /** Classify the delivery lifetime of a hook-owning rule. A rule whose
+   * durable part is already persisted is durable; otherwise the current
+   * condition provenance decides, defaulting to ephemeral when unproven. */
+  private classifyHookRuleLifetime(
+    sessionID: string,
+    rule: RuleSnapshot,
+    context: RuleFilterContext
+  ): RuleLifetime {
+    const key = ruleKeyFor(rule.relativePath, rule.strippedContent);
+    if (this.sessionStore.get(sessionID)?.injectedRuleKeys.has(key)) {
+      return 'durable';
+    }
+    return matchRuleSnapshots([rule], context)[0]?.lifetime ?? 'ephemeral';
+  }
+
   /** Evaluate hooks for a tool invocation and queue matches.
    * @throws {Error} When a PreToolUse hook with block:true matches the tool and arguments. */
   private async evaluateAndQueueHooks(
@@ -781,20 +846,18 @@ export class OpenCodeRulesRuntime {
   ): Promise<void> {
     const serializedArgs = serializeToolArgs(args);
 
+    const snapshots = await this.ensureSessionRuleSnapshot(sessionID);
+
     // First pass: collect all matched hooks across all rules
     const allMatches: Array<{
       hook: { type: string; run?: string };
-      relativePath: string;
-      strippedContent: string;
+      rule: RuleSnapshot;
     }> = [];
 
-    for (const { filePath: rulePath, relativePath } of this.ruleFiles) {
-      const cachedRule = await getCachedRule(rulePath);
-      if (!cachedRule?.metadata?.hooks) continue;
+    for (const rule of snapshots) {
+      if (!rule.metadata?.hooks) continue;
 
-      const typeFiltered = cachedRule.metadata.hooks.filter(
-        h => h.type === hookType
-      );
+      const typeFiltered = rule.metadata.hooks.filter(h => h.type === hookType);
       if (typeFiltered.length === 0) continue;
 
       const matched = evaluateHooks(typeFiltered, {
@@ -804,15 +867,22 @@ export class OpenCodeRulesRuntime {
       });
 
       for (const hook of matched) {
-        allMatches.push({
-          hook,
-          relativePath,
-          strippedContent: cachedRule.strippedContent,
-        });
+        allMatches.push({ hook, rule });
       }
     }
 
     if (allMatches.length === 0) return;
+
+    // Build the shared classification context only when hooks actually
+    // matched: the context query (tool RPCs, project tags, git branch) is
+    // the expensive part of the tool-event path.
+    const state = this.sessionStore.get(sessionID);
+    const filterContext = await this.buildSessionFilterContext(
+      sessionID,
+      state?.lastUserPrompt,
+      state?.lastModelID,
+      state?.lastAgentType
+    );
 
     // Check for blockers globally before any queuing or side-effects
     if (hookType === 'PreToolUse') {
@@ -822,10 +892,10 @@ export class OpenCodeRulesRuntime {
       );
       if (blocker) {
         this.debugLog(
-          `PreToolUse block fired for rule ${blocker.relativePath}, tool ${toolName}`
+          `PreToolUse block fired for rule ${blocker.rule.relativePath}, tool ${toolName}`
         );
         throw new Error(
-          `[opencode-rules] Blocked by rule "${blocker.relativePath}": ` +
+          `[opencode-rules] Blocked by rule "${blocker.rule.relativePath}": ` +
             `tool "${toolName}" matched blocked pattern`
         );
       }
@@ -834,18 +904,31 @@ export class OpenCodeRulesRuntime {
     // No blockers: queue content and run side-effects
     // Deduplicate content per rule (one injection per rule, regardless of how many hooks matched)
     const seenContent = new Set<string>();
-    for (const { hook, relativePath, strippedContent } of allMatches) {
-      if (!seenContent.has(strippedContent)) {
-        seenContent.add(strippedContent);
+    for (const { hook, rule } of allMatches) {
+      if (!seenContent.has(rule.strippedContent)) {
+        seenContent.add(rule.strippedContent);
+        const lifetime = this.classifyHookRuleLifetime(
+          sessionID,
+          rule,
+          filterContext
+        );
+
         this.sessionStore.upsert(sessionID, state => {
-          if (!state.pendingHookInjections) {
-            state.pendingHookInjections = [];
+          const queue =
+            lifetime === 'durable'
+              ? state.pendingHookInjections
+              : state.pendingEphemeralHookInjections;
+          if (queue) {
+            queue.push(rule.strippedContent);
+          } else if (lifetime === 'durable') {
+            state.pendingHookInjections = [rule.strippedContent];
+          } else {
+            state.pendingEphemeralHookInjections = [rule.strippedContent];
           }
-          state.pendingHookInjections.push(strippedContent);
         });
 
         this.debugLog(
-          `${hookType} hook fired for rule ${relativePath}, tool ${toolName}`
+          `${hookType} hook fired for rule ${rule.relativePath}, tool ${toolName} (${lifetime})`
         );
       }
 

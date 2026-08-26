@@ -2114,6 +2114,182 @@ describe('chat.message rule persistence', () => {
       __testOnly.getSessionStateSnapshot('ses_receiver')?.needsRuleRescan
     ).toBe(false);
   });
+
+  it('does not persist hook text owned by an ephemeral rule', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    writeFileSync(
+      path.join(globalRulesDir, 'plan-hook.mdc'),
+      `---\nagent: [plan]\nhooks:\n  - type: PostToolUse\n    tool: bash\n    match: "eslint"\n---\n\nPlan hook guidance.`
+    );
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const hooks = await getHooks(testDir);
+    const chatMessage = hooks['chat.message'] as ChatMessageHook;
+    const after = hooks['tool.execute.after'] as (
+      input: {
+        tool: string;
+        sessionID: string;
+        callID: string;
+        args: Record<string, unknown>;
+      },
+      output: { title: string; output: string; metadata: unknown }
+    ) => Promise<void>;
+    const transform = hooks['experimental.chat.messages.transform'] as (
+      input: unknown,
+      output: { messages: Array<Record<string, unknown>> }
+    ) => Promise<void>;
+
+    await chatMessage(
+      { sessionID: 'ses_hook_eph', messageID: 'msg_hook_user' },
+      {
+        message: { role: 'user', agent: 'plan' },
+        parts: [{ type: 'text', text: 'work on linting' }],
+      }
+    );
+    await after(
+      {
+        tool: 'bash',
+        sessionID: 'ses_hook_eph',
+        callID: 'call_1',
+        args: { command: 'npx eslint src/' },
+      },
+      { title: '', output: '', metadata: {} }
+    );
+
+    const dispatch = [
+      {
+        info: {
+          id: 'msg_after_tool',
+          role: 'assistant',
+          sessionID: 'ses_hook_eph',
+        },
+        parts: [{ type: 'text', text: 'tool completed' }],
+      },
+    ];
+    await transform({}, { messages: dispatch });
+    expect(
+      dispatch
+        .flatMap(message => message.parts as Array<{ text?: string }>)
+        .some(part => part.text === 'Plan hook guidance.')
+    ).toBe(true);
+
+    const nextUserMessage = {
+      message: { role: 'user', agent: 'plan' },
+      parts: [{ type: 'text', text: 'continue' }],
+    };
+    await chatMessage(
+      { sessionID: 'ses_hook_eph', messageID: 'msg_hook_next' },
+      nextUserMessage
+    );
+    expect(
+      nextUserMessage.parts.some(part => part.text === 'Plan hook guidance.')
+    ).toBe(false);
+    expect(
+      __testOnly.getSessionStateSnapshot('ses_hook_eph')
+        ?.pendingEphemeralHookInjections
+    ).toEqual([]);
+  });
+
+  it('keeps a mixed any hook durable when a durable condition matches', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    writeFileSync(
+      path.join(globalRulesDir, 'mixed-hook.mdc'),
+      `---\nglobs:\n  - "src/**/*.ts"\nagent: [plan]\nmatch: any\nhooks:\n  - type: PostToolUse\n    tool: bash\n    match: "eslint"\n---\n\nMixed hook guidance.`
+    );
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const hooks = await getHooks(testDir);
+    const after = hooks['tool.execute.after'] as (
+      input: {
+        tool: string;
+        sessionID: string;
+        callID: string;
+        args: Record<string, unknown>;
+      },
+      output: { title: string; output: string; metadata: unknown }
+    ) => Promise<void>;
+
+    __testOnly.upsertSessionState('ses_hook_mixed', s => {
+      s.contextPaths.add('src/index.ts');
+      s.lastAgentType = 'plan';
+    });
+
+    await after(
+      {
+        tool: 'bash',
+        sessionID: 'ses_hook_mixed',
+        callID: 'call_1',
+        args: { command: 'npx eslint src/' },
+      },
+      { title: '', output: '', metadata: {} }
+    );
+
+    const snapshot = __testOnly.getSessionStateSnapshot('ses_hook_mixed');
+    expect(snapshot?.pendingHookInjections).toEqual(['Mixed hook guidance.']);
+    expect(snapshot?.pendingEphemeralHookInjections).toBeUndefined();
+  });
+
+  it('uses the original snapshot body for hook text after an in-process edit', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    const rulePath = path.join(globalRulesDir, 'snap-hook.md');
+    writeFileSync(
+      rulePath,
+      `---\nhooks:\n  - type: PostToolUse\n    tool: bash\n    match: "eslint"\n---\n\nVersion one.`
+    );
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const hooks = await getHooks(testDir);
+    const chatMessage = hooks['chat.message'] as ChatMessageHook;
+    const after = hooks['tool.execute.after'] as (
+      input: {
+        tool: string;
+        sessionID: string;
+        callID: string;
+        args: Record<string, unknown>;
+      },
+      output: { title: string; output: string; metadata: unknown }
+    ) => Promise<void>;
+
+    const first: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'first' }],
+    };
+    await chatMessage(
+      { sessionID: 'ses_hook_edit', messageID: 'msg_he_1' },
+      first
+    );
+    expect(first.parts.some(part => part.text?.includes('Version one.'))).toBe(
+      true
+    );
+
+    writeFileSync(
+      rulePath,
+      `---\nhooks:\n  - type: PostToolUse\n    tool: bash\n    match: "eslint"\n---\n\nVersion two.`
+    );
+    await after(
+      {
+        tool: 'bash',
+        sessionID: 'ses_hook_edit',
+        callID: 'call_1',
+        args: { command: 'npx eslint src/' },
+      },
+      { title: '', output: '', metadata: {} }
+    );
+
+    const second: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'second' }],
+    };
+    await chatMessage(
+      { sessionID: 'ses_hook_edit', messageID: 'msg_he_2' },
+      second
+    );
+    const hookPart = second.parts.find(
+      p => p.synthetic && p.id?.startsWith('prt_hook_')
+    );
+    expect(hookPart?.text).toContain('Version one.');
+    expect(hookPart?.text).not.toContain('Version two.');
+  });
 });
 
 describe('transient hook injection delivery', () => {
@@ -2265,5 +2441,47 @@ describe('transient hook injection delivery', () => {
     await messagesTransform({}, { messages });
 
     expect(messages).toHaveLength(0);
+  });
+
+  it('retains the ephemeral hook queue until a transform can deliver it', async () => {
+    const { testDir } = getTestDirs();
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+    const {
+      default: { server: plugin },
+      __testOnly,
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+    __testOnly.upsertSessionState('ses_eph_retain', s => {
+      s.pendingEphemeralHookInjections = ['Transient hook text.'];
+      s.seededFromHistory = true;
+    });
+    const messagesTransform = hooks['experimental.chat.messages.transform'] as (
+      input: unknown,
+      output: { messages: unknown[] }
+    ) => Promise<{ messages: unknown[] }>;
+
+    // No target message: queue retained for retry.
+    await messagesTransform({}, { messages: [] });
+    expect(
+      __testOnly.getSessionStateSnapshot('ses_eph_retain')
+        ?.pendingEphemeralHookInjections
+    ).toEqual(['Transient hook text.']);
+
+    // A valid request consumes the queue and delivers the text transiently.
+    const messages = [
+      {
+        info: { id: 'msg_u1', role: 'user', sessionID: 'ses_eph_retain' },
+        parts: [{ type: 'text', text: 'hi' }],
+      },
+    ];
+    await messagesTransform({}, { messages });
+    expect(messages).toHaveLength(2);
+    expect(
+      __testOnly.getSessionStateSnapshot('ses_eph_retain')
+        ?.pendingEphemeralHookInjections
+    ).toEqual([]);
   });
 });
