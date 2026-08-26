@@ -436,14 +436,17 @@ describe('OpenCodeRulesPlugin', () => {
     );
 
     const chatMessage = hooks['chat.message'] as (
-      input: { sessionID: string },
+      input: { sessionID: string; messageID?: string },
       output: ChatMessageOutputLike
     ) => Promise<void>;
     const output: ChatMessageOutputLike = {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'next turn' }],
     };
-    await chatMessage({ sessionID: 'ses_deliver' }, output);
+    await chatMessage(
+      { sessionID: 'ses_deliver', messageID: 'msg_deliver_1' },
+      output
+    );
 
     const hookParts = output.parts.filter(
       p => p.synthetic && p.id?.startsWith('prt_hook_')
@@ -851,7 +854,7 @@ describe('SessionState', () => {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'check this' }],
     };
-    await chatMessage({ sessionID: 'ses_1' }, output);
+    await chatMessage({ sessionID: 'ses_1', messageID: 'msg_ses1_1' }, output);
 
     expect(output.parts.filter(p => p.synthetic)[0]?.text).toContain(
       'React best practices'
@@ -1101,7 +1104,7 @@ describe('Active rules state persistence', () => {
 
     const sessionID = 'ses-state-match';
     const chatMessage = hooks['chat.message'] as (
-      input: { sessionID?: string },
+      input: { sessionID?: string; messageID?: string },
       output: ChatMessageOutputLike
     ) => Promise<void>;
 
@@ -1109,7 +1112,7 @@ describe('Active rules state persistence', () => {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'hello' }],
     };
-    await chatMessage({ sessionID }, output);
+    await chatMessage({ sessionID, messageID: 'msg_state_match_1' }, output);
 
     expect(output.parts.filter(p => p.synthetic)[0]?.text).toContain(
       'Always Apply'
@@ -1149,7 +1152,7 @@ Conditional rule for gpt-5 only.`
 
     const sessionID = 'ses-state-nomatch';
     const chatMessage = hooks['chat.message'] as (
-      input: { sessionID?: string },
+      input: { sessionID?: string; messageID?: string },
       output: ChatMessageOutputLike
     ) => Promise<void>;
 
@@ -1157,7 +1160,7 @@ Conditional rule for gpt-5 only.`
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'hello' }],
     };
-    await chatMessage({ sessionID }, output);
+    await chatMessage({ sessionID, messageID: 'msg_state_nomatch_1' }, output);
 
     // No rules should match (model is not gpt-5)
     expect(output.parts.filter(p => p.synthetic)).toHaveLength(0);
@@ -1287,7 +1290,7 @@ describe('CI environment detection', () => {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'hello' }],
     };
-    await chatMessage({ sessionID: 'ses_ci_1' }, output);
+    await chatMessage({ sessionID: 'ses_ci_1', messageID: 'msg_ci_1' }, output);
 
     const synthetic = output.parts
       .filter(p => p.synthetic)
@@ -1320,7 +1323,7 @@ describe('CI environment detection', () => {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'hello' }],
     };
-    await chatMessage({ sessionID: 'ses_ci_2' }, output);
+    await chatMessage({ sessionID: 'ses_ci_2', messageID: 'msg_ci_2' }, output);
 
     const synthetic = output.parts
       .filter(p => p.synthetic)
@@ -1353,7 +1356,7 @@ describe('CI environment detection', () => {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'hello' }],
     };
-    await chatMessage({ sessionID: 'ses_ci_3' }, output);
+    await chatMessage({ sessionID: 'ses_ci_3', messageID: 'msg_ci_3' }, output);
 
     const synthetic = output.parts
       .filter(p => p.synthetic)
@@ -1386,7 +1389,7 @@ describe('CI environment detection', () => {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'hello' }],
     };
-    await chatMessage({ sessionID: 'ses_ci_4' }, output);
+    await chatMessage({ sessionID: 'ses_ci_4', messageID: 'msg_ci_4' }, output);
 
     const synthetic = output.parts
       .filter(p => p.synthetic)
@@ -1419,7 +1422,7 @@ describe('CI environment detection', () => {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'hello' }],
     };
-    await chatMessage({ sessionID: 'ses_ci_5' }, output);
+    await chatMessage({ sessionID: 'ses_ci_5', messageID: 'msg_ci_5' }, output);
 
     const synthetic = output.parts
       .filter(p => p.synthetic)
@@ -1430,17 +1433,19 @@ describe('CI environment detection', () => {
 });
 
 type ChatMessageHook = (
-  input: { sessionID: string },
+  input: { sessionID: string; messageID?: string },
   output: ChatMessageOutputLike
 ) => Promise<void>;
 
 type ChatMessageOutputLike = {
-  message: { role: string };
+  message: { role: string; id?: string };
   parts: Array<{
     id?: string;
     type?: string;
     text?: string;
     synthetic?: boolean;
+    sessionID?: string;
+    messageID?: string;
   }>;
 };
 
@@ -1501,7 +1506,10 @@ describe('chat.message rule persistence', () => {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'hello' }],
     };
-    await chatMessage({ sessionID: 'ses_append' }, output);
+    await chatMessage(
+      { sessionID: 'ses_append', messageID: 'msg_append_1' },
+      output
+    );
 
     const synthetic = output.parts.filter(p => p.synthetic);
     expect(synthetic).toHaveLength(1);
@@ -1510,6 +1518,82 @@ describe('chat.message rule persistence', () => {
       '## always.md\n\n# Always Apply\nThis rule always applies.'
     );
     expect(output.parts[0]).toEqual({ type: 'text', text: 'hello' });
+  });
+
+  it('stamps sessionID and messageID onto appended synthetic parts', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    writeFileSync(path.join(globalRulesDir, 'always.md'), '# Always Apply');
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const hooks = await getHooks(testDir);
+    const chatMessage = hooks['chat.message'] as ChatMessageHook;
+
+    const output: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'hello' }],
+    };
+    await chatMessage(
+      { sessionID: 'ses_stamp', messageID: 'msg_host_1' },
+      output
+    );
+
+    const synthetic = output.parts.filter(p => p.synthetic);
+    expect(synthetic).toHaveLength(1);
+    expect(synthetic[0]?.sessionID).toBe('ses_stamp');
+    expect(synthetic[0]?.messageID).toBe('msg_host_1');
+  });
+
+  it('skips injection rather than emitting parts without a messageID', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    writeFileSync(path.join(globalRulesDir, 'always.md'), '# Always Apply');
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const hooks = await getHooks(testDir);
+    const chatMessage = hooks['chat.message'] as (
+      input: { sessionID: string },
+      output: ChatMessageOutputLike
+    ) => Promise<void>;
+
+    // Pre-queue a hook injection: the guard must preserve it for retry
+    // rather than flushing it without an owning message id.
+    const { __testOnly } = await import('./index.js');
+    __testOnly.upsertSessionState('sans_message_id', s => {
+      s.pendingHookInjections = ['Queued text.'];
+    });
+
+    const output: ChatMessageOutputLike = {
+      message: { role: 'user' }, // no id field
+      parts: [{ type: 'text', text: 'hello' }],
+    };
+    await chatMessage({ sessionID: 'sans_message_id' }, output);
+
+    expect(output.parts.filter(p => p.synthetic)).toHaveLength(0);
+    expect(
+      __testOnly.getSessionStateSnapshot('sans_message_id')
+        ?.pendingHookInjections
+    ).toEqual(['Queued text.']);
+  });
+
+  it('falls back to output.message.id when input omits it', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    writeFileSync(path.join(globalRulesDir, 'always.md'), '# Always Apply');
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const hooks = await getHooks(testDir);
+    const chatMessage = hooks['chat.message'] as (
+      input: { sessionID: string },
+      output: ChatMessageOutputLike
+    ) => Promise<void>;
+
+    const output: ChatMessageOutputLike = {
+      message: { role: 'user', id: 'msg_from_output' },
+      parts: [{ type: 'text', text: 'hi' }],
+    };
+    await chatMessage({ sessionID: 'ses_msgfallback' }, output);
+
+    const synthetic = output.parts.filter(p => p.synthetic);
+    expect(synthetic).toHaveLength(1);
+    expect(synthetic[0]?.messageID).toBe('msg_from_output');
   });
 
   it('deduplicates rules already injected on earlier messages', async () => {
@@ -1542,7 +1626,10 @@ describe('chat.message rule persistence', () => {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'first' }],
     };
-    await chatMessage({ sessionID: 'ses_dedup' }, first);
+    await chatMessage(
+      { sessionID: 'ses_dedup', messageID: 'msg_dedup_1' },
+      first
+    );
     expect(first.parts.filter(p => p.synthetic)).toHaveLength(1);
     persisted.push(...first.parts.filter(p => p.synthetic));
 
@@ -1550,7 +1637,10 @@ describe('chat.message rule persistence', () => {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'second' }],
     };
-    await chatMessage({ sessionID: 'ses_dedup' }, second);
+    await chatMessage(
+      { sessionID: 'ses_dedup', messageID: 'msg_dedup_2' },
+      second
+    );
     expect(second.parts.filter(p => p.synthetic)).toHaveLength(0);
   });
 
@@ -1567,7 +1657,10 @@ describe('chat.message rule persistence', () => {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'first' }],
     };
-    await chatMessage({ sessionID: 'ses_change' }, first);
+    await chatMessage(
+      { sessionID: 'ses_change', messageID: 'msg_change_1' },
+      first
+    );
     const firstIds = first.parts.filter(p => p.synthetic).map(p => p.id);
 
     writeFileSync(rulePath, 'Version two.');
@@ -1578,7 +1671,10 @@ describe('chat.message rule persistence', () => {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'second' }],
     };
-    await chatMessage({ sessionID: 'ses_change' }, second);
+    await chatMessage(
+      { sessionID: 'ses_change', messageID: 'msg_change_2' },
+      second
+    );
     const secondIds = second.parts.filter(p => p.synthetic).map(p => p.id);
 
     expect(secondIds).toHaveLength(1);
@@ -1620,13 +1716,18 @@ describe('chat.message rule persistence', () => {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'next turn' }],
     };
-    await chatMessage({ sessionID: 'ses_hookflush' }, output);
+    await chatMessage(
+      { sessionID: 'ses_hookflush', messageID: 'msg_hookflush_1' },
+      output
+    );
 
     const hookParts = output.parts.filter(
       p => p.synthetic && p.id?.startsWith('prt_hook_')
     );
     expect(hookParts).toHaveLength(1);
     expect(hookParts[0]?.text).toBe('Do not bind to 0.0.0.0.');
+    expect(hookParts[0]?.sessionID).toBe('ses_hookflush');
+    expect(hookParts[0]?.messageID).toBe('msg_hookflush_1');
     expect(
       __testOnly.getSessionStateSnapshot('ses_hookflush')?.pendingHookInjections
     ).toHaveLength(0);
@@ -1677,7 +1778,10 @@ describe('chat.message rule persistence', () => {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'synthetic only', synthetic: true }],
     };
-    await chatMessage({ sessionID: 'ses_textless' }, output);
+    await chatMessage(
+      { sessionID: 'ses_textless', messageID: 'msg_textless_1' },
+      output
+    );
 
     const syntheticIds = output.parts
       .filter(p => p.synthetic)
@@ -1695,7 +1799,7 @@ describe('chat.message rule persistence', () => {
     const hooks = await getHooks(testDir);
     const chatMessage = hooks['chat.message'] as ChatMessageHook;
     await chatMessage(
-      { sessionID: 'ses-state-match' },
+      { sessionID: 'ses-state-match', messageID: 'msg_state_match_1' },
       {
         message: { role: 'user' },
         parts: [{ type: 'text', text: 'hello' }],
@@ -1738,7 +1842,10 @@ describe('chat.message rule persistence', () => {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'post-restart message' }],
     };
-    await chatMessage({ sessionID: 'ses_restart' }, output);
+    await chatMessage(
+      { sessionID: 'ses_restart', messageID: 'msg_restart_1' },
+      output
+    );
 
     expect(output.parts.filter(p => p.synthetic)).toHaveLength(0);
   });
@@ -1808,7 +1915,10 @@ describe('chat.message rule persistence', () => {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'hello' }],
     };
-    await chatMessage({ sessionID: 'ses_receiver' }, output);
+    await chatMessage(
+      { sessionID: 'ses_receiver', messageID: 'msg_receiver_1' },
+      output
+    );
 
     expect(output.parts.filter(p => p.synthetic)).toHaveLength(1);
     expect(
@@ -1893,7 +2003,13 @@ describe('transient hook injection delivery', () => {
     expect((messages[1] as { info: { id: string } }).info.id).toBe('msg_a1'); // source info untouched
     const appended = messages[2] as {
       info: { id: string; role: string; sessionID: string };
-      parts: Array<{ id?: string; synthetic?: boolean; text?: string }>;
+      parts: Array<{
+        id?: string;
+        synthetic?: boolean;
+        text?: string;
+        sessionID?: string;
+        messageID?: string;
+      }>;
     };
     expect(appended.info.id.startsWith('msg_rules_hook_')).toBe(true);
     expect(appended.info.role).toBe('user');
@@ -1902,6 +2018,8 @@ describe('transient hook injection delivery', () => {
     expect(appended.parts[0]?.id?.startsWith('prt_hook_transient_')).toBe(true);
     expect(appended.parts[0]?.synthetic).toBe(true);
     expect(appended.parts[0]?.text).toBe('Mind the linter.');
+    expect(appended.parts[0]?.sessionID).toBe('ses_mid');
+    expect(appended.parts[0]?.messageID).toBe(appended.info.id);
   });
 
   it('is idempotent across dispatches within the turn', async () => {

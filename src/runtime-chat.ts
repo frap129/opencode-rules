@@ -4,12 +4,14 @@ import type { DebugLog } from './debug.js';
 
 export interface ChatMessageInput {
   sessionID?: string;
+  messageID?: string;
   model?: { modelID?: string };
   agent?: string;
 }
 
 export interface ChatMessageOutput {
   message?: {
+    id?: string;
     role?: string;
     agent?: string;
     model?: { modelID?: string };
@@ -19,6 +21,8 @@ export interface ChatMessageOutput {
     type?: string;
     text?: string;
     synthetic?: boolean;
+    sessionID?: string;
+    messageID?: string;
   }>;
 }
 

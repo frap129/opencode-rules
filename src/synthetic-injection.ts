@@ -11,6 +11,8 @@ export interface SyntheticPart {
   type: 'text';
   text: string;
   synthetic: true;
+  sessionID?: string;
+  messageID?: string;
 }
 
 export interface TransientHookMessage {

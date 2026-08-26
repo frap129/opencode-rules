@@ -271,6 +271,11 @@ export class OpenCodeRulesRuntime {
           content,
           lastMessage.info as Record<string, unknown>
         );
+        transient.parts[0] = {
+          ...transient.parts[0],
+          sessionID,
+          messageID: transient.info.id,
+        };
         messages.push(transient as MessageWithInfo);
       }
     } catch (error) {
@@ -391,7 +396,19 @@ export class OpenCodeRulesRuntime {
         matched = await matchRules(this.ruleFiles, filterContext);
       }
 
-      // 5. Append one synthetic part per not-yet-injected rule
+      // 5. Resolve the owning message id and guard before any part
+      //    construction or store mutation: persisted parts must carry
+      //    sessionID/messageID (SDK schema), so skip rather than emit
+      //    schema-invalid parts. The pending queue stays intact for retry.
+      const messageID = input.messageID ?? output.message?.id;
+      if (!messageID) {
+        this.debugLog(
+          `No messageID available for session ${sessionID} - skipping synthetic part injection`
+        );
+        return;
+      }
+
+      // 6. Append one synthetic part per not-yet-injected rule
       const newParts: SyntheticPart[] = [];
       const newRuleKeys: string[] = [];
       for (const rule of matched) {
@@ -399,11 +416,15 @@ export class OpenCodeRulesRuntime {
         if (state.injectedRuleKeys.has(key) || newRuleKeys.includes(key)) {
           continue;
         }
-        newParts.push(buildRulePart(rule.relativePath, rule.strippedContent));
+        newParts.push({
+          ...buildRulePart(rule.relativePath, rule.strippedContent),
+          sessionID,
+          messageID,
+        });
         newRuleKeys.push(key);
       }
 
-      // 6. Flush queued hook injections as durable parts (content-hash dedup)
+      // 7. Flush queued hook injections as durable parts (content-hash dedup)
       const newHookHashes: string[] = [];
       const pending = state.pendingHookInjections ?? [];
       for (const content of new Set(pending)) {
@@ -414,7 +435,11 @@ export class OpenCodeRulesRuntime {
         ) {
           continue;
         }
-        newParts.push(buildHookInjectionPart(content));
+        newParts.push({
+          ...buildHookInjectionPart(content),
+          sessionID,
+          messageID,
+        });
         newHookHashes.push(hash);
       }
 

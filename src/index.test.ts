@@ -97,7 +97,11 @@ Model-specific guidelines.`
     } as Parameters<typeof plugin>[0]);
 
     const chatMessage = hooks['chat.message'] as (
-      input: { sessionID: string; model?: { modelID: string } },
+      input: {
+        sessionID: string;
+        model?: { modelID: string };
+        messageID?: string;
+      },
       output: ChatMessageOutputLike
     ) => Promise<void>;
     const output: ChatMessageOutputLike = {
@@ -105,7 +109,11 @@ Model-specific guidelines.`
       parts: [{ type: 'text', text: 'hello' }],
     };
     await chatMessage(
-      { sessionID: 'ses_model_test', model: { modelID: 'claude-opus' } },
+      {
+        sessionID: 'ses_model_test',
+        model: { modelID: 'claude-opus' },
+        messageID: 'msg_model_test_1',
+      },
       output
     );
 
@@ -143,7 +151,7 @@ Agent-specific guidelines.`
     } as Parameters<typeof plugin>[0]);
 
     const chatMessage = hooks['chat.message'] as (
-      input: { sessionID: string; agent?: string },
+      input: { sessionID: string; agent?: string; messageID?: string },
       output: ChatMessageOutputLike
     ) => Promise<void>;
     const output: ChatMessageOutputLike = {
@@ -151,7 +159,11 @@ Agent-specific guidelines.`
       parts: [{ type: 'text', text: 'hello' }],
     };
     await chatMessage(
-      { sessionID: 'ses_agent_test', agent: 'programmer' },
+      {
+        sessionID: 'ses_agent_test',
+        agent: 'programmer',
+        messageID: 'msg_agent_test_1',
+      },
       output
     );
 
@@ -202,7 +214,7 @@ Nonmatching output context.`
     } as Parameters<typeof plugin>[0]);
 
     const chatMessage = hooks['chat.message'] as (
-      input: { sessionID: string },
+      input: { sessionID: string; messageID?: string },
       output: ChatMessageOutputLike
     ) => Promise<void>;
     const output: ChatMessageOutputLike = {
@@ -213,7 +225,10 @@ Nonmatching output context.`
       },
       parts: [{ type: 'text', text: 'hello' }],
     };
-    await chatMessage({ sessionID: 'ses_output_context' }, output);
+    await chatMessage(
+      { sessionID: 'ses_output_context', messageID: 'msg_output_context_1' },
+      output
+    );
 
     const injectedText = output.parts
       .filter(p => p.synthetic)
@@ -250,14 +265,17 @@ Planning guidelines.`
     } as Parameters<typeof plugin>[0]);
 
     const chatMessage = hooks['chat.message'] as (
-      input: { sessionID: string },
+      input: { sessionID: string; messageID?: string },
       output: ChatMessageOutputLike
     ) => Promise<void>;
     const output: ChatMessageOutputLike = {
       message: { role: 'user' },
       parts: [{ type: 'text', text: '/plan implement a new feature' }],
     };
-    await chatMessage({ sessionID: 'ses_cmd_test' }, output);
+    await chatMessage(
+      { sessionID: 'ses_cmd_test', messageID: 'msg_cmd_test_1' },
+      output
+    );
 
     const injectedText = output.parts
       .filter(p => p.synthetic)
@@ -294,14 +312,14 @@ Platform-specific guidelines.`
     } as Parameters<typeof plugin>[0]);
 
     const chatMessage = hooks['chat.message'] as (
-      input: { sessionID: string },
+      input: { sessionID: string; messageID?: string },
       output: ChatMessageOutputLike
     ) => Promise<void>;
     const message: ChatMessageOutputLike = {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'hello' }],
     };
-    await chatMessage({ sessionID: 'ses_os' }, message);
+    await chatMessage({ sessionID: 'ses_os', messageID: 'msg_os_1' }, message);
 
     const injectedText = message.parts
       .filter(p => p.synthetic)
@@ -339,14 +357,17 @@ CI-authoritative guidelines.`
     } as Parameters<typeof plugin>[0]);
 
     const chatMessage = hooks['chat.message'] as (
-      input: { sessionID: string },
+      input: { sessionID: string; messageID?: string },
       output: ChatMessageOutputLike
     ) => Promise<void>;
     const message: ChatMessageOutputLike = {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'hello' }],
     };
-    await chatMessage({ sessionID: 'ses_ci_auth' }, message);
+    await chatMessage(
+      { sessionID: 'ses_ci_auth', messageID: 'msg_ci_auth_1' },
+      message
+    );
 
     const injectedText = message.parts
       .filter(p => p.synthetic)
@@ -387,7 +408,12 @@ All dimensions must match.`
     } as Parameters<typeof plugin>[0]);
 
     const chatMessage = hooks['chat.message'] as (
-      input: { sessionID: string; model?: { modelID: string }; agent?: string },
+      input: {
+        sessionID: string;
+        model?: { modelID: string };
+        agent?: string;
+        messageID?: string;
+      },
       output: ChatMessageOutputLike
     ) => Promise<void>;
     const output: ChatMessageOutputLike = {
@@ -399,6 +425,7 @@ All dimensions must match.`
         sessionID: 'ses_all',
         model: { modelID: 'claude-opus' },
         agent: 'programmer',
+        messageID: 'msg_all_1',
       },
       output
     );
@@ -442,7 +469,12 @@ All dimensions must match.`
     } as Parameters<typeof plugin>[0]);
 
     const chatMessage = hooks['chat.message'] as (
-      input: { sessionID: string; model?: { modelID: string }; agent?: string },
+      input: {
+        sessionID: string;
+        model?: { modelID: string };
+        agent?: string;
+        messageID?: string;
+      },
       output: ChatMessageOutputLike
     ) => Promise<void>;
     const output: ChatMessageOutputLike = {
@@ -454,6 +486,7 @@ All dimensions must match.`
         sessionID: 'ses_fail',
         model: { modelID: 'claude-opus' },
         agent: 'programmer',
+        messageID: 'msg_fail_1',
       },
       output
     );
@@ -496,14 +529,17 @@ Node.js project guidelines.`
     } as Parameters<typeof plugin>[0]);
 
     const chatMessage = hooks['chat.message'] as (
-      input: { sessionID: string },
+      input: { sessionID: string; messageID?: string },
       output: ChatMessageOutputLike
     ) => Promise<void>;
     const message: ChatMessageOutputLike = {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'hello' }],
     };
-    await chatMessage({ sessionID: 'ses_proj_tags' }, message);
+    await chatMessage(
+      { sessionID: 'ses_proj_tags', messageID: 'msg_proj_tags_1' },
+      message
+    );
 
     const injectedText = message.parts
       .filter(p => p.synthetic)
@@ -545,14 +581,17 @@ Feature branch guidelines.`
       } as Parameters<typeof plugin>[0]);
 
       const chatMessage = hooks['chat.message'] as (
-        input: { sessionID: string },
+        input: { sessionID: string; messageID?: string },
         output: ChatMessageOutputLike
       ) => Promise<void>;
       const message: ChatMessageOutputLike = {
         message: { role: 'user' },
         parts: [{ type: 'text', text: 'hello' }],
       };
-      await chatMessage({ sessionID: 'ses_branch' }, message);
+      await chatMessage(
+        { sessionID: 'ses_branch', messageID: 'msg_branch_1' },
+        message
+      );
 
       const injectedText = message.parts
         .filter(p => p.synthetic)
@@ -635,14 +674,17 @@ Feature branch guidelines.`
     } as Parameters<typeof plugin>[0]);
 
     const chatMessage = hooks['chat.message'] as (
-      input: { sessionID: string },
+      input: { sessionID: string; messageID?: string },
       output: ChatMessageOutputLike
     ) => Promise<void>;
     const message: ChatMessageOutputLike = {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'hello' }],
     };
-    await chatMessage({ sessionID: 'ses_tags_fail' }, message);
+    await chatMessage(
+      { sessionID: 'ses_tags_fail', messageID: 'msg_tags_fail_1' },
+      message
+    );
 
     const injectedText = message.parts
       .filter(p => p.synthetic)
@@ -676,14 +718,17 @@ Feature branch guidelines.`
     } as Parameters<typeof plugin>[0]);
 
     const chatMessage = hooks['chat.message'] as (
-      input: { sessionID: string },
+      input: { sessionID: string; messageID?: string },
       output: ChatMessageOutputLike
     ) => Promise<void>;
     const message: ChatMessageOutputLike = {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'hello' }],
     };
-    await chatMessage({ sessionID: 'ses_branch_fail' }, message);
+    await chatMessage(
+      { sessionID: 'ses_branch_fail', messageID: 'msg_branch_fail_1' },
+      message
+    );
 
     const injectedText = message.parts
       .filter(p => p.synthetic)

@@ -1003,14 +1003,17 @@ Use React best practices for components.`
     await messagesTransform({}, messagesOutput);
 
     const chatMessage = hooks['chat.message'] as (
-      input: { sessionID: string },
+      input: { sessionID: string; messageID?: string },
       output: ChatMessageOutputLike
     ) => Promise<void>;
     const output: ChatMessageOutputLike = {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'hello' }],
     };
-    await chatMessage({ sessionID: testSessionID }, output);
+    await chatMessage(
+      { sessionID: testSessionID, messageID: 'msg_glob_1' },
+      output
+    );
 
     const syntheticText = output.parts
       .filter(p => p.synthetic)
@@ -1067,14 +1070,17 @@ Use React best practices for components.`
     await messagesTransform({}, messagesOutput);
 
     const chatMessage = hooks['chat.message'] as (
-      input: { sessionID: string },
+      input: { sessionID: string; messageID?: string },
       output: ChatMessageOutputLike
     ) => Promise<void>;
     const output: ChatMessageOutputLike = {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'hello' }],
     };
-    await chatMessage({ sessionID: testSessionID }, output);
+    await chatMessage(
+      { sessionID: testSessionID, messageID: 'msg_negctx_1' },
+      output
+    );
 
     const syntheticText = output.parts
       .filter(p => p.synthetic)
@@ -1132,14 +1138,17 @@ Special rule content.`
     await messagesTransform({}, messagesOutput);
 
     const chatMessage = hooks['chat.message'] as (
-      input: { sessionID: string },
+      input: { sessionID: string; messageID?: string },
       output: ChatMessageOutputLike
     ) => Promise<void>;
     const output: ChatMessageOutputLike = {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'hello' }],
     };
-    await chatMessage({ sessionID: testSessionID }, output);
+    await chatMessage(
+      { sessionID: testSessionID, messageID: 'msg_uncond_1' },
+      output
+    );
 
     const syntheticText = output.parts
       .filter(p => p.synthetic)
@@ -1348,14 +1357,14 @@ MCP Context7 rule content`;
     );
 
     const chatMessage = hooks['chat.message'] as (
-      input: { sessionID: string },
+      input: { sessionID: string; messageID?: string },
       output: ChatMessageOutputLike
     ) => Promise<void>;
     const output: ChatMessageOutputLike = {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'hello' }],
     };
-    await chatMessage({ sessionID: 'ses_mcp' }, output);
+    await chatMessage({ sessionID: 'ses_mcp', messageID: 'msg_mcp_1' }, output);
 
     const syntheticText = output.parts
       .filter(p => p.synthetic)
@@ -1419,7 +1428,7 @@ describe('Synthetic-part delivery lifecycle', () => {
       mockInput as unknown as Parameters<typeof plugin>[0]
     );
     const chatMessage = hooks['chat.message'] as (
-      input: { sessionID: string },
+      input: { sessionID: string; messageID?: string },
       output: {
         message: { role: string };
         parts: Array<{ id?: string; synthetic?: boolean; text?: string }>;
@@ -1439,7 +1448,10 @@ describe('Synthetic-part delivery lifecycle', () => {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'run the linter' }],
     };
-    await chatMessage({ sessionID: 'ses_life' }, turn1);
+    await chatMessage(
+      { sessionID: 'ses_life', messageID: 'msg_life_1' },
+      turn1
+    );
     const turn1Synthetic = turn1.parts.filter(p => p.synthetic);
     expect(turn1Synthetic).toHaveLength(2);
     expect(turn1Synthetic.map(p => p.text)).toContain(
@@ -1476,7 +1488,10 @@ describe('Synthetic-part delivery lifecycle', () => {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'thanks' }],
     };
-    await chatMessage({ sessionID: 'ses_life' }, turn2);
+    await chatMessage(
+      { sessionID: 'ses_life', messageID: 'msg_life_2' },
+      turn2
+    );
     const syntheticIds = turn2.parts.filter(p => p.synthetic).map(p => p.id);
     expect(syntheticIds.some(id => id?.startsWith('prt_rules_'))).toBe(false);
     expect(syntheticIds.some(id => id?.startsWith('prt_hook_'))).toBe(true);
@@ -1530,7 +1545,7 @@ describe('Synthetic-part delivery lifecycle', () => {
       mockInput as unknown as Parameters<typeof plugin>[0]
     );
     const chatMessage = hooks['chat.message'] as (
-      input: { sessionID: string },
+      input: { sessionID: string; messageID?: string },
       output: {
         message: { role: string };
         parts: Array<{ synthetic?: boolean }>;
@@ -1541,7 +1556,10 @@ describe('Synthetic-part delivery lifecycle', () => {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'continuing after restart' }],
     };
-    await chatMessage({ sessionID: 'ses_restart' }, output);
+    await chatMessage(
+      { sessionID: 'ses_restart', messageID: 'msg_restart_1' },
+      output
+    );
 
     expect(output.parts.filter(p => p.synthetic)).toHaveLength(0);
   });
@@ -1563,7 +1581,7 @@ describe('Synthetic-part delivery lifecycle', () => {
       mockInput as unknown as Parameters<typeof plugin>[0]
     );
     const chatMessage = hooks['chat.message'] as (
-      input: { sessionID: string },
+      input: { sessionID: string; messageID?: string },
       output: {
         message: { role: string };
         parts: Array<{ id?: string; synthetic?: boolean; text?: string }>;
@@ -1583,7 +1601,10 @@ describe('Synthetic-part delivery lifecycle', () => {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'first' }],
     };
-    await chatMessage({ sessionID: 'ses_comp' }, turn1);
+    await chatMessage(
+      { sessionID: 'ses_comp', messageID: 'msg_comp_1' },
+      turn1
+    );
     expect(turn1.parts.filter(p => p.synthetic)).toHaveLength(1);
 
     // Compaction fires (empty contextPaths is fine — flag set unconditionally)
@@ -1610,7 +1631,10 @@ describe('Synthetic-part delivery lifecycle', () => {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'second' }],
     };
-    await chatMessage({ sessionID: 'ses_comp' }, turn2);
+    await chatMessage(
+      { sessionID: 'ses_comp', messageID: 'msg_comp_2' },
+      turn2
+    );
     const reappended = turn2.parts.filter(p => p.synthetic);
     expect(reappended).toHaveLength(1);
     expect(reappended[0]?.text).toContain('Compaction survivor.');
