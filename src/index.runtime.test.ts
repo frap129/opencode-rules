@@ -1772,6 +1772,49 @@ describe('chat.message rule persistence', () => {
       __testOnly.getSessionStateSnapshot('ses_fetchfail')?.needsRuleRescan
     ).toBe(true);
   });
+
+  it('invokes session.messages with its receiver so sdk methods stay bound', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    writeFileSync(path.join(globalRulesDir, 'always.md'), '# Always Apply');
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const {
+      default: { server: plugin },
+      __testOnly,
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    // Simulate the real SDK: a prototype-style method that reads instance
+    // state via `this` (arrow functions would mask the detachment bug).
+    const sessionApi = {
+      _client: { ready: true },
+      async messages(this: { _client?: { ready: boolean } }, _args?: unknown) {
+        if (!this || !this._client) {
+          throw new TypeError(
+            "undefined is not an object (evaluating 'this._client')"
+          );
+        }
+        return { data: [] };
+      },
+    };
+    mockInput.client.session =
+      sessionApi as unknown as typeof mockInput.client.session;
+
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+    const chatMessage = hooks['chat.message'] as ChatMessageHook;
+
+    const output: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'hello' }],
+    };
+    await chatMessage({ sessionID: 'ses_receiver' }, output);
+
+    expect(output.parts.filter(p => p.synthetic)).toHaveLength(1);
+    expect(
+      __testOnly.getSessionStateSnapshot('ses_receiver')?.needsRuleRescan
+    ).toBe(false);
+  });
 });
 
 describe('transient hook injection delivery', () => {

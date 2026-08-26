@@ -455,8 +455,8 @@ export class OpenCodeRulesRuntime {
   private async scanHistoryFromClient(
     sessionID: string
   ): Promise<InjectedPartsScan | undefined> {
-    const fetchHistory = this.client.session?.messages;
-    if (!fetchHistory) {
+    const session = this.client.session;
+    if (!session?.messages) {
       // Client without the session API (older host or test mock):
       // assume a fresh session with empty history.
       this.debugLog(
@@ -469,7 +469,8 @@ export class OpenCodeRulesRuntime {
       };
     }
     try {
-      const result = await fetchHistory({
+      // SDK methods rely on instance state via `this`; must not be called detached.
+      const result = await session.messages({
         path: { id: sessionID },
         query: { directory: this.directory },
       });
