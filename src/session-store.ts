@@ -1,3 +1,5 @@
+import type { RuleSnapshot } from './rule-discovery.js';
+
 export interface SessionState {
   contextPaths: Set<string>;
   lastUserPrompt?: string;
@@ -10,6 +12,8 @@ export interface SessionState {
   injectedRuleKeys: Set<string>;
   injectedHookHashes: Set<string>;
   needsRuleRescan: boolean;
+  ruleSnapshots?: RuleSnapshot[];
+  pendingEphemeralHookInjections?: string[];
 }
 
 interface SessionStoreOptions {
@@ -48,6 +52,14 @@ export class SessionStore {
     };
     if (s.pendingHookInjections) {
       snapshot.pendingHookInjections = [...s.pendingHookInjections];
+    }
+    if (s.ruleSnapshots) {
+      snapshot.ruleSnapshots = s.ruleSnapshots.map(rule => ({ ...rule }));
+    }
+    if (s.pendingEphemeralHookInjections) {
+      snapshot.pendingEphemeralHookInjections = [
+        ...s.pendingEphemeralHookInjections,
+      ];
     }
     return snapshot;
   }

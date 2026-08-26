@@ -56,3 +56,29 @@ describe('pending hook injections', () => {
     ]);
   });
 });
+
+describe('SessionStore lifetime fields', () => {
+  it('clones rule snapshots and ephemeral hook queues', () => {
+    const store = new SessionStore();
+    store.upsert('ses_clone', state => {
+      state.ruleSnapshots = [
+        {
+          filePath: '/rules/plan.mdc',
+          relativePath: 'plan.mdc',
+          metadata: { agent: ['plan'] },
+          strippedContent: 'Plan body.',
+        },
+      ];
+      state.pendingEphemeralHookInjections = ['Transient hook.'];
+    });
+
+    const copied = store.snapshot('ses_clone');
+    copied!.ruleSnapshots!.pop();
+    copied!.pendingEphemeralHookInjections!.pop();
+
+    expect(store.get('ses_clone')?.ruleSnapshots).toHaveLength(1);
+    expect(store.get('ses_clone')?.pendingEphemeralHookInjections).toEqual([
+      'Transient hook.',
+    ]);
+  });
+});

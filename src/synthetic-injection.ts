@@ -29,6 +29,8 @@ export interface InjectedPartsScan {
 const RULE_PART_PREFIX = 'prt_rules_';
 const HOOK_PART_PREFIX = 'prt_hook_';
 const TRANSIENT_HOOK_PART_PREFIX = 'prt_hook_transient_';
+const TRANSIENT_RULE_PART_PREFIX = 'prt_rule_ephemeral_';
+const TRANSIENT_RULE_MESSAGE_PREFIX = 'msg_rule_ephemeral_';
 const RULE_HEADER_PATTERN = /^## (.+)\n\n([\s\S]*)$/;
 
 function shortHash(input: string): string {
@@ -85,6 +87,35 @@ export function buildTransientHookMessage(
   };
 }
 
+/**
+ * Build a request-scoped synthetic user message carrying an ephemeral rule.
+ * The id prefixes and single-`#` text header keep transient content from
+ * being mistaken for durable rule parts by history scanning, even when a
+ * part id is lost.
+ */
+export function buildTransientRuleMessage(
+  relativePath: string,
+  content: string,
+  baseInfo: Record<string, unknown>
+): TransientHookMessage {
+  const keyHash = shortHash(ruleKeyFor(relativePath, content));
+  return {
+    info: {
+      ...baseInfo,
+      id: `${TRANSIENT_RULE_MESSAGE_PREFIX}${keyHash}`,
+      role: 'user',
+    },
+    parts: [
+      {
+        id: `${TRANSIENT_RULE_PART_PREFIX}${keyHash}`,
+        type: 'text',
+        text: `# OpenCode transient rule: ${relativePath}\n\n${content}`,
+        synthetic: true,
+      },
+    ],
+  };
+}
+
 export function scanInjectedParts(
   messages: MessageWithInfo[]
 ): InjectedPartsScan {
@@ -100,6 +131,10 @@ export function scanInjectedParts(
 
       if (id?.startsWith(RULE_PART_PREFIX)) {
         recordRuleText(scan, part.text);
+        continue;
+      }
+
+      if (id?.startsWith(TRANSIENT_RULE_PART_PREFIX)) {
         continue;
       }
 

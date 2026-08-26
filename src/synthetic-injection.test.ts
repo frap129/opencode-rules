@@ -5,6 +5,7 @@ import {
   buildRulePart,
   buildHookInjectionPart,
   buildTransientHookMessage,
+  buildTransientRuleMessage,
   scanInjectedParts,
 } from './synthetic-injection.js';
 
@@ -51,6 +52,44 @@ describe('buildHookInjectionPart', () => {
     expect(part.type).toBe('text');
     expect(part.synthetic).toBe(true);
     expect(part.text).toBe('Use pinned dependencies.');
+  });
+});
+
+describe('buildTransientRuleMessage', () => {
+  it('creates a deterministic transient rule message outside the durable prefixes', () => {
+    const message = buildTransientRuleMessage('agent-plan.md', 'Plan body.', {
+      id: 'msg_user',
+      role: 'user',
+      sessionID: 'ses_1',
+    });
+
+    expect(message.info.id).toMatch(/^msg_rule_ephemeral_/);
+    expect(message.parts[0]?.id).toMatch(/^prt_rule_ephemeral_/);
+    expect(message.parts[0]?.id).not.toMatch(/^prt_rules_/);
+    expect(message.parts[0]?.text).toBe(
+      '# OpenCode transient rule: agent-plan.md\n\nPlan body.'
+    );
+    expect(message.parts[0]?.synthetic).toBe(true);
+
+    const scan = scanInjectedParts([message]);
+    expect(scan.ruleKeys.size).toBe(0);
+    expect(scan.ruleRelativePaths.size).toBe(0);
+  });
+
+  it('does not let an id-less transient marker become a durable rule', () => {
+    const message = buildTransientRuleMessage('agent-plan.md', 'Plan body.', {
+      id: 'msg_user',
+      role: 'user',
+    });
+    const partWithoutId = { ...message.parts[0] };
+    delete partWithoutId.id;
+
+    const scan = scanInjectedParts([
+      { info: { role: 'user' }, parts: [partWithoutId] },
+    ]);
+
+    expect(scan.ruleKeys.size).toBe(0);
+    expect(scan.ruleRelativePaths.size).toBe(0);
   });
 });
 
