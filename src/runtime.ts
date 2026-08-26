@@ -477,7 +477,9 @@ export class OpenCodeRulesRuntime {
     });
   }
 
-  /** Rebuild injected-part tracking from the message array (history is ground truth). */
+  /** Rebuild injected-part tracking from the message array (history is ground truth).
+   * Never writes active-rules state: history is not the source of current
+   * activity; only the complete user-turn evaluation in chat.message is. */
   private async rescanInjectedParts(
     sessionID: string,
     messages: MessageWithInfo[]
@@ -489,12 +491,6 @@ export class OpenCodeRulesRuntime {
         state.injectedHookHashes = new Set(scan.hookHashes);
         state.needsRuleRescan = false;
       });
-      if (scan.ruleRelativePaths.size > 0) {
-        const matchedPaths = this.ruleFiles
-          .filter(rf => scan.ruleRelativePaths.has(rf.relativePath))
-          .map(rf => rf.filePath);
-        await writeActiveRulesState(sessionID, matchedPaths);
-      }
       this.debugLog(
         `Rescanned injected parts for session ${sessionID}: ${scan.ruleKeys.size} rule key(s), ${scan.hookHashes.size} hook hash(es)`
       );

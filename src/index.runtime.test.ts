@@ -30,6 +30,7 @@ import { __testOnly } from './index.js';
 import {
   _setStateDirForTesting,
   readActiveRulesState,
+  writeActiveRulesState,
 } from './active-rules-state.js';
 import { clearRuleCache } from './utils.js';
 import {
@@ -935,11 +936,10 @@ describe('history scan and rescan', () => {
     );
   });
 
-  it('refreshes active-rules-state from scanned history rule paths', async () => {
-    const { testDir, globalRulesDir } = getTestDirs();
-    const rulePath = path.join(globalRulesDir, 'persisted.md');
-    writeFileSync(rulePath, 'Persisted rule body.');
+  it('does not let a history rescan overwrite the last complete active state', async () => {
+    const { testDir } = getTestDirs();
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+    await writeActiveRulesState('ses_state_reconcile', ['/rules/current.mdc']);
 
     const {
       default: { server: plugin },
@@ -948,26 +948,95 @@ describe('history scan and rescan', () => {
     const hooks = await plugin(
       mockInput as unknown as Parameters<typeof plugin>[0]
     );
-    const messagesTransform = hooks['experimental.chat.messages.transform'] as (
+    const transform = hooks['experimental.chat.messages.transform'] as (
       input: unknown,
-      output: { messages: unknown[] }
-    ) => Promise<{ messages: unknown[] }>;
-
-    await messagesTransform(
+      output: { messages: Array<Record<string, unknown>> }
+    ) => Promise<void>;
+    await transform(
       {},
       {
         messages: [
           {
-            info: { id: 'msg_1', role: 'user', sessionID: 'ses_refresh' },
-            parts: [buildRulePart('persisted.md', 'Persisted rule body.')],
+            info: {
+              id: 'msg_history',
+              role: 'user',
+              sessionID: 'ses_state_reconcile',
+            },
+            parts: [
+              { type: 'text', text: 'resume' },
+              buildRulePart('persisted.md', 'Persisted rule body.'),
+            ],
           },
         ],
       }
     );
 
-    await new Promise(resolve => setTimeout(resolve, 50));
-    const state = await readActiveRulesState('ses_refresh');
-    expect(state?.matchedRulePaths).toEqual([rulePath]);
+    const current = await readActiveRulesState('ses_state_reconcile');
+    expect(current?.matchedRulePaths).toEqual(['/rules/current.mdc']);
+  });
+
+  it('recomputes ephemeral rules after compaction without persisting them', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    writeFileSync(
+      path.join(globalRulesDir, 'always.md'),
+      '# Always Apply\nCompaction survivor.'
+    );
+    writeFileSync(
+      path.join(globalRulesDir, 'plan-only.mdc'),
+      `---\nagent: [plan]\n---\n\nPlan guidance.`
+    );
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const {
+      default: { server: plugin },
+      __testOnly,
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+    const chatMessage = hooks['chat.message'] as ChatMessageHook;
+    const compacting = hooks['experimental.session.compacting'] as (
+      input: { sessionID: string },
+      output: { context: string[] }
+    ) => Promise<void>;
+    const transform = hooks['experimental.chat.messages.transform'] as (
+      input: unknown,
+      output: { messages: Array<Record<string, unknown>> }
+    ) => Promise<void>;
+
+    const output: ChatMessageOutputLike = {
+      message: { role: 'user', agent: 'plan' },
+      parts: [{ type: 'text', text: 'plan the testing work' }],
+    };
+    await chatMessage(
+      { sessionID: 'ses_comp_eph', messageID: 'msg_ce_1' },
+      output
+    );
+    expect(output.parts.filter(p => p.synthetic)).toHaveLength(1);
+    expect(
+      __testOnly.getSessionStateSnapshot('ses_comp_eph')?.injectedRuleKeys.size
+    ).toBe(1);
+
+    await compacting({ sessionID: 'ses_comp_eph' }, { context: [] });
+
+    const request = [
+      {
+        info: { id: 'msg_ce_2', role: 'user', sessionID: 'ses_comp_eph' },
+        parts: [{ type: 'text', text: 'plan the testing work' }],
+      },
+    ];
+    await transform({}, { messages: request });
+    const transformedText = request
+      .flatMap(message => message.parts as Array<{ text?: string }>)
+      .map(part => part.text ?? '')
+      .join('\n');
+    expect(transformedText).toContain('Plan guidance.');
+    const snapshot = __testOnly.getSessionStateSnapshot('ses_comp_eph');
+    expect(snapshot?.injectedRuleKeys.size).toBe(0);
+    expect(
+      [...snapshot!.injectedRuleKeys].some(key => key.includes('plan-only'))
+    ).toBe(false);
   });
 
   it('compacting sets needsRuleRescan even with empty context paths', async () => {
@@ -2289,6 +2358,31 @@ describe('chat.message rule persistence', () => {
     );
     expect(hookPart?.text).toContain('Version one.');
     expect(hookPart?.text).not.toContain('Version two.');
+  });
+
+  it('writes ephemeral matches to active state without persisting their parts', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    const rulePath = path.join(globalRulesDir, 'plan-only.mdc');
+    writeFileSync(rulePath, `---\nagent: [plan]\n---\n\nPlan guidance.`);
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const hooks = await getHooks(testDir);
+    const chatMessage = hooks['chat.message'] as ChatMessageHook;
+    await chatMessage(
+      { sessionID: 'ses_active_eph', messageID: 'msg_active_eph' },
+      {
+        message: { role: 'user', agent: 'plan' },
+        parts: [{ type: 'text', text: 'plan this' }],
+      }
+    );
+
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const state = await readActiveRulesState('ses_active_eph');
+    expect(state?.matchedRulePaths).toEqual([rulePath]);
+    expect(
+      __testOnly.getSessionStateSnapshot('ses_active_eph')?.injectedRuleKeys
+        .size
+    ).toBe(0);
   });
 });
 
