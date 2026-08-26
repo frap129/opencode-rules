@@ -12,7 +12,7 @@
 
 - One package, two default plugin exports: server entry `src/index.ts` returns `{ id, server }`; TUI entry `tui/index.tsx` returns `{ id, tui }`. The package root imports built `dist/src/index.js`, and `"./tui"` imports built `dist/tui/index.js` (its types come from `dist/tui/index.d.ts`).
 - OpenCode's plugin loader calls every named export as a plugin initializer; any added named export must be callable (see the `__testOnly` pattern in `src/index.ts`).
-- Rules are injected as synthetic text parts appended to the user message via the `chat.message` hook, not into the system prompt (system-prompt injection was removed). Content-hash dedup keys (`relativePath:sha256-16(content)`) prevent rules already in history from being re-appended.
+- Session-durable rules (unconditional, globs, keywords, command, project, os, ci) are injected as synthetic text parts appended to the user message via the `chat.message` hook, not into the system prompt (system-prompt injection was removed). Ephemeral rules (agent, model, branch, tools) are delivered as transient synthetic messages via `experimental.chat.messages.transform` and never persisted. Content-hash dedup keys (`relativePath:sha256-16(content)`) prevent durable rules already in history from being re-appended.
 - Depends on experimental OpenCode hooks (`experimental.chat.messages.transform`, `experimental.session.compacting`); re-verify against `@opencode-ai/plugin` when upgrading.
 - Per-session matched-rule state is written atomically to `~/.opencode/state/opencode-rules/{sessionID}.json`, which the TUI sidebar reads.
 

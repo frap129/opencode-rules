@@ -251,19 +251,34 @@ The plugin uses OpenCode's hook system to track context and inject rules:
      - **CI** (`ci`): Boolean equality against CI environment detection
    - Missing runtime context (e.g., no git branch available) is treated as a non-match for that dimension
 
-Rule injection happens once per user message via the `chat.message` hook:
-matching rules are formatted as self-contained blocks (`## <relativePath>`
-followed by the rule body) and appended to the user message as _synthetic_
-text parts before opencode persists it. Synthetic parts are hidden in the TUI
-but included in provider requests, so rules reach the model without ever
-touching the system prompt — the prompt stays byte-stable across requests,
-preserving provider prompt caching. Rules already recorded in session history
-are never re-appended (content-hash dedup), so restarting opencode or resuming
-a session does not duplicate rules.
+Rule delivery is split by the rule's **lifetime classification**:
+
+- **Session-durable rules** — unconditional rules and rules gated only by
+  `globs`, `keywords`, `command`, `project`, `os`, or `ci` — are appended once
+  per session via the `chat.message` hook: formatted as self-contained blocks
+  (`## <relativePath>` followed by the rule body) and appended to the user
+  message as _synthetic_ text parts before opencode persists it. Once
+  persisted, a durable rule is never re-evaluated for removal during that
+  session. A durable rule matched mid-turn is appended with the **next user
+  message**, so the first request of a turn carries it one message later than
+  the evaluation that matched it.
+- **Ephemeral rules** — rules gated by `agent`, `model`, `branch`, or `tools`
+  — are appended only to the transformed model request via
+  `experimental.chat.messages.transform` as transient synthetic messages.
+  They are never written to `chat.message` output or persisted history, so
+  switching agent or model does not leave stale rule text behind.
+
+Synthetic parts are hidden in the TUI but included in provider requests, so
+rules reach the model without ever touching the system prompt — the prompt
+stays byte-stable across requests, preserving provider prompt caching. Durable
+rules already recorded in session history are never re-appended (content-hash
+dedup), so restarting opencode or resuming a session does not duplicate them.
+Rule content and metadata are snapshotted per session at first evaluation;
+editing a rule file does not change an existing session's delivery.
 
 3. **Session Persistence**:
    - `experimental.session.compacting` hook preserves context paths during session compression
-   - This ensures rules remain applicable after session compaction
+   - After compaction, durable rules are re-appended from the session snapshot on the next user message, while ephemeral rules are recomputed per request
 
 ## Hook-Based Rule Triggers
 
@@ -305,14 +320,19 @@ respects `.gitignore` by default, and produces better formatted output.
 
 ### How Hook Injections Work
 
-1. When a tool call matches a hook's `tool` and `match`, the rule's body is queued as a **pending hook injection** in the session state.
-2. Pending hook injections are delivered two ways: immediately, as a transient
-   synthetic user message appended to the very next model request
-   (`experimental.chat.messages.transform`, never persisted), and durably, as
-   synthetic parts attached to the next user message (`chat.message`) so they
-   remain in session history.
+1. When a tool call matches a hook's `tool` and `match`, the rule's body is queued as a **pending hook injection** in the session state. Hook blocking (`block: true`) and `run` side effects are unchanged.
+2. Pending hook injections are routed by the owning rule's lifetime:
+   - **Durable owners** are delivered two ways: immediately, as a transient
+     synthetic user message appended to the very next model request
+     (`experimental.chat.messages.transform`, never persisted), and durably, as
+     synthetic parts attached to the next user message (`chat.message`) so they
+     remain in session history.
+   - **Ephemeral owners** (rules gated by `agent`, `model`, `branch`, or
+     `tools`) are delivered only as a transient synthetic message via
+     `experimental.chat.messages.transform` and are never flushed into
+     `chat.message` output or persisted history.
 3. The agent sees the corrective guidance on its next turn and can self-correct.
-4. Pending injections are cleared once delivered durably via `chat.message`.
+4. Durable pending injections are cleared once delivered durably via `chat.message`; ephemeral pending injections are cleared after a successful transient delivery.
 
 ### Security Example: Blocking Insecure Bindings
 
@@ -353,7 +373,7 @@ respects `.gitignore` by default, and produces better formatted output.
 - **Regex matching** is performed against the JSON-serialized tool arguments (e.g., `{"command":"node server.js --host 0.0.0.0"}`). Escape dots and other regex metacharacters accordingly.
 - **`block: true`** only works with `PreToolUse`. It throws an error that OpenCode should surface to prevent execution. Use sparingly — `PostToolUse` with corrective guidance is usually preferred.
 - **`run` commands** execute fire-and-forget via `child_process.exec` in the project directory. Failures are logged as warnings when debug logging is enabled and do not block the agent.
-- Hook-triggered rules are **injected independently** of the per-message rule deduplication. They can fire multiple times per session and are always delivered when pending.
+- Hook-triggered rules are **injected independently** of the per-message rule deduplication. They can fire multiple times per session and are always delivered when pending, with the delivery channel determined by the owning rule's lifetime as described above.
 
 ## Rule Matching Examples
 

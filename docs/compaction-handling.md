@@ -78,17 +78,19 @@ interface SessionState {
   seedCount?: number; // Count of history scans
   lastModelID?: string; // Latest model ID
   lastAgentType?: string; // Latest agent type
-  pendingHookInjections?: string[]; // Queued hook injection texts
-  injectedRuleKeys: Set<string>; // Content-hash dedup keys for delivered rules
+  pendingHookInjections?: string[]; // Queued durable hook injection texts
+  injectedRuleKeys: Set<string>; // Content-hash dedup keys for delivered durable rules
   injectedHookHashes: Set<string>; // Hashes of delivered durable hook injections
   needsRuleRescan: boolean; // Flag: re-append rules after compaction
+  ruleSnapshots?: RuleSnapshot[]; // Per-session rule snapshot (process lifetime)
+  pendingEphemeralHookInjections?: string[]; // Queued transient hook texts
 }
 ```
 
 - Maximum of 100 concurrent sessions in memory (LRU eviction)
 - Each entry is tagged with `lastUpdated` for age tracking
 - Sessions are automatically pruned when limit is exceeded
-- After compaction, persisted synthetic parts are gone from history; the next `experimental.chat.messages.transform` rescan empties the injection key sets and the next user message re-appends all currently-matched rules
+- After compaction, persisted synthetic parts are gone from history; the next `experimental.chat.messages.transform` rescan empties the injection key sets, the next user message re-appends durable rules from the session snapshot, and ephemeral rules are recomputed per request
 
 ## Data Flow
 
@@ -101,7 +103,9 @@ chat.message hook captures file paths from message text
     ↓
 tool.execute.before hooks capture paths from tool calls
     ↓
-chat.message appends matching rules to the user message as synthetic parts
+chat.message appends session-durable matching rules to the user message
+as synthetic parts; ephemeral rules (agent, model, branch, tools) are
+delivered only in the transformed model request
     ↓
 AI processes request with full context
 ```
@@ -119,7 +123,10 @@ Compaction LLM generates summary including injected file paths
     ↓
 Session context preserved through compaction
     ↓
-Conditional rules remain applicable in next turn
+Post-compaction transform rescans history and empties injection key sets
+    ↓
+Next user message re-appends durable rules from the session snapshot;
+ephemeral rules are recomputed per request
 ```
 
 ## Benefits
@@ -215,8 +222,8 @@ When running with `OPENCODE_RULES_DEBUG=1`, you'll see:
 - Delivered via the standard `chat.message` hook - no experimental API required
 - Synthetic parts are hidden in the TUI but included in provider requests
 - System prompt stays byte-stable across requests, preserving provider prompt caching
-- Content-hash dedup keys prevent re-appending rules already in session history
-- After compaction, the next user message re-appends all currently-matched rules
+- Content-hash dedup keys prevent re-appending durable rules already in session history
+- Session-durable rules are re-appended after compaction from the per-session snapshot; ephemeral rules (agent, model, branch, tools) are recomputed per request and never persisted
 
 ### ❌ Naive Per-message Injection
 

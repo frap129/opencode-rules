@@ -111,9 +111,9 @@ That's it! The rule will now be automatically injected into all AI agent prompts
 3. **Tool Execution**: `tool.execute.before` hook captures file paths before tools run
 4. **Message Flow**: `chat.message` hook updates user prompt as messages arrive
 5. **Initial Seeding**: `experimental.chat.messages.transform` extracts context from message history once and rebuilds dedup keys when resuming a session; pending hook injections are delivered as a transient synthetic message on the next request
-6. **Rule Delivery**: Matching rules are appended to the user message as synthetic text parts via `chat.message` (one per rule), hidden in the TUI but included in provider requests so the system prompt stays byte-stable for prompt caching; content-hash dedup keys ensure rules already in history are never re-appended
+6. **Rule Delivery**: Session-durable rules (unconditional, `globs`, `keywords`, `command`, `project`, `os`, and `ci`) are appended once to the user message as persisted synthetic text parts via `chat.message` (one per rule), hidden in the TUI but included in provider requests so the system prompt stays byte-stable for prompt caching. Agent, `model`, `branch`, and `tools` rules are appended only to the transformed model request as transient synthetic messages, so changing agent or model does not leave stale rule text in new history. Content-hash deduplication applies only to durable parts.
 7. **State Persistence**: Matched rule paths are written to `~/.opencode/state/opencode-rules/{sessionId}.json` for TUI consumption
-8. **Compaction Persistence**: `experimental.session.compacting` preserves context during session compression and marks rules for rescan, so the next user message re-appends all currently-matched rules
+8. **Compaction Persistence**: `experimental.session.compacting` preserves context during session compression and marks rules for rescan, so durable rules are re-appended on the next user message while ephemeral rules are recomputed per request
 
 ## Performance
 
@@ -459,9 +459,9 @@ opencode-rules/
 │   ├── runtime.ts            # OpenCodeRulesRuntime class (hook orchestration)
 │   ├── runtime-context.ts    # Context-building helpers (filter context, project detection)
 │   ├── runtime-chat.ts       # Chat message handling and text extraction
-│   ├── rule-discovery.ts     # Rule file scanning and discovery
+│   ├── rule-discovery.ts     # Rule file scanning, discovery, and per-session snapshots
 │   ├── rule-metadata.ts      # YAML frontmatter parsing
-│   ├── rule-filter.ts        # Rule filtering logic (globs, keywords, tools, runtime)
+│   ├── rule-filter.ts        # Rule filtering, lifetime classification (globs, keywords, tools, runtime)
 │   ├── message-paths.ts      # Path extraction from messages
 │   ├── message-context.ts    # User prompt extraction from message parts
 │   ├── session-store.ts      # Per-session state management
@@ -497,7 +497,7 @@ The following highlights the primary runtime modules:
 - **runtime-chat.ts** - Extracts text from chat message parts for keyword matching
 - **rule-discovery.ts** - Recursively scans directories for `.md`/`.mdc` rule files
 - **rule-metadata.ts** - Parses YAML frontmatter into typed `RuleMetadata`
-- **rule-filter.ts** - Evaluates rules against context (globs, keywords, tools, runtime filters); returns `FilterResult` with `formattedRules` and `matchedPaths`
+- **rule-filter.ts** - Evaluates rules against context (globs, keywords, tools, runtime filters) and classifies each match as session-durable or ephemeral; returns `FilterResult` with `formattedRules` and `matchedPaths`
 - **message-paths.ts** - Extracts file paths from tool invocation arguments and message text
 - **message-context.ts** - Extracts user prompt text, slash commands, and session IDs from message parts
 - **session-store.ts** - Manages per-session state with LRU eviction
@@ -579,41 +579,47 @@ This plugin uses OpenCode's hook system for incremental, stateful rule injection
    - Extracts and stores the latest user prompt text
    - Enables keyword-based rule matching across the conversation flow
    - Receives full runtime filter context: model, agent, command, project type, git branch, OS, and CI environment
-   - Reads discovered rule files and filters based on:
+   - Evaluates the session rule snapshot and filters based on:
      - Extracted file paths from session state (`globs`)
      - Latest user prompt (`keywords`)
      - Available tool IDs (`tools`)
      - Runtime environment (model, agent, command, project, branch, OS, CI)
    - Command is inferred from the leading slash token (first token) of the latest user prompt
-   - Appends matching rules to the user message as one synthetic text part per rule (id prefix `prt_rules_`) before opencode persists it
+   - Appends only **session-durable** matches to the user message as one synthetic text part per rule (id prefix `prt_rules_`) before opencode persists it; ephemeral matches (agent, model, branch, tools) are never written here
    - Synthetic parts are hidden in the TUI but included in provider requests, keeping the system prompt byte-stable across requests for provider prompt caching
-   - Content-hash dedup keys (`${relativePath}:${sha256-16(content)}`) ensure rules already in history are never re-appended
+   - Content-hash dedup keys (`${relativePath}:${sha256-16(content)}`) ensure durable rules already in history are never re-appended
+   - Rule content and metadata are snapshotted per session at first evaluation; in-process file edits do not change an existing session's delivery
 
-3. **`experimental.chat.messages.transform`** - One-time seeding fallback and transient hook delivery
+3. **`experimental.chat.messages.transform`** - History seeding, ephemeral rule delivery, and transient hook delivery
    - Fires before each model request; history seeding runs only on the first
-     call (gated by seededFromHistory), while transient hook delivery and
+     call (gated by seededFromHistory), while transient rule/hook delivery and
      post-compaction rescans run on every request
    - Seeds session state from full message history if needed
    - Rebuilds dedup key sets from client history when a session is resumed
+   - Evaluates the session snapshot against the current request and appends
+     matching **ephemeral** rules (agent, model, branch, tools) as transient
+     synthetic user messages (`prt_rule_ephemeral_`) — request-scoped only,
+     never persisted, so switching agent or model swaps the applicable rules
    - Delivers pending hook injections immediately as a transient synthetic user message (`prt_hook_transient_`) appended to the very next model request - never persisted
-   - After compaction, rescans history and empties the injection key sets so the next user message re-appends all currently-matched rules
+   - After compaction, rescans history and empties the injection key sets so the next user message re-appends durable rules and ephemeral rules are recomputed
 
 4. **`experimental.session.compacting`** - Compaction context preservation
    - Fires when a session is compacted (summarized)
    - Injects current context paths into the compaction context
-   - Sets `needsRuleRescan` (unconditionally, before any context-path early return) so rules are re-appended after compaction
+   - Sets `needsRuleRescan` (unconditionally, before any context-path early return) so durable rules are re-appended after compaction
 
 5. **`tool.execute.after`** - Post-execution corrective guidance
    - Fires after each tool completes
    - Evaluates `PostToolUse` hooks for reactive rule triggering
-   - Queues corrective rule content into pending hook injections
-   - Durable hook injections are delivered as synthetic parts (id `prt_hook_<hash>`) on the next user message via `chat.message` so they remain in session history
+   - Queues corrective rule content into pending hook injections; hook blocking
+     and `run` side effects are unchanged
+   - Hook text owned by a durable rule is delivered as synthetic parts (id `prt_hook_<hash>`) on the next user message via `chat.message` so it remains in session history; hook text owned by an ephemeral rule is delivered only as a transient synthetic message via `experimental.chat.messages.transform` and never persisted
 
 ### Experimental API Notice
 
 This plugin depends on experimental OpenCode APIs:
 
-- `experimental.chat.messages.transform` (history seeding, transient hook delivery)
+- `experimental.chat.messages.transform` (history seeding, transient rule and hook delivery)
 - `experimental.session.compacting` (compaction context)
 
 It also uses the stable `chat.message` hook for synthetic-part rule delivery.
