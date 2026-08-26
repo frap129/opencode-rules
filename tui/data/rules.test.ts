@@ -1,5 +1,13 @@
 // tui/data/rules.test.ts
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  afterAll,
+  vi,
+} from 'vitest';
 import path from 'node:path';
 import os from 'node:os';
 import {
@@ -22,6 +30,20 @@ import {
   loadSidebarRules,
   type SidebarRuleEntry,
 } from './rules.js';
+
+const originalDebugEnv = vi.hoisted(() => {
+  const value = process.env.OPENCODE_RULES_DEBUG;
+  delete process.env.OPENCODE_RULES_DEBUG;
+  return value;
+});
+
+afterAll(() => {
+  if (originalDebugEnv === undefined) {
+    delete process.env.OPENCODE_RULES_DEBUG;
+  } else {
+    process.env.OPENCODE_RULES_DEBUG = originalDebugEnv;
+  }
+});
 
 // ──────────────────────────────────────────────
 // classifyRuleScope
@@ -336,10 +358,8 @@ describe('loadSidebarRules', () => {
     expect(rules[0]!.name).toBe('readable');
     expect(skippedCount).toBe(1);
 
-    // getCachedRule() logs its own warning for read failures —
-    // loadSidebarRules does NOT add a second one (no duplicate logs).
-    // But getCachedRule's internal warning should still fire:
-    expect(warnSpy).toHaveBeenCalled();
+    // getCachedRule() keeps the warning silent unless debug logging is enabled.
+    expect(warnSpy).not.toHaveBeenCalled();
 
     // Restore permissions for cleanup
     chmodSync(unreadable, 0o644);

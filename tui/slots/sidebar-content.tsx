@@ -13,6 +13,7 @@ import type { TuiPluginApi, TuiTheme } from '@opencode-ai/plugin/tui';
 import { loadSidebarRules, type SidebarRuleEntry } from '../data/rules.js';
 import { createRulesLoadCoordinator } from '../data/rules-load-coordinator.js';
 import type { RuleMetadata } from '../../src/utils.js';
+import { logError } from '../../src/debug.js';
 
 const metadataFieldDescriptors: Array<{
   key: keyof RuleMetadata;
@@ -179,7 +180,7 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
       setStatus('loaded');
     },
     onError: (error, _target, reset) => {
-      console.error('[opencode-rules] Failed to load rules:', error);
+      logError('Failed to load rules', error);
       if (reset) {
         setStatus('error');
       }

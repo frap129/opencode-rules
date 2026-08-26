@@ -10,4 +10,4 @@ globs:
 
 - Use shared message-context helpers for prompt and part extraction. Do not duplicate extraction loops in runtime hooks.
 - Keep CI/env boolean detection on one parser path (`parseEnvBoolean` / `isTruthyEnvValue`) across all provider checks.
-- Keep warning channels consistent: user-actionable rule-file problems may use `console.warn`; internal operational failures should go through debug logging.
+- Route all plugin console output through the gated helpers in `src/debug.ts`; use UI state or intentional thrown errors for user-visible behavior that must remain available when debug logging is disabled.

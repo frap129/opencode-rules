@@ -635,6 +635,10 @@ This will log information about:
 - Rule filtering (which rules are included/skipped)
 - Available tool IDs (useful for writing `tools` conditions)
 
+All plugin console output, including warnings and TUI rule-load errors, is
+suppressed unless `OPENCODE_RULES_DEBUG` is set. The value is captured when
+the plugin module loads, so set it before launching OpenCode.
+
 ## Troubleshooting
 
 ### Rules Not Appearing
@@ -647,7 +651,7 @@ This will log information about:
 ### Common Issues
 
 - **Missing directories**: Plugin gracefully handles missing directories
-- **Invalid YAML**: Metadata parsing errors are logged but don't crash the plugin
+- **Invalid YAML**: Metadata parsing errors are logged when debug logging is enabled but don't crash the plugin
 - **Pattern mismatches**: Use relative paths from project root for glob patterns
 
 ## Contributing

@@ -352,7 +352,7 @@ respects `.gitignore` by default, and produces better formatted output.
 
 - **Regex matching** is performed against the JSON-serialized tool arguments (e.g., `{"command":"node server.js --host 0.0.0.0"}`). Escape dots and other regex metacharacters accordingly.
 - **`block: true`** only works with `PreToolUse`. It throws an error that OpenCode should surface to prevent execution. Use sparingly — `PostToolUse` with corrective guidance is usually preferred.
-- **`run` commands** execute fire-and-forget via `child_process.exec` in the project directory. Failures are logged as warnings and do not block the agent.
+- **`run` commands** execute fire-and-forget via `child_process.exec` in the project directory. Failures are logged as warnings when debug logging is enabled and do not block the agent.
 - Hook-triggered rules are **injected independently** of the per-message rule deduplication. They can fire multiple times per session and are always delivered when pending.
 
 ## Rule Matching Examples

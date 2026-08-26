@@ -12,7 +12,15 @@
  * are not yet migrated. New tests should be added to the appropriate
  * focused test file above.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  afterAll,
+  vi,
+} from 'vitest';
 import path from 'node:path';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { readAndFormatRules, clearRuleCache } from './utils.js';
@@ -27,6 +35,20 @@ import {
   restoreCiEnvVars,
   type CiEnvSnapshot,
 } from './test-fixtures.js';
+
+const originalDebugEnv = vi.hoisted(() => {
+  const value = process.env.OPENCODE_RULES_DEBUG;
+  delete process.env.OPENCODE_RULES_DEBUG;
+  return value;
+});
+
+afterAll(() => {
+  if (originalDebugEnv === undefined) {
+    delete process.env.OPENCODE_RULES_DEBUG;
+  } else {
+    process.env.OPENCODE_RULES_DEBUG = originalDebugEnv;
+  }
+});
 
 type ChatMessageOutputLike = {
   message: { role: string; model?: { modelID: string }; agent?: string };
@@ -604,7 +626,7 @@ Feature branch guidelines.`
     }
   });
 
-  it('should log warnings via console.warn for tool query failures', async () => {
+  it('should suppress warnings via console.warn for tool query failures', async () => {
     const { testDir, globalRulesDir } = getTestDirs();
     writeFileSync(
       path.join(globalRulesDir, 'unconditional.md'),
@@ -644,9 +666,7 @@ Feature branch guidelines.`
       };
       await chatMessage({ sessionID: 'ses_toolwarn' }, message);
 
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Warning: Failed to query tool IDs')
-      );
+      expect(warnSpy).not.toHaveBeenCalled();
     } finally {
       warnSpy.mockRestore();
     }
