@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import path from 'node:path';
-import { writeFileSync, mkdirSync, readdirSync, utimesSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readdirSync } from 'node:fs';
 import {
   setupTestDirs,
   teardownTestDirs,
@@ -1438,7 +1438,12 @@ type ChatMessageHook = (
 ) => Promise<void>;
 
 type ChatMessageOutputLike = {
-  message: { role: string; id?: string };
+  message: {
+    role: string;
+    id?: string;
+    agent?: string;
+    model?: { modelID?: string };
+  };
   parts: Array<{
     id?: string;
     type?: string;
@@ -1602,8 +1607,10 @@ describe('chat.message rule persistence', () => {
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
     // Model real persistence: the client's history returns whatever the
-    // plugin has appended so far, so the second message's fetch re-scans
-    // the persisted parts and restores the injected rule keys.
+    // plugin has appended so far, so the first message's fetch scans the
+    // persisted parts. After that fetch, in-memory injected keys are
+    // authoritative for the session, so the second message dedups against
+    // them without a second history fetch.
     const {
       default: { server: plugin },
     } = await import('./index.js');
@@ -1644,7 +1651,7 @@ describe('chat.message rule persistence', () => {
     expect(second.parts.filter(p => p.synthetic)).toHaveLength(0);
   });
 
-  it('appends a new part when rule content changes', async () => {
+  it('keeps the original rule content after an in-process file edit', async () => {
     const { testDir, globalRulesDir } = getTestDirs();
     const rulePath = path.join(globalRulesDir, 'changing.md');
     writeFileSync(rulePath, 'Version one.');
@@ -1652,7 +1659,6 @@ describe('chat.message rule persistence', () => {
 
     const hooks = await getHooks(testDir);
     const chatMessage = hooks['chat.message'] as ChatMessageHook;
-
     const first: ChatMessageOutputLike = {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'first' }],
@@ -1661,12 +1667,11 @@ describe('chat.message rule persistence', () => {
       { sessionID: 'ses_change', messageID: 'msg_change_1' },
       first
     );
-    const firstIds = first.parts.filter(p => p.synthetic).map(p => p.id);
+    expect(first.parts.some(part => part.text?.includes('Version one.'))).toBe(
+      true
+    );
 
     writeFileSync(rulePath, 'Version two.');
-    const future = new Date(Date.now() + 10_000);
-    utimesSync(rulePath, future, future); // bypass mtime cache granularity
-
     const second: ChatMessageOutputLike = {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'second' }],
@@ -1675,12 +1680,196 @@ describe('chat.message rule persistence', () => {
       { sessionID: 'ses_change', messageID: 'msg_change_2' },
       second
     );
-    const secondIds = second.parts.filter(p => p.synthetic).map(p => p.id);
 
-    expect(secondIds).toHaveLength(1);
-    expect(secondIds[0]).not.toBe(firstIds[0]);
-    expect(second.parts.filter(p => p.synthetic)[0]?.text).toContain(
-      'Version two.'
+    expect(second.parts.some(part => part.text?.includes('Version two.'))).toBe(
+      false
+    );
+    expect(second.parts.filter(part => part.synthetic)).toHaveLength(0);
+  });
+
+  it('keeps agent rules transient while persisting task rules', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    writeFileSync(
+      path.join(globalRulesDir, 'agent-plan.mdc'),
+      `---\nagent: [plan]\n---\n\nPlan-only guidance.`
+    );
+    writeFileSync(
+      path.join(globalRulesDir, 'agent-build.mdc'),
+      `---\nagent: [build]\n---\n\nBuild-only guidance.`
+    );
+    writeFileSync(
+      path.join(globalRulesDir, 'testing.mdc'),
+      `---\nkeywords: [testing]\n---\n\nTesting guidance.`
+    );
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+    const chatMessage = hooks['chat.message'] as ChatMessageHook;
+    const transform = hooks['experimental.chat.messages.transform'] as (
+      input: unknown,
+      output: { messages: Array<Record<string, unknown>> }
+    ) => Promise<void>;
+
+    const planOutput: ChatMessageOutputLike = {
+      message: { role: 'user', agent: 'plan' },
+      parts: [{ type: 'text', text: 'please plan the testing work' }],
+    };
+    await chatMessage(
+      { sessionID: 'ses_route', messageID: 'msg_plan' },
+      planOutput
+    );
+
+    expect(planOutput.parts.filter(part => part.synthetic)).toHaveLength(1);
+    expect(
+      planOutput.parts.some(part => part.text?.includes('Plan-only'))
+    ).toBe(false);
+    expect(
+      planOutput.parts.some(part => part.text?.includes('Testing guidance'))
+    ).toBe(true);
+
+    const planRequest = [
+      {
+        info: { id: 'msg_plan', role: 'user', sessionID: 'ses_route' },
+        parts: planOutput.parts,
+      },
+    ];
+    await transform({}, { messages: planRequest });
+    expect(
+      planRequest.some(message =>
+        (message.parts as Array<{ text?: string }>).some(part =>
+          part.text?.includes('Plan-only guidance.')
+        )
+      )
+    ).toBe(true);
+
+    const buildOutput: ChatMessageOutputLike = {
+      message: { role: 'user', agent: 'build' },
+      parts: [{ type: 'text', text: 'implement it' }],
+    };
+    await chatMessage(
+      { sessionID: 'ses_route', messageID: 'msg_build' },
+      buildOutput
+    );
+    expect(buildOutput.parts.filter(part => part.synthetic)).toHaveLength(0);
+
+    const buildRequest = [
+      {
+        info: { id: 'msg_build', role: 'user', sessionID: 'ses_route' },
+        parts: buildOutput.parts,
+      },
+    ];
+    await transform({}, { messages: buildRequest });
+    const transformedText = buildRequest
+      .flatMap(message => message.parts as Array<{ text?: string }>)
+      .map(part => part.text ?? '')
+      .join('\n');
+    expect(transformedText).toContain('Build-only guidance.');
+    expect(transformedText).not.toContain('Plan-only guidance.');
+
+    const state = __testOnly.getSessionStateSnapshot('ses_route');
+    expect(state?.injectedRuleKeys.size).toBe(1);
+    expect(
+      [...state!.injectedRuleKeys].some(key => key.includes('testing'))
+    ).toBe(true);
+  });
+
+  it('persists keyword rules once across turns', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    writeFileSync(
+      path.join(globalRulesDir, 'testing.mdc'),
+      `---\nkeywords: [testing]\n---\n\nTesting guidance.`
+    );
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const persisted: ChatMessageOutputLike['parts'] = [];
+    mockInput.client.session.messages = async () => ({
+      data: [
+        {
+          info: { id: 'msg_1', role: 'user', sessionID: 'ses_kw' },
+          parts: [...persisted],
+        },
+      ],
+    });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+    const chatMessage = hooks['chat.message'] as ChatMessageHook;
+
+    const first: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'add testing here' }],
+    };
+    await chatMessage({ sessionID: 'ses_kw', messageID: 'msg_kw_1' }, first);
+    expect(first.parts.filter(p => p.synthetic)).toHaveLength(1);
+    persisted.push(...first.parts.filter(p => p.synthetic));
+
+    const second: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'still testing' }],
+    };
+    await chatMessage({ sessionID: 'ses_kw', messageID: 'msg_kw_2' }, second);
+    expect(second.parts.filter(p => p.synthetic)).toHaveLength(0);
+  });
+
+  it('does not emit an ephemeral copy for a persisted mixed any rule', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    writeFileSync(
+      path.join(globalRulesDir, 'mixed.mdc'),
+      `---\nglobs:\n  - "src/**/*.ts"\nagent: [plan]\nmatch: any\n---\n\nMixed guidance.`
+    );
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+    const chatMessage = hooks['chat.message'] as ChatMessageHook;
+    const transform = hooks['experimental.chat.messages.transform'] as (
+      input: unknown,
+      output: { messages: Array<Record<string, unknown>> }
+    ) => Promise<void>;
+
+    __testOnly.upsertSessionState('ses_mixed', s => {
+      s.contextPaths.add('src/index.ts');
+    });
+
+    const output: ChatMessageOutputLike = {
+      message: { role: 'user', agent: 'plan' },
+      parts: [{ type: 'text', text: 'work here' }],
+    };
+    await chatMessage(
+      { sessionID: 'ses_mixed', messageID: 'msg_mixed_1' },
+      output
+    );
+    expect(output.parts.filter(p => p.synthetic)).toHaveLength(1);
+
+    const request = [
+      {
+        info: { id: 'msg_mixed_req', role: 'user', sessionID: 'ses_mixed' },
+        parts: output.parts,
+      },
+    ];
+    await transform({}, { messages: request });
+    const ephemeralIds = request.flatMap(message =>
+      ((message.parts as Array<{ id?: string }> | undefined) ?? []).map(
+        part => part.id
+      )
+    );
+    expect(ephemeralIds.some(id => id?.startsWith('prt_rule_ephemeral_'))).toBe(
+      false
     );
   });
 

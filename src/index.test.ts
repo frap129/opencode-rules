@@ -143,7 +143,26 @@ Model-specific guidelines.`
       .filter(p => p.synthetic)
       .map(p => p.text)
       .join('\n');
-    expect(injectedText).toContain('Model-specific guidelines');
+    const messagesTransform = hooks['experimental.chat.messages.transform'] as (
+      input: unknown,
+      output: { messages: Array<Record<string, unknown>> }
+    ) => Promise<void>;
+    const sessionID = 'ses_model_test';
+    const expectedRuleText = 'Model-specific guidelines';
+    const request = [
+      {
+        info: { id: 'msg_ephemeral_check', role: 'user', sessionID },
+        parts: output.parts,
+      },
+    ];
+    await messagesTransform({}, { messages: request });
+    const transformedText = request
+      .flatMap(message => message.parts as Array<{ text?: string }>)
+      .map(part => part.text ?? '')
+      .join('\n');
+    expect(injectedText).not.toContain(expectedRuleText);
+    expect(output.parts.filter(part => part.synthetic)).toHaveLength(0);
+    expect(transformedText).toContain(expectedRuleText);
   });
 
   it('should include agent-conditional rule when session has matching agentType', async () => {
@@ -193,7 +212,26 @@ Agent-specific guidelines.`
       .filter(p => p.synthetic)
       .map(p => p.text)
       .join('\n');
-    expect(injectedText).toContain('Agent-specific guidelines');
+    const messagesTransform = hooks['experimental.chat.messages.transform'] as (
+      input: unknown,
+      output: { messages: Array<Record<string, unknown>> }
+    ) => Promise<void>;
+    const sessionID = 'ses_agent_test';
+    const expectedRuleText = 'Agent-specific guidelines';
+    const request = [
+      {
+        info: { id: 'msg_ephemeral_check', role: 'user', sessionID },
+        parts: output.parts,
+      },
+    ];
+    await messagesTransform({}, { messages: request });
+    const transformedText = request
+      .flatMap(message => message.parts as Array<{ text?: string }>)
+      .map(part => part.text ?? '')
+      .join('\n');
+    expect(injectedText).not.toContain(expectedRuleText);
+    expect(output.parts.filter(part => part.synthetic)).toHaveLength(0);
+    expect(transformedText).toContain(expectedRuleText);
   });
 
   it('should evaluate model and agent rules from output.message context', async () => {
@@ -256,8 +294,26 @@ Nonmatching output context.`
       .filter(p => p.synthetic)
       .map(p => p.text)
       .join('\n');
-    expect(injectedText).toContain('Matching output context.');
-    expect(injectedText).not.toContain('Nonmatching output context.');
+    const messagesTransform = hooks['experimental.chat.messages.transform'] as (
+      input: unknown,
+      output: { messages: Array<Record<string, unknown>> }
+    ) => Promise<void>;
+    const sessionID = 'ses_output_context';
+    const request = [
+      {
+        info: { id: 'msg_ephemeral_check', role: 'user', sessionID },
+        parts: output.parts,
+      },
+    ];
+    await messagesTransform({}, { messages: request });
+    const transformedText = request
+      .flatMap(message => message.parts as Array<{ text?: string }>)
+      .map(part => part.text ?? '')
+      .join('\n');
+    expect(injectedText).not.toContain('Matching output context.');
+    expect(output.parts.filter(part => part.synthetic)).toHaveLength(0);
+    expect(transformedText).toContain('Matching output context.');
+    expect(transformedText).not.toContain('Nonmatching output context.');
   });
 
   it('should include command-conditional rule when user prompt starts with matching slash command', async () => {
@@ -456,7 +512,26 @@ All dimensions must match.`
       .filter(p => p.synthetic)
       .map(p => p.text)
       .join('\n');
-    expect(injectedText).toContain('All dimensions must match');
+    const messagesTransform = hooks['experimental.chat.messages.transform'] as (
+      input: unknown,
+      output: { messages: Array<Record<string, unknown>> }
+    ) => Promise<void>;
+    const sessionID = 'ses_all';
+    const expectedRuleText = 'All dimensions must match';
+    const request = [
+      {
+        info: { id: 'msg_ephemeral_check', role: 'user', sessionID },
+        parts: output.parts,
+      },
+    ];
+    await messagesTransform({}, { messages: request });
+    const transformedText = request
+      .flatMap(message => message.parts as Array<{ text?: string }>)
+      .map(part => part.text ?? '')
+      .join('\n');
+    expect(injectedText).not.toContain(expectedRuleText);
+    expect(output.parts.filter(part => part.synthetic)).toHaveLength(0);
+    expect(transformedText).toContain(expectedRuleText);
   });
 
   it('should exclude match: all rule when one dimension is missing', async () => {
@@ -619,7 +694,28 @@ Feature branch guidelines.`
         .filter(p => p.synthetic)
         .map(p => p.text)
         .join('\n');
-      expect(injectedText).toContain('Feature branch guidelines');
+      const messagesTransform = hooks[
+        'experimental.chat.messages.transform'
+      ] as (
+        input: unknown,
+        output: { messages: Array<Record<string, unknown>> }
+      ) => Promise<void>;
+      const sessionID = 'ses_branch';
+      const expectedRuleText = 'Feature branch guidelines';
+      const request = [
+        {
+          info: { id: 'msg_ephemeral_check', role: 'user', sessionID },
+          parts: message.parts,
+        },
+      ];
+      await messagesTransform({}, { messages: request });
+      const transformedText = request
+        .flatMap(msg => msg.parts as Array<{ text?: string }>)
+        .map(part => part.text ?? '')
+        .join('\n');
+      expect(injectedText).not.toContain(expectedRuleText);
+      expect(message.parts.filter(part => part.synthetic)).toHaveLength(0);
+      expect(transformedText).toContain(expectedRuleText);
       expect(getGitBranchSpy).toHaveBeenCalled();
     } finally {
       getGitBranchSpy.mockRestore();

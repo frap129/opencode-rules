@@ -1370,7 +1370,25 @@ MCP Context7 rule content`;
       .filter(p => p.synthetic)
       .map(p => p.text)
       .join('\n');
-    expect(syntheticText).toContain('MCP Context7 rule content');
+    expect(syntheticText).not.toContain('MCP Context7 rule content');
+    expect(output.parts.filter(p => p.synthetic)).toHaveLength(0);
+
+    const messagesTransform = hooks['experimental.chat.messages.transform'] as (
+      input: unknown,
+      output: { messages: Array<Record<string, unknown>> }
+    ) => Promise<void>;
+    const request = [
+      {
+        info: { id: 'msg_mcp_req', role: 'user', sessionID: 'ses_mcp' },
+        parts: output.parts,
+      },
+    ];
+    await messagesTransform({}, { messages: request });
+    const transformedText = request
+      .flatMap(message => message.parts as Array<{ text?: string }>)
+      .map(part => part.text ?? '')
+      .join('\n');
+    expect(transformedText).toContain('MCP Context7 rule content');
   });
 });
 

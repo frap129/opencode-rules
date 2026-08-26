@@ -1,10 +1,15 @@
 import {
-  matchRules,
+  matchRuleSnapshots,
   type RuleFilterContext,
   type MatchedRuleEntry,
 } from './rule-filter.js';
 import { extractFilePathsFromMessages } from './message-paths.js';
-import { type DiscoveredRule, getCachedRule } from './rule-discovery.js';
+import {
+  loadRuleSnapshots,
+  getCachedRule,
+  type DiscoveredRule,
+  type RuleSnapshot,
+} from './rule-discovery.js';
 import {
   extractLatestUserPrompt,
   extractSessionID,
@@ -33,6 +38,7 @@ import {
   buildRulePart,
   buildHookInjectionPart,
   buildTransientHookMessage,
+  buildTransientRuleMessage,
   hashContent,
   ruleKeyFor,
   scanInjectedParts,
@@ -83,6 +89,7 @@ export class OpenCodeRulesRuntime {
   private ruleFiles: DiscoveredRule[];
   private sessionStore: SessionStore;
   private debugLog: DebugLog;
+  private snapshotPromises = new Map<string, Promise<RuleSnapshot[]>>();
 
   constructor(opts: OpenCodeRulesRuntimeOptions) {
     this.client = opts.client as OpenCodeClient;
@@ -219,6 +226,24 @@ export class OpenCodeRulesRuntime {
       await this.rescanInjectedParts(sessionID, output.messages);
     }
 
+    try {
+      const currentState = this.sessionStore.get(sessionID);
+      if (currentState && !currentState.needsRuleRescan) {
+        const prompt = extractLatestUserPrompt(output.messages);
+        const matches = await this.evaluateSessionRules(
+          sessionID,
+          prompt,
+          currentState.lastModelID,
+          currentState.lastAgentType
+        );
+        this.appendTransientRuleInjections(sessionID, output.messages, matches);
+      }
+    } catch (error) {
+      this.debugLog(
+        `Ephemeral rule evaluation failed for ${sessionID}: ${formatError(error)}`
+      );
+    }
+
     this.appendTransientHookInjections(sessionID, output.messages);
 
     return output;
@@ -285,6 +310,123 @@ export class OpenCodeRulesRuntime {
     }
   }
 
+  /** Load the per-session rule snapshot exactly once per process/session,
+   * deduplicating concurrent loads via a promise map. */
+  private async ensureSessionRuleSnapshot(
+    sessionID: string
+  ): Promise<RuleSnapshot[]> {
+    const existing = this.sessionStore.get(sessionID)?.ruleSnapshots;
+    if (existing) return existing;
+
+    let pending = this.snapshotPromises.get(sessionID);
+    if (!pending) {
+      pending = loadRuleSnapshots(this.ruleFiles);
+      this.snapshotPromises.set(sessionID, pending);
+    }
+
+    try {
+      const loaded = await pending;
+      this.sessionStore.upsert(sessionID, state => {
+        if (!state.ruleSnapshots) state.ruleSnapshots = loaded;
+      });
+      return this.sessionStore.get(sessionID)?.ruleSnapshots ?? loaded;
+    } finally {
+      if (this.snapshotPromises.get(sessionID) === pending) {
+        this.snapshotPromises.delete(sessionID);
+      }
+    }
+  }
+
+  /** Assemble the shared filter context from session state and live queries. */
+  private async buildSessionFilterContext(
+    sessionID: string,
+    userPrompt: string | undefined,
+    modelID: string | undefined,
+    agentType: string | undefined
+  ): Promise<RuleFilterContext> {
+    const state = this.sessionStore.get(sessionID);
+    const contextFilePaths = Array.from(state?.contextPaths ?? []).sort(
+      (a, b) => a.localeCompare(b)
+    );
+    const availableToolIDs = await this.queryAvailableToolIDs();
+    return buildFilterContext({
+      contextFilePaths,
+      userPrompt,
+      availableToolIDs,
+      modelID,
+      agentType,
+      projectDirectory: this.projectDirectory,
+      debugLog: this.debugLog,
+    });
+  }
+
+  /** Evaluate the session snapshot against the current request context. */
+  private async evaluateSessionRules(
+    sessionID: string,
+    userPrompt: string | undefined,
+    modelID: string | undefined,
+    agentType: string | undefined
+  ): Promise<MatchedRuleEntry[]> {
+    const snapshots = await this.ensureSessionRuleSnapshot(sessionID);
+    const context = await this.buildSessionFilterContext(
+      sessionID,
+      userPrompt,
+      modelID,
+      agentType
+    );
+    return matchRuleSnapshots(snapshots, context);
+  }
+
+  /** Append request-scoped synthetic user messages carrying ephemeral rule
+   * matches for the current model dispatch. Never persisted: transform
+   * mutations are discarded after dispatch. Idempotent by deterministic
+   * ids and durable-key dedup. */
+  private appendTransientRuleInjections(
+    sessionID: string,
+    messages: MessageWithInfo[],
+    matches: MatchedRuleEntry[]
+  ): void {
+    const state = this.sessionStore.get(sessionID);
+    const lastMessage = messages[messages.length - 1];
+    if (!state || !lastMessage?.parts) return;
+
+    const presentIds = new Set<string>();
+    for (const message of messages) {
+      if (typeof message.info?.id === 'string') presentIds.add(message.info.id);
+      for (const part of message.parts ?? []) {
+        if (typeof part.id === 'string') presentIds.add(part.id);
+      }
+    }
+    const persistedKeys = new Set([
+      ...state.injectedRuleKeys,
+      ...scanInjectedParts(messages).ruleKeys,
+    ]);
+
+    for (const rule of matches) {
+      if (rule.lifetime !== 'ephemeral') continue;
+      const key = ruleKeyFor(rule.relativePath, rule.strippedContent);
+      if (persistedKeys.has(key)) continue;
+      const transient = buildTransientRuleMessage(
+        rule.relativePath,
+        rule.strippedContent,
+        (lastMessage.info ?? {}) as Record<string, unknown>
+      );
+      if (
+        presentIds.has(transient.info.id) ||
+        presentIds.has(transient.parts[0]!.id)
+      )
+        continue;
+      transient.parts[0] = {
+        ...transient.parts[0]!,
+        sessionID,
+        messageID: transient.info.id,
+      };
+      messages.push(transient as MessageWithInfo);
+      presentIds.add(transient.info.id);
+      presentIds.add(transient.parts[0]!.id);
+    }
+  }
+
   /** Rebuild injected-part tracking from the message array (history is ground truth). */
   private async rescanInjectedParts(
     sessionID: string,
@@ -347,7 +489,10 @@ export class OpenCodeRulesRuntime {
       }
 
       // 2. First message of a session run: rebuild injection keys from
-      //    persisted history so restarts never duplicate parts.
+      //    persisted history so restarts never duplicate parts. Once the
+      //    history scan completes, in-memory keys are authoritative for
+      //    the session; later turns must not re-derive (and potentially
+      //    drop) keys from a stale client snapshot.
       const initialState = this.sessionStore.get(sessionID);
       if (initialState && !initialState.seededFromHistory) {
         const scanned = await this.scanHistoryFromClient(sessionID);
@@ -363,6 +508,7 @@ export class OpenCodeRulesRuntime {
         this.sessionStore.upsert(sessionID, state => {
           state.injectedRuleKeys = new Set(scanned.ruleKeys);
           state.injectedHookHashes = new Set(scanned.hookHashes);
+          state.seededFromHistory = true;
         });
       }
 
@@ -378,23 +524,16 @@ export class OpenCodeRulesRuntime {
       // 4. Rule matching (skipped for messages without non-synthetic text)
       let matched: MatchedRuleEntry[] = [];
       if (captured.userPrompt) {
-        const contextPaths = Array.from(state.contextPaths).sort((a, b) =>
-          a.localeCompare(b)
+        matched = await this.evaluateSessionRules(
+          sessionID,
+          captured.userPrompt,
+          captured.modelID,
+          captured.agentType
         );
-        const availableToolIDs = await this.queryAvailableToolIDs();
-
-        const filterContext: RuleFilterContext = await buildFilterContext({
-          contextFilePaths: contextPaths,
-          userPrompt: captured.userPrompt,
-          availableToolIDs,
-          modelID: captured.modelID,
-          agentType: captured.agentType,
-          projectDirectory: this.projectDirectory,
-          debugLog: this.debugLog,
-        });
-
-        matched = await matchRules(this.ruleFiles, filterContext);
       }
+      const durableMatches = matched.filter(
+        rule => rule.lifetime === 'durable'
+      );
 
       // 5. Resolve the owning message id and guard before any part
       //    construction or store mutation: persisted parts must carry
@@ -408,10 +547,10 @@ export class OpenCodeRulesRuntime {
         return;
       }
 
-      // 6. Append one synthetic part per not-yet-injected rule
+      // 6. Append one synthetic part per not-yet-injected durable rule
       const newParts: SyntheticPart[] = [];
       const newRuleKeys: string[] = [];
-      for (const rule of matched) {
+      for (const rule of durableMatches) {
         const key = ruleKeyFor(rule.relativePath, rule.strippedContent);
         if (state.injectedRuleKeys.has(key) || newRuleKeys.includes(key)) {
           continue;
