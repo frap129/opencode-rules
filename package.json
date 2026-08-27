@@ -10,7 +10,7 @@
     "tui"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && bun run build-tui.mjs",
     "dev": "tsc --watch",
     "test": "vitest",
     "test:run": "vitest run",

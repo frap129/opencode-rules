@@ -5,7 +5,6 @@ import {
   createEffect,
   createMemo,
   onCleanup,
-  Show,
   For,
   type JSX,
 } from 'solid-js';
@@ -74,68 +73,70 @@ function RuleSection(props: RuleSectionProps): JSX.Element {
   };
 
   return (
-    <Show when={props.rules.length > 0}>
-      <box>
-        <box flexDirection="row" gap={1} onMouseDown={() => props.onToggle()}>
-          <text fg={props.theme.text}>{props.open ? '▼' : '▶'}</text>
-          <text fg={props.theme.text}>
-            {props.title}
-            <Show when={!props.open}>
-              <span style={{ fg: props.theme.textMuted }}>
-                {' '}
-                {headerCount()}
-              </span>
-            </Show>
-          </text>
-        </box>
-        <Show when={props.open}>
-          <For each={props.rules}>
-            {(rule, localIndex) => {
-              const globalIndex = () => props.globalOffset + localIndex();
-              return (
-                <box
-                  flexDirection="column"
-                  onMouseDown={() => props.onExpandToggle(globalIndex())}
-                >
-                  <box flexDirection="row" gap={1}>
-                    <text fg={bulletColor(rule)}>•</text>
-                    <text fg={props.theme.text}>{rule.name}</text>
-                  </box>
-                  <Show when={props.expandedIndex === globalIndex()}>
-                    <box flexDirection="column" paddingLeft={4}>
-                      <text fg={props.theme.textMuted}>{rule.path}</text>
-                      <For each={metadataFieldDescriptors}>
-                        {({ key, label }) => {
-                          const value = rule.metadata[key];
-                          if (Array.isArray(value) && value.length > 0) {
-                            return (
-                              <text fg={props.theme.textMuted}>
-                                {label}: {value.join(', ')}
-                              </text>
-                            );
-                          }
-                          return null;
-                        }}
-                      </For>
-                      <Show when={rule.metadata.ci !== undefined}>
-                        <text fg={props.theme.textMuted}>
-                          CI: {String(rule.metadata.ci)}
-                        </text>
-                      </Show>
-                      <Show when={rule.metadata.match}>
-                        <text fg={props.theme.textMuted}>
-                          Match: {rule.metadata.match}
-                        </text>
-                      </Show>
+    <box>
+      {props.rules.length > 0 && (
+        <>
+          <box flexDirection="row" gap={1} onMouseDown={() => props.onToggle()}>
+            <text fg={props.theme.text}>{props.open ? '▼' : '▶'}</text>
+            <text fg={props.theme.text}>
+              {props.title}
+              {!props.open && (
+                <span style={{ fg: props.theme.textMuted }}>
+                  {' '}
+                  {headerCount()}
+                </span>
+              )}
+            </text>
+          </box>
+          {props.open && (
+            <For each={props.rules}>
+              {(rule, localIndex) => {
+                const globalIndex = () => props.globalOffset + localIndex();
+                return (
+                  <box
+                    flexDirection="column"
+                    onMouseDown={() => props.onExpandToggle(globalIndex())}
+                  >
+                    <box flexDirection="row" gap={1}>
+                      <text fg={bulletColor(rule)}>•</text>
+                      <text fg={props.theme.text}>{rule.name}</text>
                     </box>
-                  </Show>
-                </box>
-              );
-            }}
-          </For>
-        </Show>
-      </box>
-    </Show>
+                    {props.expandedIndex === globalIndex() && (
+                      <box flexDirection="column" paddingLeft={4}>
+                        <text fg={props.theme.textMuted}>{rule.path}</text>
+                        <For each={metadataFieldDescriptors}>
+                          {({ key, label }) => {
+                            const value = rule.metadata[key];
+                            if (Array.isArray(value) && value.length > 0) {
+                              return (
+                                <text fg={props.theme.textMuted}>
+                                  {label}: {value.join(', ')}
+                                </text>
+                              );
+                            }
+                            return null;
+                          }}
+                        </For>
+                        {rule.metadata.ci !== undefined && (
+                          <text fg={props.theme.textMuted}>
+                            CI: {String(rule.metadata.ci)}
+                          </text>
+                        )}
+                        {rule.metadata.match && (
+                          <text fg={props.theme.textMuted}>
+                            Match: {rule.metadata.match}
+                          </text>
+                        )}
+                      </box>
+                    )}
+                  </box>
+                );
+              }}
+            </For>
+          )}
+        </>
+      )}
+    </box>
   );
 }
 
@@ -277,47 +278,48 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
         <b>Rules</b>
       </text>
 
-      <Show when={status() === 'loading'}>
-        <text fg={theme().textMuted}>Loading...</text>
-      </Show>
-      <Show when={status() === 'error'}>
+      {status() === 'loading' && <text fg={theme().textMuted}>Loading...</text>}
+      {status() === 'error' && (
         <text fg={theme().textMuted}>Failed to load rules</text>
-      </Show>
+      )}
 
-      <Show when={status() === 'loaded'}>
-        <Show
-          when={rules().length > 0}
-          fallback={<text fg={theme().textMuted}>No rules found</text>}
-        >
-          <RuleSection
-            title="Project"
-            rules={projectRules()}
-            theme={theme()}
-            open={projectOpen()}
-            onToggle={() => setProjectOpen(x => !x)}
-            expandedIndex={expandedIndex()}
-            globalOffset={0}
-            onExpandToggle={toggleExpand}
-            hasEvaluationState={hasEvaluationState()}
-          />
-          <RuleSection
-            title="Global"
-            rules={globalRules()}
-            theme={theme()}
-            open={globalOpen()}
-            onToggle={() => setGlobalOpen(x => !x)}
-            expandedIndex={expandedIndex()}
-            globalOffset={projectRules().length}
-            onExpandToggle={toggleExpand}
-            hasEvaluationState={hasEvaluationState()}
-          />
-        </Show>
-        <Show when={skippedCount() > 0}>
-          <text fg={theme().textMuted}>
-            {skippedCount()} rules skipped (unreadable)
-          </text>
-        </Show>
-      </Show>
+      {status() === 'loaded' && (
+        <>
+          {rules().length > 0 ? (
+            <>
+              <RuleSection
+                title="Project"
+                rules={projectRules()}
+                theme={theme()}
+                open={projectOpen()}
+                onToggle={() => setProjectOpen(x => !x)}
+                expandedIndex={expandedIndex()}
+                globalOffset={0}
+                onExpandToggle={toggleExpand}
+                hasEvaluationState={hasEvaluationState()}
+              />
+              <RuleSection
+                title="Global"
+                rules={globalRules()}
+                theme={theme()}
+                open={globalOpen()}
+                onToggle={() => setGlobalOpen(x => !x)}
+                expandedIndex={expandedIndex()}
+                globalOffset={projectRules().length}
+                onExpandToggle={toggleExpand}
+                hasEvaluationState={hasEvaluationState()}
+              />
+            </>
+          ) : (
+            <text fg={theme().textMuted}>No rules found</text>
+          )}
+          {skippedCount() > 0 && (
+            <text fg={theme().textMuted}>
+              {skippedCount()} rules skipped (unreadable)
+            </text>
+          )}
+        </>
+      )}
     </box>
   );
 }

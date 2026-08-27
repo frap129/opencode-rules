@@ -4,6 +4,9 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 type PackageManifest = {
+  scripts?: {
+    build?: string;
+  };
   exports?: {
     './tui'?: {
       import?: string;
@@ -23,5 +26,6 @@ describe('package manifest', () => {
     ) as PackageManifest;
 
     expect(manifest.exports?.['./tui']?.import).toBe('./dist/tui/index.js');
+    expect(manifest.scripts?.build).toContain('bun run build-tui.mjs');
   });
 });
