@@ -1848,6 +1848,118 @@ describe('chat.message rule persistence', () => {
     ).toBe(true);
   });
 
+  it('inherits the user message model so host hooks can read info.model', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    writeFileSync(
+      path.join(globalRulesDir, 'agent-plan.mdc'),
+      `---\nagent: [plan]\n---\n\nPlan-only guidance.`
+    );
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const hooks = await getHooks(testDir);
+    const chatMessage = hooks['chat.message'] as ChatMessageHook;
+    const transform = hooks['experimental.chat.messages.transform'] as (
+      input: unknown,
+      output: { messages: Array<Record<string, unknown>> }
+    ) => Promise<void>;
+
+    await chatMessage(
+      { sessionID: 'ses_tmodel', messageID: 'msg_tm_1' },
+      {
+        message: { role: 'user', agent: 'plan' },
+        parts: [{ type: 'text', text: 'plan this' }],
+      }
+    );
+
+    // Step-2 shape: the array ends with the in-progress assistant message,
+    // whose info carries flat providerID/modelID and no `model` object.
+    const request = {
+      messages: [
+        {
+          info: {
+            id: 'msg_tm_1',
+            role: 'user',
+            sessionID: 'ses_tmodel',
+            model: { providerID: 'opencode-go', modelID: 'deepseek-v4-flash' },
+          },
+          parts: [{ type: 'text', text: 'plan this' }],
+        },
+        {
+          info: {
+            id: 'msg_asst_1',
+            role: 'assistant',
+            sessionID: 'ses_tmodel',
+            providerID: 'opencode-go',
+            modelID: 'deepseek-v4-flash',
+            time: { created: 1 },
+          },
+          parts: [{ type: 'text', text: 'thinking...' }],
+        },
+      ],
+    };
+    await transform({}, request);
+
+    const last = request.messages[request.messages.length - 1];
+    const info = last!.info as Record<string, unknown>;
+    expect(info.role).toBe('user');
+    expect(info.model).toEqual({
+      providerID: 'opencode-go',
+      modelID: 'deepseek-v4-flash',
+    });
+    // Host-hook style read (dcp reads userInfo.model.providerID) must work.
+    expect((info.model as { providerID?: string }).providerID).toBe(
+      'opencode-go'
+    );
+  });
+
+  it('synthesizes a model object when only flat fields are available', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    writeFileSync(
+      path.join(globalRulesDir, 'agent-plan.mdc'),
+      `---\nagent: [plan]\n---\n\nPlan-only guidance.`
+    );
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const hooks = await getHooks(testDir);
+    const chatMessage = hooks['chat.message'] as ChatMessageHook;
+    const transform = hooks['experimental.chat.messages.transform'] as (
+      input: unknown,
+      output: { messages: Array<Record<string, unknown>> }
+    ) => Promise<void>;
+
+    await chatMessage(
+      { sessionID: 'ses_tmodel_flat', messageID: 'msg_tmf_1' },
+      {
+        message: { role: 'user', agent: 'plan' },
+        parts: [{ type: 'text', text: 'plan this' }],
+      }
+    );
+
+    const request = {
+      messages: [
+        {
+          info: {
+            id: 'msg_asst_1',
+            role: 'assistant',
+            sessionID: 'ses_tmodel_flat',
+            providerID: 'opencode-go',
+            modelID: 'deepseek-v4-flash',
+            time: { created: 1 },
+          },
+          parts: [{ type: 'text', text: 'thinking...' }],
+        },
+      ],
+    };
+    await transform({}, request);
+
+    const last = request.messages[request.messages.length - 1];
+    const info = last!.info as Record<string, unknown>;
+    expect(info.model).toEqual({
+      providerID: 'opencode-go',
+      modelID: 'deepseek-v4-flash',
+    });
+  });
+
   it('persists keyword rules once across turns', async () => {
     const { testDir, globalRulesDir } = getTestDirs();
     writeFileSync(

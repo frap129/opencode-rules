@@ -91,6 +91,32 @@ describe('buildTransientRuleMessage', () => {
     expect(scan.ruleKeys.size).toBe(0);
     expect(scan.ruleRelativePaths.size).toBe(0);
   });
+
+  it('synthesizes a model object from flat model fields', () => {
+    const message = buildTransientRuleMessage('agent-plan.md', 'Plan body.', {
+      id: 'msg_user',
+      role: 'user',
+      providerID: 'opencode-go',
+      modelID: 'deepseek-v4-flash',
+    });
+
+    expect(message.info.model).toEqual({
+      providerID: 'opencode-go',
+      modelID: 'deepseek-v4-flash',
+    });
+  });
+
+  it('always carries a model object so host hooks can read info.model', () => {
+    const message = buildTransientRuleMessage('agent-plan.md', 'Plan body.', {
+      id: 'msg_user',
+      role: 'user',
+    });
+
+    expect(message.info.model).toBeTypeOf('object');
+    expect(() => {
+      void (message.info.model as { providerID?: string }).providerID;
+    }).not.toThrow();
+  });
 });
 
 describe('buildTransientHookMessage', () => {
@@ -116,6 +142,20 @@ describe('buildTransientHookMessage', () => {
     );
     expect(message.parts[0]?.synthetic).toBe(true);
     expect(message.parts[0]?.text).toBe('Use pinned dependencies.');
+  });
+
+  it('synthesizes a model object from flat model fields', () => {
+    const message = buildTransientHookMessage('Use pinned dependencies.', {
+      id: 'msg_123',
+      role: 'user',
+      providerID: 'opencode-go',
+      modelID: 'deepseek-v4-flash',
+    });
+
+    expect(message.info.model).toEqual({
+      providerID: 'opencode-go',
+      modelID: 'deepseek-v4-flash',
+    });
   });
 
   it('never mutates the base info object', () => {

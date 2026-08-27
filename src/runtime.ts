@@ -40,6 +40,7 @@ import {
   buildTransientHookMessage,
   buildTransientRuleMessage,
   hashContent,
+  isTransientMessageId,
   ruleKeyFor,
   scanInjectedParts,
   type InjectedPartsScan,
@@ -250,6 +251,24 @@ export class OpenCodeRulesRuntime {
     return output;
   }
 
+  /** Resolve the info transient synthetic messages should inherit: the latest
+   * real user message (authoritative model object and agent), skipping
+   * transient messages appended earlier in the same dispatch. Falls back to
+   * the last message's info (the builders synthesize a model object from
+   * flat fields when needed). */
+  private transientBaseInfo(
+    messages: MessageWithInfo[]
+  ): Record<string, unknown> {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const info = messages[i]?.info;
+      if (!info || info.role !== 'user') continue;
+      if (isTransientMessageId(info.id)) continue;
+      return info as Record<string, unknown>;
+    }
+    const last = messages[messages.length - 1]?.info;
+    return (last ?? {}) as Record<string, unknown>;
+  }
+
   /** Append request-scoped synthetic user messages carrying pending hook
    * texts. Never persisted: opencode discards messages.transform mutations
    * after the model dispatch. Idempotent by deterministic id/content. */
@@ -295,7 +314,7 @@ export class OpenCodeRulesRuntime {
         }
         const transient = buildTransientHookMessage(
           content,
-          lastMessage.info as Record<string, unknown>
+          this.transientBaseInfo(messages)
         );
         transient.parts[0] = {
           ...transient.parts[0],
@@ -410,7 +429,7 @@ export class OpenCodeRulesRuntime {
       const transient = buildTransientRuleMessage(
         rule.relativePath,
         rule.strippedContent,
-        (lastMessage.info ?? {}) as Record<string, unknown>
+        this.transientBaseInfo(messages)
       );
       if (
         presentIds.has(transient.info.id) ||
@@ -453,7 +472,7 @@ export class OpenCodeRulesRuntime {
     for (const content of pending) {
       const transient = buildTransientHookMessage(
         content,
-        (lastMessage.info ?? {}) as Record<string, unknown>
+        this.transientBaseInfo(messages)
       );
       const hash = hashContent(content);
       if (

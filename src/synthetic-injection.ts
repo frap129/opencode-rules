@@ -31,6 +31,7 @@ const HOOK_PART_PREFIX = 'prt_hook_';
 const TRANSIENT_HOOK_PART_PREFIX = 'prt_hook_transient_';
 const TRANSIENT_RULE_PART_PREFIX = 'prt_rule_ephemeral_';
 const TRANSIENT_RULE_MESSAGE_PREFIX = 'msg_rule_ephemeral_';
+const TRANSIENT_HOOK_MESSAGE_PREFIX = 'msg_rules_hook_';
 const RULE_HEADER_PATTERN = /^## (.+)\n\n([\s\S]*)$/;
 
 function shortHash(input: string): string {
@@ -43,6 +44,33 @@ export function hashContent(content: string): string {
 
 export function ruleKeyFor(relativePath: string, content: string): string {
   return `${relativePath}:${shortHash(content)}`;
+}
+
+/** True when a message id belongs to one of this plugin's transient messages. */
+export function isTransientMessageId(id: unknown): boolean {
+  return (
+    typeof id === 'string' &&
+    (id.startsWith(TRANSIENT_RULE_MESSAGE_PREFIX) ||
+      id.startsWith(TRANSIENT_HOOK_MESSAGE_PREFIX))
+  );
+}
+
+/**
+ * Guarantee the transient message info carries a `model` object. Host hooks
+ * (e.g. dcp's messages.transform handler) read `info.model.providerID` on
+ * the last user message; a missing model crashes them. Inherit an existing
+ * object, otherwise synthesize one from the flat providerID/modelID fields
+ * assistant messages carry.
+ */
+function withModelObject<T extends Record<string, unknown>>(info: T): T {
+  const model = info.model;
+  if (model !== null && typeof model === 'object') {
+    return info;
+  }
+  const providerID =
+    typeof info.providerID === 'string' ? info.providerID : undefined;
+  const modelID = typeof info.modelID === 'string' ? info.modelID : undefined;
+  return { ...info, model: { providerID, modelID } };
 }
 
 export function buildRulePart(
@@ -71,11 +99,11 @@ export function buildTransientHookMessage(
   baseInfo: Record<string, unknown>
 ): TransientHookMessage {
   return {
-    info: {
+    info: withModelObject({
       ...baseInfo,
-      id: `msg_rules_hook_${shortHash(content)}`,
+      id: `${TRANSIENT_HOOK_MESSAGE_PREFIX}${shortHash(content)}`,
       role: 'user',
-    },
+    }),
     parts: [
       {
         id: `${TRANSIENT_HOOK_PART_PREFIX}${shortHash(content)}`,
@@ -100,11 +128,11 @@ export function buildTransientRuleMessage(
 ): TransientHookMessage {
   const keyHash = shortHash(ruleKeyFor(relativePath, content));
   return {
-    info: {
+    info: withModelObject({
       ...baseInfo,
       id: `${TRANSIENT_RULE_MESSAGE_PREFIX}${keyHash}`,
       role: 'user',
-    },
+    }),
     parts: [
       {
         id: `${TRANSIENT_RULE_PART_PREFIX}${keyHash}`,
