@@ -886,3 +886,124 @@ describe('RuleDelivery transient dispatches', () => {
     expect(history.calls).toEqual(['ses_rescan']);
   });
 });
+
+describe('RuleDelivery compaction invalidation', () => {
+  it('defers durable delivery until dispatch history replaces the ledger', async () => {
+    const history = new MockRawHistoryAdapter({ ok: true, messages: [] });
+    const delivery: RuleDelivery = createRuleDelivery({ rawHistory: history });
+    const removedRule = {
+      relativePath: 'rules/removed.md',
+      content: 'Removed by compaction.',
+    };
+    await delivery.deliverDurableTurn({
+      sessionID: 'ses_compacted',
+      messageID: 'msg_before_compaction',
+      matchedRules: [removedRule],
+      output: { parts: [] },
+    });
+    delivery.queueMatchedHooks({
+      sessionID: 'ses_compacted',
+      hooks: [
+        {
+          relativePath: 'rules/hook.md',
+          content: 'Retained durable Hook.',
+          lifetime: 'durable',
+        },
+      ],
+    });
+
+    expect(delivery.markCompacted('ses_compacted')).toBeUndefined();
+
+    const deferredOutput = { parts: [] };
+    await expect(
+      delivery.deliverDurableTurn({
+        sessionID: 'ses_compacted',
+        messageID: 'msg_before_rescan',
+        matchedRules: [removedRule],
+        output: deferredOutput,
+      })
+    ).resolves.toBe('deferred');
+    expect(deferredOutput.parts).toEqual([]);
+
+    const survivingRule = {
+      relativePath: 'rules/surviving.md',
+      content: 'Survived compaction.',
+    };
+    const messages = [
+      {
+        info: { id: 'msg_after_compaction', role: 'user' },
+        parts: [
+          { type: 'text', text: 'Prompt after compaction.' },
+          buildRulePart(survivingRule.relativePath, survivingRule.content),
+        ],
+      },
+    ];
+    delivery.deliverTransientDispatch({
+      sessionID: 'ses_compacted',
+      matchedRules: [removedRule, survivingRule],
+      messages,
+    });
+    expect(messages.slice(1).map(message => message.parts[0]?.text)).toEqual([
+      '# OpenCode transient rule: rules/removed.md\n\nRemoved by compaction.',
+      'Retained durable Hook.',
+    ]);
+
+    const resumedOutput = { parts: [] };
+    await expect(
+      delivery.deliverDurableTurn({
+        sessionID: 'ses_compacted',
+        messageID: 'msg_after_rescan',
+        matchedRules: [removedRule, survivingRule],
+        output: resumedOutput,
+      })
+    ).resolves.toBe('accepted');
+    expect(resumedOutput.parts).toEqual([
+      {
+        ...buildRulePart(removedRule.relativePath, removedRule.content),
+        sessionID: 'ses_compacted',
+        messageID: 'msg_after_rescan',
+      },
+      {
+        ...buildHookInjectionPart('Retained durable Hook.'),
+        sessionID: 'ses_compacted',
+        messageID: 'msg_after_rescan',
+      },
+    ]);
+    expect(history.calls).toEqual(['ses_compacted']);
+  });
+
+  it('invalidates a durable history scan already in flight', async () => {
+    let releaseHistory: (() => void) | undefined;
+    const historyBlocked = new Promise<void>(resolve => {
+      releaseHistory = resolve;
+    });
+    let markHistoryStarted: (() => void) | undefined;
+    const historyStarted = new Promise<void>(resolve => {
+      markHistoryStarted = resolve;
+    });
+    const history: RawHistoryAdapter = {
+      readHistory: async () => {
+        markHistoryStarted?.();
+        await historyBlocked;
+        return { ok: true, messages: [] };
+      },
+    };
+    const delivery: RuleDelivery = createRuleDelivery({ rawHistory: history });
+    const output = { parts: [] };
+    const durableTurn = delivery.deliverDurableTurn({
+      sessionID: 'ses_compacted_in_flight',
+      messageID: 'msg_in_flight',
+      matchedRules: [
+        { relativePath: 'rules/core.md', content: 'Durable guidance.' },
+      ],
+      output,
+    });
+    await historyStarted;
+
+    delivery.markCompacted('ses_compacted_in_flight');
+    releaseHistory?.();
+
+    await expect(durableTurn).resolves.toBe('deferred');
+    expect(output.parts).toEqual([]);
+  });
+});

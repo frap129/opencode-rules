@@ -20,6 +20,7 @@ export interface RuleDelivery {
   decodeHistory(sessionID: string): Promise<DeliveryLedgerFacts | undefined>;
   deliverDurableTurn(input: DurableTurnInput): Promise<DurableTurnResult>;
   deliverTransientDispatch(input: TransientDispatchInput): void;
+  markCompacted(sessionID: string): void;
   queueMatchedHooks(input: MatchedHooksInput): void;
 }
 
@@ -70,6 +71,7 @@ type RuleDeliveryOptions = {
 interface DeliveryState {
   ruleKeys: Set<string>;
   hookHashes: Set<string>;
+  ledgerRevision: number;
   seededFromHistory: boolean;
   needsRescan: boolean;
   pendingHookQueue: MatchedHookContent[];
@@ -131,11 +133,13 @@ class DefaultRuleDelivery implements RuleDelivery {
     if (state.needsRescan) return 'deferred';
 
     if (!state.seededFromHistory) {
+      const ledgerRevision = state.ledgerRevision;
       const facts = await this.decodeHistory(input.sessionID);
       if (!facts) {
         state.needsRescan = true;
         return 'deferred';
       }
+      if (state.ledgerRevision !== ledgerRevision) return 'deferred';
       state.ruleKeys = new Set(facts.ruleKeys);
       state.hookHashes = new Set(facts.hookHashes);
       state.seededFromHistory = true;
@@ -208,6 +212,7 @@ class DefaultRuleDelivery implements RuleDelivery {
         const facts = decodeRawHistory(input.messages);
         state.ruleKeys = new Set(facts.ruleKeys);
         state.hookHashes = new Set(facts.hookHashes);
+        state.ledgerRevision++;
         state.seededFromHistory = true;
         state.needsRescan = false;
       }
@@ -297,6 +302,12 @@ class DefaultRuleDelivery implements RuleDelivery {
     }
   }
 
+  markCompacted(sessionID: string): void {
+    const state = this.getState(sessionID);
+    state.ledgerRevision++;
+    state.needsRescan = true;
+  }
+
   private routePendingHooks(state: DeliveryState): void {
     for (const hook of state.pendingHookQueue) {
       const ownerIsDurable = state.ruleKeys.has(
@@ -330,6 +341,7 @@ class DefaultRuleDelivery implements RuleDelivery {
       state = {
         ruleKeys: new Set(),
         hookHashes: new Set(),
+        ledgerRevision: 0,
         seededFromHistory: false,
         needsRescan: false,
         pendingHookQueue: [],
