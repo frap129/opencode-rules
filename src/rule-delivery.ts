@@ -2,6 +2,7 @@ import {
   buildHookInjectionPart,
   buildRulePart,
   buildTransientHookMessage,
+  buildTransientRuleMessage,
   decodeRawHistory,
   type DeliveryLedgerFacts,
   type DeliveryPart,
@@ -24,7 +25,7 @@ export interface RuleDelivery {
 
 export type DurableTurnResult = 'accepted' | 'deferred';
 
-export interface DurableMatchedRule {
+export interface MatchedRuleContent {
   relativePath: string;
   content: string;
 }
@@ -36,13 +37,11 @@ export interface DurableTurnOutput {
 export interface DurableTurnInput {
   sessionID: string;
   messageID?: string;
-  matchedRules: readonly DurableMatchedRule[];
+  matchedRules: readonly MatchedRuleContent[];
   output: DurableTurnOutput;
 }
 
-export interface MatchedHookContent {
-  relativePath: string;
-  content: string;
+export interface MatchedHookContent extends MatchedRuleContent {
   lifetime: 'durable' | 'ephemeral';
 }
 
@@ -58,6 +57,7 @@ export interface TransientDispatchMessage {
 
 export interface TransientDispatchInput {
   sessionID: string;
+  matchedRules: readonly MatchedRuleContent[];
   messages: TransientDispatchMessage[];
 }
 
@@ -232,6 +232,35 @@ class DefaultRuleDelivery implements RuleDelivery {
       }
 
       const baseInfo = this.transientBaseInfo(input.messages);
+      for (const rule of input.matchedRules) {
+        const key = ruleKeyFor(rule.relativePath, rule.content);
+        const transient = buildTransientRuleMessage(
+          rule.relativePath,
+          rule.content,
+          baseInfo
+        );
+        const part = transient.parts[0];
+        if (
+          !part ||
+          state.ruleKeys.has(key) ||
+          presentIDs.has(transient.info.id) ||
+          presentIDs.has(part.id)
+        ) {
+          continue;
+        }
+        input.messages.push({
+          info: transient.info,
+          parts: [
+            {
+              ...part,
+              sessionID: input.sessionID,
+              messageID: transient.info.id,
+            },
+          ],
+        });
+        presentIDs.add(transient.info.id);
+        presentIDs.add(part.id);
+      }
       for (const content of [
         ...state.durableHookQueue,
         ...state.transientHookQueue,

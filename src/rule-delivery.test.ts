@@ -575,6 +575,7 @@ describe('RuleDelivery matched Hook queueing', () => {
     expect(
       delivery.deliverTransientDispatch({
         sessionID: 'ses_hook_queue',
+        matchedRules: [],
         messages,
       })
     ).toBeUndefined();
@@ -623,6 +624,7 @@ describe('RuleDelivery matched Hook queueing', () => {
     ];
     delivery.deliverTransientDispatch({
       sessionID: 'ses_hook_queue',
+      matchedRules: [],
       messages: nextMessages,
     });
     expect(nextMessages).toHaveLength(1);
@@ -645,6 +647,7 @@ describe('RuleDelivery matched Hook queueing', () => {
 
     delivery.deliverTransientDispatch({
       sessionID: 'ses_transient_retention',
+      matchedRules: [],
       messages: [],
     });
     const messages = [
@@ -655,6 +658,7 @@ describe('RuleDelivery matched Hook queueing', () => {
     ];
     delivery.deliverTransientDispatch({
       sessionID: 'ses_transient_retention',
+      matchedRules: [],
       messages,
     });
 
@@ -687,6 +691,7 @@ describe('RuleDelivery matched Hook queueing', () => {
 
     delivery.deliverTransientDispatch({
       sessionID: 'ses_recovered_owner',
+      matchedRules: [],
       messages,
     });
     const output = { parts: [] };
@@ -704,5 +709,180 @@ describe('RuleDelivery matched Hook queueing', () => {
         messageID: 'msg_recovered_hook',
       },
     ]);
+  });
+});
+
+describe('RuleDelivery transient dispatches', () => {
+  it('appends matched rules, durable Hook copies, and transient Hook content in order', async () => {
+    const history = new MockRawHistoryAdapter({ ok: true, messages: [] });
+    const delivery: RuleDelivery = createRuleDelivery({ rawHistory: history });
+    await delivery.deliverDurableTurn({
+      sessionID: 'ses_transient',
+      messageID: 'msg_durable',
+      matchedRules: [
+        { relativePath: 'rules/durable.md', content: 'Durable guidance.' },
+      ],
+      output: { parts: [] },
+    });
+    delivery.queueMatchedHooks({
+      sessionID: 'ses_transient',
+      hooks: [
+        {
+          relativePath: 'rules/durable-hook.md',
+          content: 'Durable Hook guidance.',
+          lifetime: 'durable',
+        },
+        {
+          relativePath: 'rules/transient-hook.md',
+          content: 'Transient Hook guidance.',
+          lifetime: 'ephemeral',
+        },
+      ],
+    });
+    const messages = [
+      {
+        info: {
+          id: 'msg_user',
+          role: 'user',
+          providerID: 'opencode-go',
+          modelID: 'deepseek-v4-flash',
+          custom: 'inherited',
+        },
+        parts: [{ type: 'text', text: 'Prompt.' }],
+      },
+      {
+        info: {
+          id: 'msg_rule_ephemeral_prior',
+          role: 'user',
+          providerID: 'wrong-provider',
+          modelID: 'wrong-model',
+        },
+        parts: [
+          { id: 'prt_rule_ephemeral_prior', type: 'text', text: 'Prior.' },
+        ],
+      },
+    ];
+
+    delivery.deliverTransientDispatch({
+      sessionID: 'ses_transient',
+      matchedRules: [
+        { relativePath: 'rules/transient.md', content: 'Transient guidance.' },
+        { relativePath: 'rules/transient.md', content: 'Transient guidance.' },
+        { relativePath: 'rules/durable.md', content: 'Durable guidance.' },
+      ],
+      messages,
+    });
+
+    expect(messages.slice(2).map(message => message.parts[0]?.text)).toEqual([
+      '# OpenCode transient rule: rules/transient.md\n\nTransient guidance.',
+      'Durable Hook guidance.',
+      'Transient Hook guidance.',
+    ]);
+    for (const message of messages.slice(2)) {
+      expect(message.info).toMatchObject({
+        role: 'user',
+        providerID: 'opencode-go',
+        modelID: 'deepseek-v4-flash',
+        custom: 'inherited',
+        model: {
+          providerID: 'opencode-go',
+          modelID: 'deepseek-v4-flash',
+        },
+      });
+    }
+  });
+
+  it('consumes queued transient Hook content after a duplicate-only dispatch', () => {
+    const delivery: RuleDelivery = createRuleDelivery({
+      rawHistory: new MockRawHistoryAdapter({ ok: true, messages: [] }),
+    });
+    const hook = {
+      relativePath: 'rules/transient-hook.md',
+      content: 'Duplicate transient Hook.',
+      lifetime: 'ephemeral' as const,
+    };
+    const messages = [
+      {
+        info: { id: 'msg_user', role: 'user' },
+        parts: [{ type: 'text', text: 'Prompt.' }],
+      },
+    ];
+    delivery.queueMatchedHooks({
+      sessionID: 'ses_duplicate_queue',
+      hooks: [hook],
+    });
+    delivery.deliverTransientDispatch({
+      sessionID: 'ses_duplicate_queue',
+      matchedRules: [],
+      messages,
+    });
+    expect(messages).toHaveLength(2);
+    expect(messages[1]?.info).toHaveProperty('model');
+
+    delivery.queueMatchedHooks({
+      sessionID: 'ses_duplicate_queue',
+      hooks: [hook],
+    });
+    delivery.deliverTransientDispatch({
+      sessionID: 'ses_duplicate_queue',
+      matchedRules: [],
+      messages,
+    });
+    expect(messages).toHaveLength(2);
+
+    const nextMessages = [
+      {
+        info: { id: 'msg_next', role: 'user' },
+        parts: [{ type: 'text', text: 'Next prompt.' }],
+      },
+    ];
+    delivery.deliverTransientDispatch({
+      sessionID: 'ses_duplicate_queue',
+      matchedRules: [],
+      messages: nextMessages,
+    });
+    expect(nextMessages).toHaveLength(1);
+  });
+
+  it('replaces a pending rescan from supplied messages without reading history', async () => {
+    const history = new MockRawHistoryAdapter({ ok: false });
+    const delivery: RuleDelivery = createRuleDelivery({ rawHistory: history });
+    await delivery.deliverDurableTurn({
+      sessionID: 'ses_rescan',
+      messageID: 'msg_failed',
+      matchedRules: [],
+      output: { parts: [] },
+    });
+    const messages = [
+      {
+        info: { id: 'msg_user', role: 'user' },
+        parts: [
+          { type: 'text', text: 'Prompt.' },
+          buildRulePart('rules/recovered.md', 'Recovered guidance.'),
+        ],
+      },
+    ];
+
+    delivery.deliverTransientDispatch({
+      sessionID: 'ses_rescan',
+      matchedRules: [
+        { relativePath: 'rules/recovered.md', content: 'Recovered guidance.' },
+        { relativePath: 'rules/current.md', content: 'Current guidance.' },
+      ],
+      messages,
+    });
+
+    expect(messages.slice(1).map(message => message.parts[0]?.text)).toEqual([
+      '# OpenCode transient rule: rules/current.md\n\nCurrent guidance.',
+    ]);
+    await expect(
+      delivery.deliverDurableTurn({
+        sessionID: 'ses_rescan',
+        messageID: 'msg_recovered',
+        matchedRules: [],
+        output: { parts: [] },
+      })
+    ).resolves.toBe('accepted');
+    expect(history.calls).toEqual(['ses_rescan']);
   });
 });
