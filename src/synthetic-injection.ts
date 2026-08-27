@@ -1,199 +1,21 @@
 /**
- * Builders and scanners for synthetic parts persisted in opencode session
- * history. Synthetic parts are hidden in the TUI but included in model
- * requests, so they carry rules without touching the system prompt.
+ * Compatibility facade for the delivery codec during the runtime migration.
+ * The runtime still imports this path until the host-hook migration is complete.
  */
-import { createHash } from 'node:crypto';
-import type { MessageWithInfo } from './message-context.js';
-
-export interface SyntheticPart {
-  id: string;
-  type: 'text';
-  text: string;
-  synthetic: true;
-  sessionID?: string;
-  messageID?: string;
-}
-
-export interface TransientHookMessage {
-  info: { id: string; role: string } & Record<string, unknown>;
-  parts: SyntheticPart[];
-}
-
-export interface InjectedPartsScan {
-  ruleKeys: Set<string>;
-  hookHashes: Set<string>;
-  ruleRelativePaths: Set<string>;
-}
-
-const RULE_PART_PREFIX = 'prt_rules_';
-const HOOK_PART_PREFIX = 'prt_hook_';
-const TRANSIENT_HOOK_PART_PREFIX = 'prt_hook_transient_';
-const TRANSIENT_RULE_PART_PREFIX = 'prt_rule_ephemeral_';
-const TRANSIENT_RULE_MESSAGE_PREFIX = 'msg_rule_ephemeral_';
-const TRANSIENT_HOOK_MESSAGE_PREFIX = 'msg_rules_hook_';
-const RULE_HEADER_PATTERN = /^## (.+)\n\n([\s\S]*)$/;
-
-function shortHash(input: string): string {
-  return createHash('sha256').update(input).digest('hex').slice(0, 16);
-}
-
-export function hashContent(content: string): string {
-  return shortHash(content);
-}
-
-export function ruleKeyFor(relativePath: string, content: string): string {
-  return `${relativePath}:${shortHash(content)}`;
-}
-
-/** True when a message id belongs to one of this plugin's transient messages. */
-export function isTransientMessageId(id: unknown): boolean {
-  return (
-    typeof id === 'string' &&
-    (id.startsWith(TRANSIENT_RULE_MESSAGE_PREFIX) ||
-      id.startsWith(TRANSIENT_HOOK_MESSAGE_PREFIX))
-  );
-}
-
-/**
- * Guarantee the transient message info carries a `model` object. Host hooks
- * (e.g. dcp's messages.transform handler) read `info.model.providerID` on
- * the last user message; a missing model crashes them. Inherit an existing
- * object, otherwise synthesize one from the flat providerID/modelID fields
- * assistant messages carry.
- */
-function withModelObject<T extends Record<string, unknown>>(info: T): T {
-  const model = info.model;
-  if (model !== null && typeof model === 'object') {
-    return info;
-  }
-  const providerID =
-    typeof info.providerID === 'string' ? info.providerID : undefined;
-  const modelID = typeof info.modelID === 'string' ? info.modelID : undefined;
-  return { ...info, model: { providerID, modelID } };
-}
-
-export function buildRulePart(
-  relativePath: string,
-  content: string
-): SyntheticPart {
-  return {
-    id: `${RULE_PART_PREFIX}${shortHash(ruleKeyFor(relativePath, content))}`,
-    type: 'text',
-    text: `## ${relativePath}\n\n${content}`,
-    synthetic: true,
-  };
-}
-
-export function buildHookInjectionPart(content: string): SyntheticPart {
-  return {
-    id: `${HOOK_PART_PREFIX}${shortHash(content)}`,
-    type: 'text',
-    text: content,
-    synthetic: true,
-  };
-}
-
-export function buildTransientHookMessage(
-  content: string,
-  baseInfo: Record<string, unknown>
-): TransientHookMessage {
-  return {
-    info: withModelObject({
-      ...baseInfo,
-      id: `${TRANSIENT_HOOK_MESSAGE_PREFIX}${shortHash(content)}`,
-      role: 'user',
-    }),
-    parts: [
-      {
-        id: `${TRANSIENT_HOOK_PART_PREFIX}${shortHash(content)}`,
-        type: 'text',
-        text: content,
-        synthetic: true,
-      },
-    ],
-  };
-}
-
-/**
- * Build a request-scoped synthetic user message carrying an ephemeral rule.
- * The id prefixes and single-`#` text header keep transient content from
- * being mistaken for durable rule parts by history scanning, even when a
- * part id is lost.
- */
-export function buildTransientRuleMessage(
-  relativePath: string,
-  content: string,
-  baseInfo: Record<string, unknown>
-): TransientHookMessage {
-  const keyHash = shortHash(ruleKeyFor(relativePath, content));
-  return {
-    info: withModelObject({
-      ...baseInfo,
-      id: `${TRANSIENT_RULE_MESSAGE_PREFIX}${keyHash}`,
-      role: 'user',
-    }),
-    parts: [
-      {
-        id: `${TRANSIENT_RULE_PART_PREFIX}${keyHash}`,
-        type: 'text',
-        text: `# OpenCode transient rule: ${relativePath}\n\n${content}`,
-        synthetic: true,
-      },
-    ],
-  };
-}
-
-export function scanInjectedParts(
-  messages: MessageWithInfo[]
-): InjectedPartsScan {
-  const scan: InjectedPartsScan = {
-    ruleKeys: new Set(),
-    hookHashes: new Set(),
-    ruleRelativePaths: new Set(),
-  };
-
-  for (const message of messages) {
-    for (const part of message.parts ?? []) {
-      const id = typeof part.id === 'string' ? part.id : undefined;
-
-      if (id?.startsWith(RULE_PART_PREFIX)) {
-        recordRuleText(scan, part.text);
-        continue;
-      }
-
-      if (id?.startsWith(TRANSIENT_RULE_PART_PREFIX)) {
-        continue;
-      }
-
-      if (id?.startsWith(HOOK_PART_PREFIX)) {
-        if (!id.startsWith(TRANSIENT_HOOK_PART_PREFIX)) {
-          scan.hookHashes.add(id.slice(HOOK_PART_PREFIX.length));
-        }
-        continue;
-      }
-
-      // Marker fallback for rule parts whose id was not preserved: a
-      // synthetic text part without an id whose text carries the per-rule
-      // `## <path>` header.
-      if (
-        id === undefined &&
-        part.synthetic === true &&
-        part.type === 'text' &&
-        typeof part.text === 'string'
-      ) {
-        recordRuleText(scan, part.text);
-      }
-    }
-  }
-
-  return scan;
-}
-
-function recordRuleText(scan: InjectedPartsScan, text: unknown): void {
-  if (typeof text !== 'string') return;
-  const match = RULE_HEADER_PATTERN.exec(text);
-  if (!match) return;
-  scan.ruleKeys.add(ruleKeyFor(match[1], match[2]));
-  scan.ruleRelativePaths.add(match[1]);
-}
+export {
+  buildHookInjectionPart,
+  buildRulePart,
+  buildTransientHookMessage,
+  buildTransientRuleMessage,
+  decodeRawHistory,
+  hashContent,
+  isTransientMessageId,
+  ruleKeyFor,
+} from './rule-delivery-codec.js';
+export type {
+  DeliveryLedgerFacts as InjectedPartsScan,
+  DeliveryPart,
+  SyntheticPart,
+  TransientMessage as TransientHookMessage,
+} from './rule-delivery-codec.js';
+export { decodeRawHistory as scanInjectedParts } from './rule-delivery-codec.js';

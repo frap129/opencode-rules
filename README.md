@@ -457,6 +457,9 @@ opencode-rules/
 ├── src/
 │   ├── index.ts              # Main plugin entry point and exports
 │   ├── runtime.ts            # OpenCodeRulesRuntime class (hook orchestration)
+│   ├── rule-delivery.ts      # RuleDelivery seam and history decoding (migration foundation)
+│   ├── rule-delivery-codec.ts # Delivery identifiers, formats, and history decoding
+│   ├── rule-delivery-history.ts # Raw history port for delivery decoding
 │   ├── runtime-context.ts    # Context-building helpers (filter context, project detection)
 │   ├── runtime-chat.ts       # Chat message handling and text extraction
 │   ├── rule-discovery.ts     # Rule file scanning, discovery, and per-session snapshots
@@ -472,7 +475,7 @@ opencode-rules/
 │   ├── debug.ts              # Debug logging utilities
 │   ├── utils.ts              # Re-export facade for backwards compatibility
 │   ├── test-fixtures.ts      # Shared test fixtures and builders
-│   └── *.test.ts             # Unit/integration tests (16 test files in src)
+│   └── *.test.ts             # Unit/integration tests in src
 ├── tui/
 │   ├── index.tsx             # TUI entrypoint, exports { id, tui }
 │   ├── slots/
@@ -493,6 +496,9 @@ opencode-rules/
 The following highlights the primary runtime modules:
 
 - **runtime.ts** - Orchestrates hooks (`tool.execute.before`, `chat.message`, `experimental.chat.*`)
+- **rule-delivery.ts** - Defines the Rule delivery seam and history reconstruction for the pending runtime migration
+- **rule-delivery-codec.ts** - Encodes durable/transient delivery and decodes durable history facts
+- **rule-delivery-history.ts** - Defines the raw host-history port used by delivery decoding
 - **runtime-context.ts** - Builds `RuleFilterContext` from session state and environment
 - **runtime-chat.ts** - Extracts text from chat message parts for keyword matching
 - **rule-discovery.ts** - Recursively scans directories for `.md`/`.mdc` rule files
