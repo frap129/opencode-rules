@@ -288,9 +288,21 @@ describe('RuleDelivery durable turns', () => {
     delivery.queueMatchedHooks({
       sessionID: 'ses_hooks',
       hooks: [
-        { content: 'Queued Hook.', lifetime: 'durable' },
-        { content: 'Already delivered Hook.', lifetime: 'durable' },
-        { content: 'Queued Hook.', lifetime: 'durable' },
+        {
+          relativePath: 'rules/queued.md',
+          content: 'Queued Hook.',
+          lifetime: 'durable',
+        },
+        {
+          relativePath: 'rules/delivered.md',
+          content: 'Already delivered Hook.',
+          lifetime: 'durable',
+        },
+        {
+          relativePath: 'rules/duplicate.md',
+          content: 'Queued Hook.',
+          lifetime: 'durable',
+        },
       ],
     });
     const deferredOutput = { parts: [{ type: 'text', text: 'Prompt.' }] };
@@ -509,5 +521,188 @@ describe('RuleDelivery durable turns', () => {
       })
     ).resolves.toBe('accepted');
     expect(retryOutput.parts).toHaveLength(1);
+  });
+});
+
+describe('RuleDelivery matched Hook queueing', () => {
+  it('promotes durable owners, deduplicates by content, and preserves delivery order', async () => {
+    const delivery: RuleDelivery = createRuleDelivery({
+      rawHistory: new MockRawHistoryAdapter({ ok: true, messages: [] }),
+    });
+    await delivery.deliverDurableTurn({
+      sessionID: 'ses_hook_queue',
+      messageID: 'msg_owner',
+      matchedRules: [
+        { relativePath: 'rules/owner.md', content: 'Durable owner Hook.' },
+      ],
+      output: { parts: [] },
+    });
+
+    expect(
+      delivery.queueMatchedHooks({
+        sessionID: 'ses_hook_queue',
+        hooks: [
+          {
+            relativePath: 'rules/owner.md',
+            content: 'Durable owner Hook.',
+            lifetime: 'ephemeral',
+          },
+          {
+            relativePath: 'rules/transient.md',
+            content: 'Transient Hook.',
+            lifetime: 'ephemeral',
+          },
+          {
+            relativePath: 'rules/durable-evidence.md',
+            content: 'Evidence durable Hook.',
+            lifetime: 'durable',
+          },
+          {
+            relativePath: 'rules/duplicate.md',
+            content: 'Transient Hook.',
+            lifetime: 'durable',
+          },
+        ],
+      })
+    ).toBeUndefined();
+
+    const messages = [
+      {
+        info: { id: 'msg_user', role: 'user' },
+        parts: [{ type: 'text', text: 'Prompt.' }],
+      },
+    ];
+    expect(
+      delivery.deliverTransientDispatch({
+        sessionID: 'ses_hook_queue',
+        messages,
+      })
+    ).toBeUndefined();
+    expect(messages.slice(1).map(message => message.parts[0]?.text)).toEqual([
+      'Durable owner Hook.',
+      'Evidence durable Hook.',
+      'Transient Hook.',
+    ]);
+
+    const durableOutput = { parts: [] };
+    await delivery.deliverDurableTurn({
+      sessionID: 'ses_hook_queue',
+      messageID: 'msg_durable_hook',
+      matchedRules: [],
+      output: durableOutput,
+    });
+    expect(durableOutput.parts).toEqual([
+      {
+        ...buildHookInjectionPart('Durable owner Hook.'),
+        sessionID: 'ses_hook_queue',
+        messageID: 'msg_durable_hook',
+      },
+      {
+        ...buildHookInjectionPart('Evidence durable Hook.'),
+        sessionID: 'ses_hook_queue',
+        messageID: 'msg_durable_hook',
+      },
+    ]);
+
+    delivery.queueMatchedHooks({
+      sessionID: 'ses_hook_queue',
+      hooks: [
+        {
+          relativePath: 'rules/owner.md',
+          content: 'Durable owner Hook.',
+          lifetime: 'ephemeral',
+        },
+      ],
+    });
+
+    const nextMessages = [
+      {
+        info: { id: 'msg_next', role: 'user' },
+        parts: [{ type: 'text', text: 'Next prompt.' }],
+      },
+    ];
+    delivery.deliverTransientDispatch({
+      sessionID: 'ses_hook_queue',
+      messages: nextMessages,
+    });
+    expect(nextMessages).toHaveLength(1);
+  });
+
+  it('retains transient Hook content until a usable dispatch', () => {
+    const delivery: RuleDelivery = createRuleDelivery({
+      rawHistory: new MockRawHistoryAdapter({ ok: true, messages: [] }),
+    });
+    delivery.queueMatchedHooks({
+      sessionID: 'ses_transient_retention',
+      hooks: [
+        {
+          relativePath: 'rules/transient.md',
+          content: 'Retained transient Hook.',
+          lifetime: 'ephemeral',
+        },
+      ],
+    });
+
+    delivery.deliverTransientDispatch({
+      sessionID: 'ses_transient_retention',
+      messages: [],
+    });
+    const messages = [
+      {
+        info: { id: 'msg_user', role: 'user' },
+        parts: [{ type: 'text', text: 'Prompt.' }],
+      },
+    ];
+    delivery.deliverTransientDispatch({
+      sessionID: 'ses_transient_retention',
+      messages,
+    });
+
+    expect(messages[1]?.parts[0]?.text).toBe('Retained transient Hook.');
+  });
+
+  it('promotes an owner recovered from supplied dispatch history', async () => {
+    const delivery: RuleDelivery = createRuleDelivery({
+      rawHistory: new MockRawHistoryAdapter({ ok: true, messages: [] }),
+    });
+    delivery.queueMatchedHooks({
+      sessionID: 'ses_recovered_owner',
+      hooks: [
+        {
+          relativePath: 'rules/recovered.md',
+          content: 'Recovered durable owner.',
+          lifetime: 'ephemeral',
+        },
+      ],
+    });
+    const messages = [
+      {
+        info: { id: 'msg_user', role: 'user' },
+        parts: [
+          { type: 'text', text: 'Prompt.' },
+          buildRulePart('rules/recovered.md', 'Recovered durable owner.'),
+        ],
+      },
+    ];
+
+    delivery.deliverTransientDispatch({
+      sessionID: 'ses_recovered_owner',
+      messages,
+    });
+    const output = { parts: [] };
+    await delivery.deliverDurableTurn({
+      sessionID: 'ses_recovered_owner',
+      messageID: 'msg_recovered_hook',
+      matchedRules: [],
+      output,
+    });
+
+    expect(output.parts).toEqual([
+      {
+        ...buildHookInjectionPart('Recovered durable owner.'),
+        sessionID: 'ses_recovered_owner',
+        messageID: 'msg_recovered_hook',
+      },
+    ]);
   });
 });

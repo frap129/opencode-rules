@@ -1,10 +1,12 @@
 import {
   buildHookInjectionPart,
   buildRulePart,
+  buildTransientHookMessage,
   decodeRawHistory,
   type DeliveryLedgerFacts,
   type DeliveryPart,
   hashContent,
+  isTransientMessageId,
   ruleKeyFor,
 } from './rule-delivery-codec.js';
 import {
@@ -16,6 +18,7 @@ import { createDebugLog, formatError, type DebugLog } from './debug.js';
 export interface RuleDelivery {
   decodeHistory(sessionID: string): Promise<DeliveryLedgerFacts | undefined>;
   deliverDurableTurn(input: DurableTurnInput): Promise<DurableTurnResult>;
+  deliverTransientDispatch(input: TransientDispatchInput): void;
   queueMatchedHooks(input: MatchedHooksInput): void;
 }
 
@@ -38,6 +41,7 @@ export interface DurableTurnInput {
 }
 
 export interface MatchedHookContent {
+  relativePath: string;
   content: string;
   lifetime: 'durable' | 'ephemeral';
 }
@@ -45,6 +49,16 @@ export interface MatchedHookContent {
 export interface MatchedHooksInput {
   sessionID: string;
   hooks: readonly MatchedHookContent[];
+}
+
+export interface TransientDispatchMessage {
+  info?: Record<string, unknown>;
+  parts?: unknown[];
+}
+
+export interface TransientDispatchInput {
+  sessionID: string;
+  messages: TransientDispatchMessage[];
 }
 
 type RuleDeliveryOptions = {
@@ -58,6 +72,7 @@ interface DeliveryState {
   hookHashes: Set<string>;
   seededFromHistory: boolean;
   needsRescan: boolean;
+  pendingHookQueue: MatchedHookContent[];
   durableHookQueue: string[];
   transientHookQueue: string[];
   lastUpdated: number;
@@ -125,6 +140,7 @@ class DefaultRuleDelivery implements RuleDelivery {
       state.hookHashes = new Set(facts.hookHashes);
       state.seededFromHistory = true;
     }
+    this.routePendingHooks(state);
 
     if (!input.messageID) return 'deferred';
 
@@ -166,12 +182,117 @@ class DefaultRuleDelivery implements RuleDelivery {
   queueMatchedHooks(input: MatchedHooksInput): void {
     const state = this.getState(input.sessionID);
     for (const hook of input.hooks) {
+      if (
+        state.pendingHookQueue.some(
+          pending => pending.content === hook.content
+        ) ||
+        state.durableHookQueue.includes(hook.content) ||
+        state.transientHookQueue.includes(hook.content)
+      ) {
+        continue;
+      }
+      state.pendingHookQueue.push(hook);
+    }
+    if (state.seededFromHistory && !state.needsRescan) {
+      this.routePendingHooks(state);
+    }
+  }
+
+  deliverTransientDispatch(input: TransientDispatchInput): void {
+    try {
+      const state = this.getState(input.sessionID);
+      const target = input.messages[input.messages.length - 1];
+      if (!target || !Array.isArray(target.parts)) return;
+
+      if (!state.seededFromHistory || state.needsRescan) {
+        const facts = decodeRawHistory(input.messages);
+        state.ruleKeys = new Set(facts.ruleKeys);
+        state.hookHashes = new Set(facts.hookHashes);
+        state.seededFromHistory = true;
+        state.needsRescan = false;
+      }
+      this.routePendingHooks(state);
+
+      const presentIDs = new Set<string>();
+      for (const message of input.messages) {
+        if (typeof message.info?.id === 'string') {
+          presentIDs.add(message.info.id);
+        }
+        if (!Array.isArray(message.parts)) continue;
+        for (const part of message.parts) {
+          if (
+            typeof part === 'object' &&
+            part !== null &&
+            'id' in part &&
+            typeof part.id === 'string'
+          ) {
+            presentIDs.add(part.id);
+          }
+        }
+      }
+
+      const baseInfo = this.transientBaseInfo(input.messages);
+      for (const content of [
+        ...state.durableHookQueue,
+        ...state.transientHookQueue,
+      ]) {
+        const hash = hashContent(content);
+        const transient = buildTransientHookMessage(content, baseInfo);
+        const part = transient.parts[0];
+        if (
+          !part ||
+          state.hookHashes.has(hash) ||
+          presentIDs.has(transient.info.id) ||
+          presentIDs.has(part.id) ||
+          presentIDs.has(`prt_hook_${hash}`)
+        ) {
+          continue;
+        }
+        const deliveryPart = {
+          ...part,
+          sessionID: input.sessionID,
+          messageID: transient.info.id,
+        };
+        input.messages.push({
+          info: transient.info,
+          parts: [deliveryPart],
+        });
+        presentIDs.add(transient.info.id);
+        presentIDs.add(part.id);
+      }
+      state.transientHookQueue = [];
+    } catch (error) {
+      this.debugLog(
+        `Transient delivery failed for ${input.sessionID}: ${formatError(error)}`
+      );
+    }
+  }
+
+  private routePendingHooks(state: DeliveryState): void {
+    for (const hook of state.pendingHookQueue) {
+      const ownerIsDurable = state.ruleKeys.has(
+        ruleKeyFor(hook.relativePath, hook.content)
+      );
       const queue =
-        hook.lifetime === 'durable'
+        ownerIsDurable || hook.lifetime === 'durable'
           ? state.durableHookQueue
           : state.transientHookQueue;
-      if (!queue.includes(hook.content)) queue.push(hook.content);
+      queue.push(hook.content);
     }
+    state.pendingHookQueue = [];
+  }
+
+  private transientBaseInfo(
+    messages: readonly TransientDispatchMessage[]
+  ): Record<string, unknown> {
+    for (let index = messages.length - 1; index >= 0; index--) {
+      const info = messages[index]?.info;
+      if (!info || info.role !== 'user' || isTransientMessageId(info.id)) {
+        continue;
+      }
+      return info;
+    }
+    return messages[messages.length - 1]?.info ?? {};
   }
 
   private getState(sessionID: string): DeliveryState {
@@ -182,6 +303,7 @@ class DefaultRuleDelivery implements RuleDelivery {
         hookHashes: new Set(),
         seededFromHistory: false,
         needsRescan: false,
+        pendingHookQueue: [],
         durableHookQueue: [],
         transientHookQueue: [],
         lastUpdated: 0,
