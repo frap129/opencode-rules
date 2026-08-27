@@ -55,6 +55,10 @@ interface MessagesTransformOutput {
   messages: MessageWithInfo[];
 }
 
+interface HistoryScanResult extends InjectedPartsScan {
+  contextPaths: string[];
+}
+
 interface OpenCodeClient {
   tool?: {
     ids?: (args: {
@@ -573,6 +577,11 @@ export class OpenCodeRulesRuntime {
         this.sessionStore.upsert(sessionID, state => {
           state.injectedRuleKeys = new Set(scanned.ruleKeys);
           state.injectedHookHashes = new Set(scanned.hookHashes);
+          for (const p of scanned.contextPaths) {
+            state.contextPaths.add(
+              normalizeContextPath(p, this.projectDirectory)
+            );
+          }
           state.seededFromHistory = true;
         });
       }
@@ -683,7 +692,7 @@ export class OpenCodeRulesRuntime {
    * Returns undefined when the fetch fails (history state unknown). */
   private async scanHistoryFromClient(
     sessionID: string
-  ): Promise<InjectedPartsScan | undefined> {
+  ): Promise<HistoryScanResult | undefined> {
     const session = this.client.session;
     if (!session?.messages) {
       // Client without the session API (older host or test mock):
@@ -695,6 +704,7 @@ export class OpenCodeRulesRuntime {
         ruleKeys: new Set<string>(),
         hookHashes: new Set<string>(),
         ruleRelativePaths: new Set<string>(),
+        contextPaths: [],
       };
     }
     try {
@@ -704,7 +714,18 @@ export class OpenCodeRulesRuntime {
         query: { directory: this.directory },
       });
       const messages = (result?.data ?? []) as MessageWithInfo[];
-      return scanInjectedParts(messages);
+      const scan = scanInjectedParts(messages);
+      let contextPaths: string[] = [];
+      try {
+        contextPaths = extractFilePathsFromMessages(
+          filterValidMessages(messages)
+        );
+      } catch (error) {
+        this.debugLog(
+          `History context path extraction failed for ${sessionID}: ${formatError(error)}`
+        );
+      }
+      return { ...scan, contextPaths };
     } catch (error) {
       logWarning('Failed to fetch session history', error);
       return undefined;

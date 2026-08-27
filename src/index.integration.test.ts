@@ -1022,6 +1022,62 @@ Use React best practices for components.`
     expect(syntheticText).toContain('React best practices');
   });
 
+  it('should restore glob context from current tool history after restart', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    writeFileSync(
+      path.join(globalRulesDir, 'typescript.mdc'),
+      `---
+globs:
+  - "src/components/**/*.tsx"
+---
+
+Use React best practices for components.`
+    );
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const sessionID = 'test-session-current-history';
+    const mockInput = createMockPluginInput({
+      testDir,
+      history: [
+        {
+          info: { role: 'assistant', sessionID },
+          parts: [
+            {
+              type: 'tool',
+              tool: 'read',
+              state: {
+                status: 'completed',
+                input: { filePath: 'src/components/Button.tsx' },
+              },
+            },
+          ],
+        },
+      ],
+    });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+
+    const chatMessage = hooks['chat.message'] as (
+      input: { sessionID: string; messageID?: string },
+      output: ChatMessageOutputLike
+    ) => Promise<void>;
+    const output: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'continue after restart' }],
+    };
+    await chatMessage({ sessionID, messageID: 'msg_current_history' }, output);
+
+    const syntheticText = output.parts
+      .filter(p => p.synthetic)
+      .map(p => p.text)
+      .join('\n');
+    expect(syntheticText).toContain('React best practices');
+  });
+
   it('should exclude conditional rule when message context does not match glob', async () => {
     const { testDir, globalRulesDir } = getTestDirs();
     writeFileSync(

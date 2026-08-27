@@ -7,6 +7,11 @@ export interface MessagePartWithSession {
   sessionID?: string;
   synthetic?: boolean;
   id?: string;
+  callID?: string;
+  tool?: string;
+  state?: {
+    input?: unknown;
+  };
 }
 
 export interface MessageWithInfo {

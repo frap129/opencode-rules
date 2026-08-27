@@ -84,6 +84,132 @@ describe('extractFilePathsFromMessages', () => {
     expect(paths).toContain('test/data.json');
   });
 
+  it('should extract paths from current OpenCode tool parts', () => {
+    const messages = [
+      {
+        role: 'assistant',
+        parts: [
+          {
+            type: 'tool' as const,
+            tool: 'read',
+            state: {
+              status: 'completed',
+              input: { filePath: 'src/utils.ts' },
+            },
+          },
+          {
+            type: 'tool' as const,
+            tool: 'edit',
+            state: {
+              status: 'running',
+              input: { filePath: 'src/components/Button.tsx' },
+            },
+          },
+          {
+            type: 'tool' as const,
+            tool: 'write',
+            state: {
+              status: 'pending',
+              input: { filePath: 'test/data.json' },
+            },
+          },
+          {
+            type: 'tool' as const,
+            tool: 'glob',
+            state: {
+              status: 'error',
+              input: {
+                pattern: 'src/components/**/*.ts',
+                path: 'src/lib',
+              },
+            },
+          },
+          {
+            type: 'tool' as const,
+            tool: 'grep',
+            state: {
+              status: 'completed',
+              input: { pattern: 'Button', path: 'src', include: '*.ts' },
+            },
+          },
+        ],
+      },
+    ];
+
+    const paths = extractFilePathsFromMessages(messages);
+    expect(paths).toEqual(
+      expect.arrayContaining([
+        'src/utils.ts',
+        'src/components/Button.tsx',
+        'test/data.json',
+        'src/components',
+        'src/lib',
+        'src',
+      ])
+    );
+    expect(paths).toHaveLength(6);
+    expect(paths).not.toContain('*.ts');
+  });
+
+  it('should ignore malformed current OpenCode tool parts', () => {
+    const messages = [
+      {
+        role: 'assistant',
+        parts: [
+          { type: 'tool' as const, tool: 'read' },
+          {
+            type: 'tool' as const,
+            tool: 'edit',
+            state: { status: 'error', input: { filePath: 42 } },
+          },
+          {
+            type: 'tool' as const,
+            tool: 'write',
+            state: { status: 'completed', input: null },
+          },
+        ],
+      },
+    ];
+
+    expect(() => extractFilePathsFromMessages(messages)).not.toThrow();
+    expect(extractFilePathsFromMessages(messages)).toEqual([]);
+  });
+
+  it('should combine and deduplicate legacy and current tool parts', () => {
+    const messages = [
+      {
+        role: 'assistant',
+        parts: [
+          {
+            type: 'tool-invocation' as const,
+            toolInvocation: {
+              toolName: 'read',
+              args: { filePath: 'src/utils.ts' },
+            },
+          },
+          {
+            type: 'tool' as const,
+            tool: 'read',
+            state: {
+              status: 'completed',
+              input: { filePath: 'src/new.ts' },
+            },
+          },
+          {
+            type: 'text' as const,
+            text: 'Also see src/utils.ts',
+          },
+        ],
+      },
+    ];
+
+    const paths = extractFilePathsFromMessages(messages);
+    expect(paths).toHaveLength(2);
+    expect(paths).toEqual(
+      expect.arrayContaining(['src/utils.ts', 'src/new.ts'])
+    );
+  });
+
   it('should extract directory from glob pattern arguments', () => {
     const messages = [
       {

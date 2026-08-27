@@ -325,6 +325,49 @@ describe('OpenCodeRulesPlugin', () => {
 
     expect(__testOnly.getSeedCount('ses_seed')).toBe(1);
   });
+
+  it('seeds context paths from current OpenCode tool parts', async () => {
+    const { testDir } = getTestDirs();
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+    const transform = hooks['experimental.chat.messages.transform'] as (
+      input: unknown,
+      output: { messages: unknown[] }
+    ) => Promise<{ messages: unknown[] }>;
+
+    await transform(
+      {},
+      {
+        messages: [
+          {
+            info: { role: 'assistant' },
+            parts: [
+              {
+                sessionID: 'ses_current_seed',
+                type: 'tool',
+                tool: 'read',
+                state: {
+                  status: 'completed',
+                  input: { filePath: 'src/current.ts' },
+                },
+              },
+            ],
+          },
+        ],
+      }
+    );
+
+    const snapshot = __testOnly.getSessionStateSnapshot('ses_current_seed');
+    expect(snapshot?.contextPaths).toContain('src/current.ts');
+    expect(snapshot?.seededFromHistory).toBe(true);
+  });
+
   it('queues PreToolUse hook injection when bash command matches', async () => {
     const { testDir, globalRulesDir } = getTestDirs();
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
@@ -1718,6 +1761,53 @@ describe('chat.message rule persistence', () => {
       second
     );
     expect(second.parts.filter(p => p.synthetic)).toHaveLength(0);
+  });
+
+  it('rehydrates current OpenCode tool paths during the first chat message', async () => {
+    const { testDir } = getTestDirs();
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({
+      testDir,
+      history: [
+        {
+          info: {
+            role: 'assistant',
+            sessionID: 'ses_current_restart',
+          },
+          parts: [
+            {
+              type: 'tool',
+              tool: 'edit',
+              state: {
+                status: 'completed',
+                input: { filePath: 'src/restarted.ts' },
+              },
+            },
+          ],
+        },
+      ],
+    });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+
+    const chatMessage = hooks['chat.message'] as ChatMessageHook;
+    await chatMessage(
+      {
+        sessionID: 'ses_current_restart',
+        messageID: 'msg_current_restart',
+      },
+      {
+        message: { role: 'user' },
+        parts: [{ type: 'text', text: 'continue' }],
+      }
+    );
+
+    const snapshot = __testOnly.getSessionStateSnapshot('ses_current_restart');
+    expect(snapshot?.seededFromHistory).toBe(true);
+    expect(snapshot?.contextPaths).toContain('src/restarted.ts');
   });
 
   it('keeps the original rule content after an in-process file edit', async () => {

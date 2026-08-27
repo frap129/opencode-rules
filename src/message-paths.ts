@@ -13,13 +13,22 @@ interface ToolInvocationPart {
   };
 }
 
+interface OpenCodeToolPart {
+  type: 'tool';
+  tool: string;
+  state?: {
+    input?: unknown;
+  };
+}
+
 interface TextPart {
   type: 'text';
   text: string;
   synthetic?: boolean;
 }
 
-export type MessagePart = ToolInvocationPart | TextPart | { type: string };
+export type MessagePart =
+  ToolInvocationPart | OpenCodeToolPart | TextPart | { type: string };
 
 export interface Message {
   role: string;
@@ -43,7 +52,17 @@ export function extractFilePathsFromMessages(messages: Message[]): string[] {
       // Extract from tool invocations
       if (part.type === 'tool-invocation') {
         const toolPart = part as ToolInvocationPart;
-        extractPathsFromToolCall(toolPart, paths);
+        extractPathsFromToolCall(
+          toolPart.toolInvocation.toolName,
+          toolPart.toolInvocation.args,
+          paths
+        );
+      }
+
+      // Extract from persisted OpenCode tool parts
+      if (part.type === 'tool') {
+        const toolPart = part as OpenCodeToolPart;
+        extractPathsFromToolCall(toolPart.tool, toolPart.state?.input, paths);
       }
 
       // Extract from text content
@@ -61,10 +80,11 @@ export function extractFilePathsFromMessages(messages: Message[]): string[] {
  * Extract file paths from tool call arguments
  */
 function extractPathsFromToolCall(
-  part: ToolInvocationPart,
+  toolName: string,
+  args: unknown,
   paths: Set<string>
 ): void {
-  const { toolName, args } = part.toolInvocation;
+  if (!args || typeof args !== 'object') return;
 
   // Tools that have a direct file path argument
   const pathArgTools: Record<string, string[]> = {
@@ -78,7 +98,7 @@ function extractPathsFromToolCall(
   const argNames = pathArgTools[toolName];
   if (argNames) {
     for (const argName of argNames) {
-      const value = args[argName];
+      const value = (args as Record<string, unknown>)[argName];
       if (typeof value === 'string' && value.length > 0) {
         // For glob patterns, extract the directory part
         if (argName === 'pattern') {
