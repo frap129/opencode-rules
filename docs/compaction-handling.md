@@ -39,8 +39,9 @@ When a session is compacted, the `experimental.session.compacting` hook injects 
 - During compaction, OpenCode calls the `experimental.session.compacting` hook
 - We extract the current working set (file paths the user was working with)
 - We add a minimal context string that the compaction LLM includes in the summary
-- We invalidate the RuleDelivery ledger (`markCompacted`) so durable rules are re-appended after compaction
-- This prevents conditional rules from becoming "invisible" when their matching paths are lost
+- We invalidate the RuleDelivery ledger so it is rebuilt from post-compaction request history
+- Durable rules removed by compaction are re-appended; rules still present are not duplicated
+- Preserved paths keep conditional-rule context available for subsequent matching
 
 **Why this works:**
 
@@ -86,7 +87,7 @@ the runtime-owned `RuleDelivery` instance, not in SessionState.
 - Maximum of 100 concurrent sessions in memory (LRU eviction)
 - Each entry is tagged with `lastUpdated` for age tracking
 - Sessions are automatically pruned when limit is exceeded
-- After compaction, persisted synthetic parts are gone from history; `markCompacted` invalidates the RuleDelivery ledger, the next `experimental.chat.messages.transform` rebuilds it from post-compaction history, the next user message re-appends durable rules from the session snapshot, and ephemeral rules are recomputed per request
+- Compaction invalidates durable delivery identities; the next transformed request rebuilds them from surviving parts, missing durable rules are re-appended on the next user message, and ephemeral rules are recomputed per request
 
 ## Data Flow
 
@@ -119,9 +120,9 @@ Compaction LLM generates summary including injected file paths
     ↓
 Session context preserved through compaction
     ↓
-Post-compaction transform rebuilds the delivery ledger from history
+Post-compaction transform rebuilds the delivery ledger from surviving parts
     ↓
-Next user message re-appends durable rules from the session snapshot;
+Missing durable rules are re-appended on the next user message;
 ephemeral rules are recomputed per request
 ```
 
@@ -218,12 +219,12 @@ When running with `OPENCODE_RULES_DEBUG=1`, you'll see:
 - Delivered via the standard `chat.message` hook - no experimental API required
 - Synthetic parts are hidden in the TUI but included in provider requests
 - System prompt stays byte-stable across requests, preserving provider prompt caching
-- Content-hash dedup keys prevent re-appending durable rules already in session history
-- Session-durable rules are re-appended after compaction from the per-session snapshot; ephemeral rules (agent, model, branch, tools) are recomputed per request and never persisted
+- Path-derived identity keys prevent re-appending durable rules already delivered in the session
+- Compaction rebuilds durable delivery identities from surviving parts and missing durable rules are re-appended; ephemeral rules (agent, model, branch, tools) are recomputed per request and never persisted
 
 ### ❌ Naive Per-message Injection
 
-**Why not**: Appending rule text to every message without deduplication would duplicate rules, wasting context tokens. Synthetic-part delivery avoids this with content-hash dedup keys.
+**Why not**: Appending rule text to every message without deduplication would duplicate rules, wasting context tokens. Synthetic-part delivery avoids this with path-derived identity keys.
 
 ### ❌ Config-based Approach
 

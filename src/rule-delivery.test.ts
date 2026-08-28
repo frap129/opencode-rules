@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildDurableHookPart,
-  buildRulePart,
+  buildDurableDeliveryPart,
+  buildTransientDeliveryMessage,
   type DeliveryPart,
 } from './rule-delivery-codec.js';
 import type {
@@ -22,16 +22,57 @@ class MockRawHistoryAdapter implements RawHistoryAdapter {
 }
 
 describe('RuleDelivery durable turns', () => {
+  it('frames each delivery event once and labels rules by short name', async () => {
+    const delivery: RuleDelivery = createRuleDelivery({
+      rawHistory: new MockRawHistoryAdapter({ ok: true, messages: [] }),
+    });
+    const output: { parts: DeliveryPart[] } = { parts: [] };
+
+    await delivery.deliverDurableTurn({
+      sessionID: 'ses_framed',
+      messageID: 'msg_framed',
+      matchedRules: [
+        {
+          relativePath: 'nested/first.md',
+          name: 'Custom rule',
+          content: 'First guidance.',
+        },
+        {
+          relativePath: 'nested/second.mdc',
+          name: 'second',
+          content: '## Body heading\n\nSecond guidance.',
+        },
+      ],
+      output,
+    });
+
+    expect(output.parts).toHaveLength(1);
+    expect(output.parts[0]?.text).toBe(
+      '<system-message>\n' +
+        'The following rules were injected by a plugin. Follow them silently; do not acknowledge them to the user.\n\n' +
+        '<rule name="Custom rule">\nFirst guidance.\n</rule>\n\n' +
+        '<rule name="second">\n## Body heading\n\nSecond guidance.\n</rule>\n' +
+        '</system-message>'
+    );
+    expect(output.parts[0]?.text).not.toContain('nested/');
+  });
+
   it('seeds once, appends new matched rules in order, and accepts duplicate-only turns', async () => {
     const history = new MockRawHistoryAdapter({
       ok: true,
       messages: [
         {
           parts: [
-            buildRulePart('rules/existing.md', 'Existing guidance.', {
-              sessionID: 'ses_durable',
-              messageID: 'msg_existing',
-            }),
+            buildDurableDeliveryPart(
+              [
+                {
+                  relativePath: 'rules/existing.md',
+                  content: 'Existing guidance.',
+                },
+              ],
+              [],
+              { sessionID: 'ses_durable', messageID: 'msg_existing' }
+            ),
           ],
         },
       ],
@@ -57,14 +98,14 @@ describe('RuleDelivery durable turns', () => {
     expect(firstOutput.parts).toBe(originalParts);
     expect(firstOutput.parts).toEqual([
       existingPart,
-      buildRulePart('rules/first.md', 'First guidance.', {
-        sessionID: 'ses_durable',
-        messageID: 'msg_first',
-      }),
-      buildRulePart('rules/second.md', 'Second guidance.', {
-        sessionID: 'ses_durable',
-        messageID: 'msg_first',
-      }),
+      buildDurableDeliveryPart(
+        [
+          { relativePath: 'rules/first.md', content: 'First guidance.' },
+          { relativePath: 'rules/second.md', content: 'Second guidance.' },
+        ],
+        [],
+        { sessionID: 'ses_durable', messageID: 'msg_first' }
+      ),
     ]);
 
     const duplicateOutput = { parts: [] };
@@ -86,7 +127,7 @@ describe('RuleDelivery durable turns', () => {
     const delivery: RuleDelivery = createRuleDelivery({
       rawHistory: new MockRawHistoryAdapter({ ok: true, messages: [] }),
     });
-    const output = { parts: [] };
+    const output: { parts: DeliveryPart[] } = { parts: [] };
     await delivery.deliverDurableTurn({
       sessionID: 'ses_identity',
       messageID: 'msg_identity',
@@ -113,23 +154,96 @@ describe('RuleDelivery durable turns', () => {
     });
 
     expect(output.parts).toEqual([
-      {
-        id: 'prt_rules_dad3bb218895408d_msg_identity',
-        type: 'text',
-        text: '## rules/core.md\n\nDurable guidance.',
-        synthetic: true,
-        sessionID: 'ses_identity',
-        messageID: 'msg_identity',
-      },
-      {
-        id: 'prt_hook_1d4c59cbd8e30804_msg_identity_2',
-        type: 'text',
-        text: 'Hook guidance.',
-        synthetic: true,
-        sessionID: 'ses_identity',
-        messageID: 'msg_identity_2',
-      },
+      buildDurableDeliveryPart(
+        [{ relativePath: 'rules/core.md', content: 'Durable guidance.' }],
+        [],
+        { sessionID: 'ses_identity', messageID: 'msg_identity' }
+      ),
+      buildDurableDeliveryPart(
+        [],
+        [{ relativePath: 'rules/hook.md', content: 'Hook guidance.' }],
+        { sessionID: 'ses_identity', messageID: 'msg_identity_2' }
+      ),
     ]);
+  });
+
+  it('deduplicates a resumed rule by path after its content changes', async () => {
+    const delivered = buildDurableDeliveryPart(
+      [{ relativePath: 'rules/edited.md', content: 'Old content.' }],
+      [],
+      { sessionID: 'ses_edited', messageID: 'msg_old' }
+    );
+    const persistedPart = {
+      id: delivered.id,
+      sessionID: delivered.sessionID,
+      messageID: delivered.messageID,
+      type: delivered.type,
+      text: delivered.text,
+      synthetic: delivered.synthetic,
+      metadata: delivered.metadata,
+    };
+    const history = new MockRawHistoryAdapter({
+      ok: true,
+      messages: [
+        {
+          parts: [persistedPart],
+        },
+      ],
+    });
+    const delivery = createRuleDelivery({ rawHistory: history });
+    const output: { parts: DeliveryPart[] } = { parts: [] };
+
+    await delivery.deliverDurableTurn({
+      sessionID: 'ses_edited',
+      messageID: 'msg_new',
+      matchedRules: [
+        { relativePath: 'rules/edited.md', content: 'New content.' },
+      ],
+      output,
+    });
+
+    expect(output.parts).toEqual([]);
+  });
+
+  it('keeps rules with the same relative path but different identities distinct', async () => {
+    const history = new MockRawHistoryAdapter({
+      ok: true,
+      messages: [
+        {
+          parts: [
+            buildDurableDeliveryPart(
+              [
+                {
+                  identity: '/global/rules/shared.md',
+                  relativePath: 'shared.md',
+                  content: 'Global guidance.',
+                },
+              ],
+              [],
+              { sessionID: 'ses_distinct', messageID: 'msg_global' }
+            ),
+          ],
+        },
+      ],
+    });
+    const delivery = createRuleDelivery({ rawHistory: history });
+    const output: { parts: DeliveryPart[] } = { parts: [] };
+
+    await delivery.deliverDurableTurn({
+      sessionID: 'ses_distinct',
+      messageID: 'msg_project',
+      matchedRules: [
+        {
+          identity: '/project/.opencode/rules/shared.md',
+          relativePath: 'shared.md',
+          content: 'Project guidance.',
+        },
+      ],
+      output,
+    });
+
+    expect(output.parts).toHaveLength(1);
+    expect(output.parts[0]?.text).toContain('Project guidance.');
   });
 
   it('scopes durable part identities to their owning message', async () => {
@@ -216,10 +330,11 @@ describe('RuleDelivery durable turns', () => {
     ).resolves.toBe('accepted');
 
     expect(output.parts).toEqual([
-      buildRulePart('rules/fresh.md', 'Fresh guidance.', {
-        sessionID: 'ses_legacy',
-        messageID: 'msg_legacy',
-      }),
+      buildDurableDeliveryPart(
+        [{ relativePath: 'rules/fresh.md', content: 'Fresh guidance.' }],
+        [],
+        { sessionID: 'ses_legacy', messageID: 'msg_legacy' }
+      ),
     ]);
   });
 
@@ -249,10 +364,19 @@ describe('RuleDelivery durable turns', () => {
       messages: [
         {
           parts: [
-            buildDurableHookPart('Already delivered Hook.', {
-              sessionID: 'ses_hooks',
-              messageID: 'msg_existing_hook',
-            }),
+            buildDurableDeliveryPart(
+              [],
+              [
+                {
+                  relativePath: 'rules/delivered.md',
+                  content: 'Already delivered Hook.',
+                },
+              ],
+              {
+                sessionID: 'ses_hooks',
+                messageID: 'msg_existing_hook',
+              }
+            ),
           ],
         },
       ],
@@ -303,14 +427,14 @@ describe('RuleDelivery durable turns', () => {
 
     expect(accepted).toBe('accepted');
     expect(acceptedOutput.parts).toEqual([
-      buildRulePart('rules/core.md', 'Durable guidance.', {
-        sessionID: 'ses_hooks',
-        messageID: 'msg_hooks',
-      }),
-      buildDurableHookPart('Queued Hook.', {
-        sessionID: 'ses_hooks',
-        messageID: 'msg_hooks',
-      }),
+      buildDurableDeliveryPart(
+        [{ relativePath: 'rules/core.md', content: 'Durable guidance.' }],
+        [
+          { relativePath: 'rules/queued.md', content: 'Queued Hook.' },
+          { relativePath: 'rules/duplicate.md', content: 'Queued Hook.' },
+        ],
+        { sessionID: 'ses_hooks', messageID: 'msg_hooks' }
+      ),
     ]);
     expect(history.calls).toEqual(['ses_hooks']);
   });
@@ -496,7 +620,7 @@ describe('RuleDelivery durable turns', () => {
 });
 
 describe('RuleDelivery matched Hook queueing', () => {
-  it('promotes durable owners, deduplicates by content, and preserves delivery order', async () => {
+  it('promotes durable owners, deduplicates by identity, and preserves delivery order', async () => {
     const delivery: RuleDelivery = createRuleDelivery({
       rawHistory: new MockRawHistoryAdapter({ ok: true, messages: [] }),
     });
@@ -550,10 +674,26 @@ describe('RuleDelivery matched Hook queueing', () => {
         messages,
       })
     ).toBeUndefined();
+    const deliveredHooks = [
+      {
+        relativePath: 'rules/owner.md',
+        content: 'Durable owner Hook.',
+      },
+      {
+        relativePath: 'rules/durable-evidence.md',
+        content: 'Evidence durable Hook.',
+      },
+      {
+        relativePath: 'rules/duplicate.md',
+        content: 'Transient Hook.',
+      },
+      {
+        relativePath: 'rules/transient.md',
+        content: 'Transient Hook.',
+      },
+    ];
     expect(messages.slice(1).map(message => message.parts[0]?.text)).toEqual([
-      'Durable owner Hook.',
-      'Evidence durable Hook.',
-      'Transient Hook.',
+      buildTransientDeliveryMessage([], deliveredHooks, {}).parts[0]!.text,
     ]);
 
     const durableOutput = { parts: [] };
@@ -564,11 +704,7 @@ describe('RuleDelivery matched Hook queueing', () => {
       output: durableOutput,
     });
     expect(durableOutput.parts).toEqual([
-      buildDurableHookPart('Durable owner Hook.', {
-        sessionID: 'ses_hook_queue',
-        messageID: 'msg_durable_hook',
-      }),
-      buildDurableHookPart('Evidence durable Hook.', {
+      buildDurableDeliveryPart([], deliveredHooks.slice(0, 3), {
         sessionID: 'ses_hook_queue',
         messageID: 'msg_durable_hook',
       }),
@@ -596,10 +732,10 @@ describe('RuleDelivery matched Hook queueing', () => {
       matchedRules: [],
       messages: nextMessages,
     });
-    // Preserved pre-migration behavior: ledger membership alone does not
-    // suppress a transient copy; only request-local presence does.
     expect(nextMessages).toHaveLength(2);
-    expect(nextMessages[1]?.parts[0]?.text).toBe('Durable owner Hook.');
+    expect(nextMessages[1]?.parts[0]?.text).toBe(
+      buildTransientDeliveryMessage([], [deliveredHooks[0]!], {}).parts[0]!.text
+    );
 
     const durableRetry = { parts: [] };
     await delivery.deliverDurableTurn({
@@ -643,7 +779,18 @@ describe('RuleDelivery matched Hook queueing', () => {
       messages,
     });
 
-    expect(messages[1]?.parts[0]?.text).toBe('Retained transient Hook.');
+    expect(messages[1]?.parts[0]?.text).toBe(
+      buildTransientDeliveryMessage(
+        [],
+        [
+          {
+            relativePath: 'rules/transient.md',
+            content: 'Retained transient Hook.',
+          },
+        ],
+        {}
+      ).parts[0]!.text
+    );
   });
 
   it('promotes an owner recovered from supplied dispatch history', async () => {
@@ -665,10 +812,16 @@ describe('RuleDelivery matched Hook queueing', () => {
         info: { id: 'msg_user', role: 'user' },
         parts: [
           { type: 'text', text: 'Prompt.' },
-          buildRulePart('rules/recovered.md', 'Recovered durable owner.', {
-            sessionID: 'ses_recovered_owner',
-            messageID: 'msg_user',
-          }),
+          buildDurableDeliveryPart(
+            [
+              {
+                relativePath: 'rules/recovered.md',
+                content: 'Recovered durable owner.',
+              },
+            ],
+            [],
+            { sessionID: 'ses_recovered_owner', messageID: 'msg_user' }
+          ),
         ],
       },
     ];
@@ -687,10 +840,19 @@ describe('RuleDelivery matched Hook queueing', () => {
     });
 
     expect(output.parts).toEqual([
-      buildDurableHookPart('Recovered durable owner.', {
-        sessionID: 'ses_recovered_owner',
-        messageID: 'msg_recovered_hook',
-      }),
+      buildDurableDeliveryPart(
+        [],
+        [
+          {
+            relativePath: 'rules/recovered.md',
+            content: 'Recovered durable owner.',
+          },
+        ],
+        {
+          sessionID: 'ses_recovered_owner',
+          messageID: 'msg_recovered_hook',
+        }
+      ),
     ]);
   });
 });
@@ -757,9 +919,25 @@ describe('RuleDelivery transient dispatches', () => {
     });
 
     expect(messages.slice(2).map(message => message.parts[0]?.text)).toEqual([
-      '# OpenCode transient rule: rules/transient.md\n\nTransient guidance.',
-      'Durable Hook guidance.',
-      'Transient Hook guidance.',
+      buildTransientDeliveryMessage(
+        [
+          {
+            relativePath: 'rules/transient.md',
+            content: 'Transient guidance.',
+          },
+        ],
+        [
+          {
+            relativePath: 'rules/durable-hook.md',
+            content: 'Durable Hook guidance.',
+          },
+          {
+            relativePath: 'rules/transient-hook.md',
+            content: 'Transient Hook guidance.',
+          },
+        ],
+        {}
+      ).parts[0]!.text,
     ]);
     for (const message of messages.slice(2)) {
       expect(message.info).toMatchObject({
@@ -862,7 +1040,7 @@ describe('RuleDelivery transient dispatches', () => {
     expect(messages).toHaveLength(2);
     expect(messages[1]?.info).toMatchObject({
       role: 'user',
-      id: 'msg_rules_hook_5d7e86f1a847a77e',
+      id: expect.stringMatching(/^msg_rule_ephemeral_/),
       model: { providerID: 'opencode-go', modelID: 'deepseek-v4-flash' },
     });
   });
@@ -910,10 +1088,16 @@ describe('RuleDelivery transient dispatches', () => {
         info: { id: 'msg_user', role: 'user' },
         parts: [
           { type: 'text', text: 'Prompt.' },
-          buildRulePart('rules/recovered.md', 'Recovered guidance.', {
-            sessionID: 'ses_rescan',
-            messageID: 'msg_user',
-          }),
+          buildDurableDeliveryPart(
+            [
+              {
+                relativePath: 'rules/recovered.md',
+                content: 'Recovered guidance.',
+              },
+            ],
+            [],
+            { sessionID: 'ses_rescan', messageID: 'msg_user' }
+          ),
         ],
       },
     ];
@@ -928,7 +1112,11 @@ describe('RuleDelivery transient dispatches', () => {
     });
 
     expect(messages.slice(1).map(message => message.parts[0]?.text)).toEqual([
-      '# OpenCode transient rule: rules/current.md\n\nCurrent guidance.',
+      buildTransientDeliveryMessage(
+        [{ relativePath: 'rules/current.md', content: 'Current guidance.' }],
+        [],
+        {}
+      ).parts[0]!.text,
     ]);
     await expect(
       delivery.deliverDurableTurn({
@@ -939,127 +1127,5 @@ describe('RuleDelivery transient dispatches', () => {
       })
     ).resolves.toBe('accepted');
     expect(history.calls).toEqual(['ses_rescan']);
-  });
-});
-
-describe('RuleDelivery compaction invalidation', () => {
-  it('defers durable delivery until dispatch history replaces the ledger', async () => {
-    const history = new MockRawHistoryAdapter({ ok: true, messages: [] });
-    const delivery: RuleDelivery = createRuleDelivery({ rawHistory: history });
-    const removedRule = {
-      relativePath: 'rules/removed.md',
-      content: 'Removed by compaction.',
-    };
-    await delivery.deliverDurableTurn({
-      sessionID: 'ses_compacted',
-      messageID: 'msg_before_compaction',
-      matchedRules: [removedRule],
-      output: { parts: [] },
-    });
-    delivery.queueMatchedHooks({
-      sessionID: 'ses_compacted',
-      hooks: [
-        {
-          relativePath: 'rules/hook.md',
-          content: 'Retained durable Hook.',
-          lifetime: 'durable',
-        },
-      ],
-    });
-
-    expect(delivery.markCompacted('ses_compacted')).toBeUndefined();
-
-    const deferredOutput = { parts: [] };
-    await expect(
-      delivery.deliverDurableTurn({
-        sessionID: 'ses_compacted',
-        messageID: 'msg_before_rescan',
-        matchedRules: [removedRule],
-        output: deferredOutput,
-      })
-    ).resolves.toBe('deferred');
-    expect(deferredOutput.parts).toEqual([]);
-
-    const survivingRule = {
-      relativePath: 'rules/surviving.md',
-      content: 'Survived compaction.',
-    };
-    const messages = [
-      {
-        info: { id: 'msg_after_compaction', role: 'user' },
-        parts: [
-          { type: 'text', text: 'Prompt after compaction.' },
-          buildRulePart(survivingRule.relativePath, survivingRule.content, {
-            sessionID: 'ses_compacted',
-            messageID: 'msg_after_compaction',
-          }),
-        ],
-      },
-    ];
-    delivery.deliverTransientDispatch({
-      sessionID: 'ses_compacted',
-      matchedRules: [removedRule, survivingRule],
-      messages,
-    });
-    expect(messages.slice(1).map(message => message.parts[0]?.text)).toEqual([
-      '# OpenCode transient rule: rules/removed.md\n\nRemoved by compaction.',
-      'Retained durable Hook.',
-    ]);
-
-    const resumedOutput = { parts: [] };
-    await expect(
-      delivery.deliverDurableTurn({
-        sessionID: 'ses_compacted',
-        messageID: 'msg_after_rescan',
-        matchedRules: [removedRule, survivingRule],
-        output: resumedOutput,
-      })
-    ).resolves.toBe('accepted');
-    expect(resumedOutput.parts).toEqual([
-      buildRulePart(removedRule.relativePath, removedRule.content, {
-        sessionID: 'ses_compacted',
-        messageID: 'msg_after_rescan',
-      }),
-      buildDurableHookPart('Retained durable Hook.', {
-        sessionID: 'ses_compacted',
-        messageID: 'msg_after_rescan',
-      }),
-    ]);
-    expect(history.calls).toEqual(['ses_compacted']);
-  });
-
-  it('invalidates a durable history scan already in flight', async () => {
-    let releaseHistory: (() => void) | undefined;
-    const historyBlocked = new Promise<void>(resolve => {
-      releaseHistory = resolve;
-    });
-    let markHistoryStarted: (() => void) | undefined;
-    const historyStarted = new Promise<void>(resolve => {
-      markHistoryStarted = resolve;
-    });
-    const history: RawHistoryAdapter = {
-      readHistory: async () => {
-        markHistoryStarted?.();
-        await historyBlocked;
-        return { ok: true, messages: [] };
-      },
-    };
-    const delivery: RuleDelivery = createRuleDelivery({ rawHistory: history });
-    const output = { parts: [] };
-    const durableTurn = delivery.deliverDurableTurn({
-      sessionID: 'ses_compacted_in_flight',
-      messageID: 'msg_in_flight',
-      matchedRules: [
-        { relativePath: 'rules/core.md', content: 'Durable guidance.' },
-      ],
-      output,
-    });
-    await historyStarted;
-
-    delivery.markCompacted('ses_compacted_in_flight');
-    releaseHistory?.();
-
-    await expect(durableTurn).resolves.toBe('deferred');
-    expect(output.parts).toEqual([]);
   });
 });

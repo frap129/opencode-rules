@@ -1,6 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import { parseRuleMetadata } from './rule-metadata.js';
 
+describe('rule identity metadata', () => {
+  it('parses a trimmed rule name', () => {
+    expect(
+      parseRuleMetadata('---\nname: "  TypeScript safety  "\n---\nRule body')
+    ).toEqual({ name: 'TypeScript safety' });
+  });
+});
+
 describe('hook metadata parsing', () => {
   it('parses PreToolUse and PostToolUse hooks', () => {
     const content = `---

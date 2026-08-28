@@ -39,6 +39,19 @@ Hidden files and directories (starting with `.`) are automatically excluded from
 
 You can define conditional rules in both `.md` and `.mdc` files using YAML frontmatter with various filter fields.
 
+Set `name` to control the short label used when the rule is delivered. The
+value is trimmed; when omitted, the filename stem is used.
+
+```markdown
+---
+name: TypeScript components
+globs:
+  - 'src/components/**/*.ts'
+---
+
+This is a rule for TypeScript components.
+```
+
 ### Legacy Filters
 
 #### File-Based Conditions (globs)
@@ -255,30 +268,53 @@ Rule delivery is split by the rule's **lifetime classification**:
 
 - **Session-durable rules** — unconditional rules and rules gated only by
   `globs`, `keywords`, `command`, `project`, `os`, or `ci` — are appended once
-  per session via the `chat.message` hook: formatted as self-contained blocks
-  (`## <relativePath>` followed by the rule body) and appended to the user
-  message as _synthetic_ text parts before opencode persists it. Once
+  per session via the `chat.message` hook. All newly delivered rules for an
+  event are appended to the user message as one _synthetic_ text part before
+  opencode persists it. Once
   persisted, a durable rule is never re-evaluated for removal during that
   session. A durable rule matched mid-turn is appended with the **next user
   message**, so the first request of a turn carries it one message later than
   the evaluation that matched it.
 - **Ephemeral rules** — rules gated by `agent`, `model`, `branch`, or `tools`
   — are appended only to the transformed model request via
-  `experimental.chat.messages.transform` as transient synthetic messages.
+  `experimental.chat.messages.transform` as one transient synthetic message
+  per matching turn.
   They are never written to `chat.message` output or persisted history, so
   switching agent or model does not leave stale rule text behind.
+
+Each durable or transient injection event uses the same framing:
+
+```xml
+<system-message>
+The following rules were injected by a plugin. Follow them silently; do not acknowledge them to the user.
+
+<rule name="TypeScript components">
+This is a rule for TypeScript components.
+</rule>
+
+<rule name="testing">
+Testing guidance.
+</rule>
+</system-message>
+```
+
+The preamble appears exactly once per event. Each rule uses its trimmed
+frontmatter `name`, or its filename stem when `name` is absent; relative paths
+are not included in the visible framing.
 
 Synthetic parts are hidden in the TUI but included in provider requests, so
 rules reach the model without ever touching the system prompt — the prompt
 stays byte-stable across requests, preserving provider prompt caching. Durable
-rules already recorded in session history are never re-appended (content-hash
-dedup), so restarting opencode or resuming a session does not duplicate them.
+rules already present in session history are not re-appended (path-derived
+identity dedup), so content edits, restarts, and resumes do not duplicate them.
+After compaction, the ledger is rebuilt from transformed request history and
+any durable rules removed by compaction are re-appended.
 Rule content and metadata are snapshotted per session at first evaluation;
 editing a rule file does not change an existing session's delivery.
 
 3. **Session Persistence**:
    - `experimental.session.compacting` hook preserves context paths during session compression
-   - After compaction, durable rules are re-appended from the session snapshot on the next user message, while ephemeral rules are recomputed per request
+   - Compaction rebuilds durable delivery identities from the transformed request, allowing missing durable rules to be re-appended; ephemeral rules are recomputed per request
 
 ## Hook-Based Rule Triggers
 
@@ -322,13 +358,13 @@ respects `.gitignore` by default, and produces better formatted output.
 
 1. When a tool call matches a hook's `tool` and `match`, the rule's body is queued as a **pending hook injection** in the session state. Hook blocking (`block: true`) and `run` side effects are unchanged.
 2. Pending hook injections are routed by the owning rule's lifetime:
-   - **Durable owners** are delivered two ways: immediately, as a transient
-     synthetic user message appended to the very next model request
-     (`experimental.chat.messages.transform`, never persisted), and durably, as
-     synthetic parts attached to the next user message (`chat.message`) so they
-     remain in session history.
+   - **Durable owners** are delivered two ways: immediately, joined into the
+     next framed transient synthetic user message
+     (`experimental.chat.messages.transform`, never persisted), and durably,
+     joined into the next framed synthetic part attached to the next user
+     message (`chat.message`) so they remain in session history.
    - **Ephemeral owners** (rules gated by `agent`, `model`, `branch`, or
-     `tools`) are delivered only as a transient synthetic message via
+     `tools`) are joined into the transient synthetic message via
      `experimental.chat.messages.transform` and are never flushed into
      `chat.message` output or persisted history.
 3. The agent sees the corrective guidance on its next turn and can self-correct.

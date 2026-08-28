@@ -284,8 +284,10 @@ export interface RuleFilterContext {
 export interface MatchedRuleEntry {
   /** Absolute path to the rule file */
   filePath: string;
-  /** Relative path from the rules directory root (for unique headings) */
+  /** Relative path from the rules directory root */
   relativePath: string;
+  /** Short display name from frontmatter or the file name without extension */
+  name: string;
   /** Rule content with frontmatter stripped */
   strippedContent: string;
   /** Per-condition evaluation results with delivery-lifetime provenance */
@@ -321,6 +323,7 @@ export function matchRuleSnapshots(
   for (const {
     filePath,
     relativePath,
+    name,
     metadata,
     strippedContent,
   } of snapshots) {
@@ -357,6 +360,7 @@ export function matchRuleSnapshots(
       matched.push({
         filePath,
         relativePath,
+        name,
         strippedContent,
         conditionResults: declaredChecks,
         lifetime: classifyRuleLifetime(mode, declaredChecks),
@@ -365,6 +369,7 @@ export function matchRuleSnapshots(
       matched.push({
         filePath,
         relativePath,
+        name,
         strippedContent,
         conditionResults: [],
         lifetime: 'durable',

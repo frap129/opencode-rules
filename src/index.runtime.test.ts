@@ -33,7 +33,7 @@ import {
   writeActiveRulesState,
 } from './active-rules-state.js';
 import { clearRuleCache } from './utils.js';
-import { buildRulePart } from './rule-delivery-codec.js';
+import { buildDurableDeliveryPart } from './rule-delivery-codec.js';
 
 describe('module boundary tests', () => {
   it('should re-export discoverRuleFiles from rule-discovery module', () => {
@@ -851,10 +851,19 @@ describe('history scan and rescan', () => {
             },
             parts: [
               { type: 'text', text: 'resume' },
-              buildRulePart('persisted.md', 'Persisted rule body.', {
-                sessionID: 'ses_state_reconcile',
-                messageID: 'msg_history',
-              }),
+              buildDurableDeliveryPart(
+                [
+                  {
+                    relativePath: 'persisted.md',
+                    content: 'Persisted rule body.',
+                  },
+                ],
+                [],
+                {
+                  sessionID: 'ses_state_reconcile',
+                  messageID: 'msg_history',
+                }
+              ),
             ],
           },
         ],
@@ -1362,11 +1371,15 @@ describe('chat.message rule persistence', () => {
     return plugin(mockInput as unknown as Parameters<typeof plugin>[0]);
   }
 
-  it('appends one synthetic rule part per matched rule to the user message', async () => {
+  it('appends all matched rules as one named delivery event', async () => {
     const { testDir, globalRulesDir } = getTestDirs();
     writeFileSync(
       path.join(globalRulesDir, 'always.md'),
       '# Always Apply\nThis rule always applies.'
+    );
+    writeFileSync(
+      path.join(globalRulesDir, 'z-custom.mdc'),
+      '---\nname: Custom label\n---\n\nCustom guidance.'
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
@@ -1386,7 +1399,21 @@ describe('chat.message rule persistence', () => {
     expect(synthetic).toHaveLength(1);
     expect(synthetic[0]?.id?.startsWith('prt_rules_')).toBe(true);
     expect(synthetic[0]?.text).toBe(
-      '## always.md\n\n# Always Apply\nThis rule always applies.'
+      buildDurableDeliveryPart(
+        [
+          {
+            relativePath: 'always.md',
+            content: '# Always Apply\nThis rule always applies.',
+          },
+          {
+            relativePath: 'z-custom.mdc',
+            name: 'Custom label',
+            content: 'Custom guidance.',
+          },
+        ],
+        [],
+        { sessionID: 'ses_append', messageID: 'msg_append_1' }
+      ).text
     );
     expect(output.parts[0]).toEqual({ type: 'text', text: 'hello' });
   });
@@ -1770,8 +1797,12 @@ describe('chat.message rule persistence', () => {
     const syntheticIds = output.parts
       .filter(p => p.synthetic)
       .map(p => p.id ?? '');
-    expect(syntheticIds.some(id => id.startsWith('prt_rules_'))).toBe(false);
-    expect(syntheticIds.some(id => id.startsWith('prt_hook_'))).toBe(true);
+    expect(syntheticIds.filter(id => id.startsWith('prt_rules_'))).toHaveLength(
+      1
+    );
+    expect(
+      output.parts.find(part => part.id?.startsWith('prt_rules_'))?.text
+    ).toContain('Hook rule body.');
   });
 
   it('still delivers queued transient Hook content when rule evaluation fails', async () => {
@@ -1834,8 +1865,8 @@ describe('chat.message rule persistence', () => {
     const part = (
       messages[1]!.parts as Array<{ id?: string; text?: string }>
     )[0];
-    expect(part?.id).toMatch(/^prt_hook_transient_/);
-    expect(part?.text).toBe('Hook rule body.');
+    expect(part?.id).toMatch(/^prt_rule_ephemeral_/);
+    expect(part?.text).toContain('Hook rule body.');
   });
 
   it('writes active-rules-state with matched rule paths', async () => {
@@ -1868,7 +1899,6 @@ describe('chat.message rule persistence', () => {
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { buildRulePart } = await import('./rule-delivery-codec.js');
     const {
       default: { server: plugin },
     } = await import('./index.js');
@@ -1878,10 +1908,16 @@ describe('chat.message rule persistence', () => {
         {
           info: { id: 'msg_1', role: 'user', sessionID: 'ses_restart' },
           parts: [
-            buildRulePart('persisted.md', 'Persisted rule body.', {
-              sessionID: 'ses_restart',
-              messageID: 'msg_1',
-            }),
+            buildDurableDeliveryPart(
+              [
+                {
+                  relativePath: 'persisted.md',
+                  content: 'Persisted rule body.',
+                },
+              ],
+              [],
+              { sessionID: 'ses_restart', messageID: 'msg_1' }
+            ),
           ],
         },
       ],
@@ -2030,7 +2066,7 @@ describe('chat.message rule persistence', () => {
     expect(
       dispatch
         .flatMap(message => message.parts as Array<{ text?: string }>)
-        .some(part => part.text === 'Plan hook guidance.')
+        .some(part => part.text?.includes('Plan hook guidance.'))
     ).toBe(true);
 
     const nextUserMessage = {
@@ -2093,8 +2129,8 @@ describe('chat.message rule persistence', () => {
       output.parts.some(
         part =>
           part.synthetic &&
-          part.id?.startsWith('prt_hook_') &&
-          part.text === 'Mixed hook guidance.'
+          part.id?.startsWith('prt_rules_') &&
+          part.text?.includes('Mixed hook guidance.')
       )
     ).toBe(true);
   });
@@ -2155,7 +2191,7 @@ describe('chat.message rule persistence', () => {
       second
     );
     const hookPart = second.parts.find(
-      p => p.synthetic && p.id?.startsWith('prt_hook_')
+      p => p.synthetic && p.text?.includes('Version one.')
     );
     expect(hookPart?.text).toContain('Version one.');
     expect(hookPart?.text).not.toContain('Version two.');

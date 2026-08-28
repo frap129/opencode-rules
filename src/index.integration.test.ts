@@ -16,7 +16,7 @@ import {
   toRules,
   createMockPluginInput,
 } from './test-fixtures.js';
-import { buildRulePart } from './rule-delivery-codec.js';
+import { buildDurableDeliveryPart } from './rule-delivery-codec.js';
 import { _setStateDirForTesting } from './active-rules-state.js';
 import { __testOnly } from './index.js';
 
@@ -1526,11 +1526,13 @@ describe('Synthetic-part delivery lifecycle', () => {
       turn1
     );
     const turn1Synthetic = turn1.parts.filter(p => p.synthetic);
-    expect(turn1Synthetic).toHaveLength(2);
-    expect(turn1Synthetic.map(p => p.text)).toContain(
-      '## always.md\n\n# Always Apply\nPersistent rule body.'
+    expect(turn1Synthetic).toHaveLength(1);
+    expect(turn1Synthetic[0]?.text).toContain(
+      '<rule name="always">\n# Always Apply\nPersistent rule body.\n</rule>'
     );
-    expect(turn1Synthetic.map(p => p.text)).not.toContain('Mind the linter.');
+    expect(turn1Synthetic[0]?.text).toContain(
+      '<rule name="lint-hook">\nMind the linter.\n</rule>'
+    );
 
     // Mid-turn: hook fires on a tool call
     await before(
@@ -1554,7 +1556,9 @@ describe('Synthetic-part delivery lifecycle', () => {
     const transient = dispatch[2] as {
       parts: Array<{ id?: string; synthetic?: boolean; text?: string }>;
     };
-    expect(transient.parts.some(p => p.text === 'Mind the linter.')).toBe(true);
+    expect(transient.parts[0]?.text).toContain(
+      '<rule name="lint-hook">\nMind the linter.\n</rule>'
+    );
 
     // Turn 2: user message — hook text lands durably, rule not duplicated
     const turn2: ChatMessageOutputLike = {
@@ -1566,12 +1570,14 @@ describe('Synthetic-part delivery lifecycle', () => {
       turn2
     );
     const syntheticIds = turn2.parts.filter(p => p.synthetic).map(p => p.id);
-    expect(syntheticIds.some(id => id?.startsWith('prt_rules_'))).toBe(false);
-    expect(syntheticIds.some(id => id?.startsWith('prt_hook_'))).toBe(true);
+    expect(syntheticIds).toHaveLength(1);
+    expect(syntheticIds[0]?.startsWith('prt_rules_')).toBe(true);
     const durableHook = turn2.parts.find(
-      p => p.synthetic && p.id?.startsWith('prt_hook_')
+      p => p.synthetic && p.id?.startsWith('prt_rules_')
     );
-    expect(durableHook?.text).toBe('Mind the linter.');
+    expect(durableHook?.text).toContain(
+      '<rule name="lint-hook">\nMind the linter.\n</rule>'
+    );
 
     // Post-durable dispatch: transient injection suppressed (durable part present)
     const dispatch2: Array<Record<string, unknown>> = [
@@ -1602,10 +1608,11 @@ describe('Synthetic-part delivery lifecycle', () => {
         info: { id: 'msg_u0', role: 'user', sessionID: 'ses_restart' },
         parts: [
           { type: 'text', text: 'original question' },
-          buildRulePart('persisted.md', 'Persisted rule body.', {
-            sessionID: 'ses_restart',
-            messageID: 'msg_u0',
-          }),
+          buildDurableDeliveryPart(
+            [{ relativePath: 'persisted.md', content: 'Persisted rule body.' }],
+            [],
+            { sessionID: 'ses_restart', messageID: 'msg_u0' }
+          ),
         ],
       },
     ];
@@ -1640,7 +1647,7 @@ describe('Synthetic-part delivery lifecycle', () => {
     expect(output.parts.filter(p => p.synthetic)).toHaveLength(0);
   });
 
-  it('compaction: rules re-appended on the next user message after compaction', async () => {
+  it('compaction: durable rules are re-appended when compacted history omits them', async () => {
     const { testDir, globalRulesDir } = getTestDirs();
     writeFileSync(
       path.join(globalRulesDir, 'always.md'),
@@ -1662,14 +1669,14 @@ describe('Synthetic-part delivery lifecycle', () => {
         parts: Array<{ id?: string; synthetic?: boolean; text?: string }>;
       }
     ) => Promise<void>;
-    const messagesTransform = hooks['experimental.chat.messages.transform'] as (
-      input: unknown,
-      output: { messages: unknown[] }
-    ) => Promise<{ messages: unknown[] }>;
     const compacting = hooks['experimental.session.compacting'] as (
       input: { sessionID: string },
       output: { context: string[] }
     ) => Promise<void>;
+    const messagesTransform = hooks['experimental.chat.messages.transform'] as (
+      input: unknown,
+      output: { messages: unknown[] }
+    ) => Promise<{ messages: unknown[] }>;
 
     // Turn 1: rule part injected
     const turn1: ChatMessageOutputLike = {
@@ -1682,22 +1689,25 @@ describe('Synthetic-part delivery lifecycle', () => {
     );
     expect(turn1.parts.filter(p => p.synthetic)).toHaveLength(1);
 
-    // Compaction fires (empty contextPaths is fine — flag set unconditionally)
+    // Compacted request history no longer contains the durable part.
     await compacting({ sessionID: 'ses_comp' }, { context: [] });
-
-    // Post-compaction dispatch rebuilds the durable history ledger.
     await messagesTransform(
       {},
       {
         messages: [
           {
-            info: { id: 'msg_u1', role: 'user', sessionID: 'ses_comp' },
-            parts: [{ type: 'text', text: 'first' }],
+            info: {
+              id: 'msg_summary',
+              role: 'assistant',
+              sessionID: 'ses_comp',
+            },
+            parts: [{ type: 'text', text: 'Compacted summary.' }],
           },
         ],
       }
     );
-    // Turn 2: rule re-appended
+
+    // Turn 2: missing durable rule is re-appended.
     const turn2: ChatMessageOutputLike = {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'second' }],
@@ -1706,8 +1716,29 @@ describe('Synthetic-part delivery lifecycle', () => {
       { sessionID: 'ses_comp', messageID: 'msg_comp_2' },
       turn2
     );
-    const reappended = turn2.parts.filter(p => p.synthetic);
-    expect(reappended).toHaveLength(1);
-    expect(reappended[0]?.text).toContain('Compaction survivor.');
+    expect(turn2.parts.filter(p => p.synthetic)).toHaveLength(1);
+
+    // A later compaction that retains the durable part does not duplicate it.
+    await compacting({ sessionID: 'ses_comp' }, { context: [] });
+    await messagesTransform(
+      {},
+      {
+        messages: [
+          {
+            info: { id: 'msg_comp_2', role: 'user', sessionID: 'ses_comp' },
+            parts: turn2.parts,
+          },
+        ],
+      }
+    );
+    const turn3: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'third' }],
+    };
+    await chatMessage(
+      { sessionID: 'ses_comp', messageID: 'msg_comp_3' },
+      turn3
+    );
+    expect(turn3.parts.filter(p => p.synthetic)).toHaveLength(0);
   });
 });

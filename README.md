@@ -110,10 +110,10 @@ That's it! The rule will now be automatically delivered to all AI agent conversa
 2. **Parsing**: Extract metadata from files with YAML front matter
 3. **Tool Execution**: `tool.execute.before` hook captures file paths before tools run
 4. **Message Flow**: `chat.message` hook updates user prompt as messages arrive
-5. **Initial Seeding**: `experimental.chat.messages.transform` extracts context from message history once and rebuilds dedup keys when resuming a session; queued hook content is delivered as a transient synthetic message on the next request
-6. **Rule Delivery**: Session-durable rules (unconditional, `globs`, `keywords`, `command`, `project`, `os`, and `ci`) are appended once to the user message as persisted synthetic text parts via `chat.message` (one per rule), hidden in the TUI but included in provider requests so the system prompt stays byte-stable for prompt caching. Agent, `model`, `branch`, and `tools` rules are appended only to the transformed model request as transient synthetic messages, so changing agent or model does not leave stale rule text in new history. Content-hash deduplication applies only to durable parts.
+5. **Initial Seeding**: `experimental.chat.messages.transform` extracts context from message history once and rebuilds identity-based dedup keys when resuming a session; queued hook content is delivered as a transient synthetic message on the next request
+6. **Rule Delivery**: Each injection event is one `<system-message>` block with one plugin preamble and a `<rule name="...">` block per rule. The name comes from frontmatter `name` or the filename stem. Session-durable rules (unconditional, `globs`, `keywords`, `command`, `project`, `os`, and `ci`) are appended once to the user message as one persisted synthetic text part via `chat.message`, hidden in the TUI but included in provider requests so the system prompt stays byte-stable for prompt caching. Agent, `model`, `branch`, and `tools` rules are appended only to the transformed model request as one transient synthetic message per matching turn, so changing agent or model does not leave stale rule text in new history. Path-based deduplication applies only to durable delivery.
 7. **State Persistence**: Matched rule paths are written to `~/.opencode/state/opencode-rules/{sessionId}.json` for TUI consumption
-8. **Compaction Persistence**: `experimental.session.compacting` preserves context during session compression and marks rules for rescan, so durable rules are re-appended on the next user message while ephemeral rules are recomputed per request
+8. **Compaction Persistence**: `experimental.session.compacting` preserves context paths and invalidates the durable delivery ledger; the next transformed request rebuilds it from surviving parts so missing durable rules are re-appended, while ephemeral rules continue to be recomputed per request
 
 ## Performance
 
@@ -457,7 +457,7 @@ opencode-rules/
 ├── src/
 │   ├── index.ts              # Main plugin entry point and exports
 │   ├── runtime.ts            # OpenCodeRulesRuntime class (hook orchestration)
-│   ├── rule-delivery.ts      # Durable/transient delivery, Hook queues, and compaction invalidation
+│   ├── rule-delivery.ts      # Durable/transient delivery, Hook queues, and identity ledger
 │   ├── rule-delivery-codec.ts # Delivery identifiers, formats, and history decoding
 │   ├── rule-delivery-history.ts # Raw history port for delivery decoding
 │   ├── runtime-context.ts    # Context-building helpers (filter context, project detection)
@@ -496,7 +496,7 @@ opencode-rules/
 The following highlights the primary runtime modules:
 
 - **runtime.ts** - Orchestrates hooks (`tool.execute.before`, `chat.message`, `experimental.chat.*`)
-- **rule-delivery.ts** - Owns durable/transient delivery, matched Hook queues, history reconstruction, and compaction invalidation
+- **rule-delivery.ts** - Owns durable/transient delivery, matched Hook queues, history reconstruction, and the identity ledger
 - **rule-delivery-codec.ts** - Encodes durable/transient delivery and decodes durable history facts
 - **rule-delivery-history.ts** - Defines the raw host-history port used by delivery decoding
 - **runtime-context.ts** - Builds `RuleFilterContext` from session state and environment
@@ -591,37 +591,34 @@ This plugin uses OpenCode's hook system for incremental, stateful rule delivery:
      - Available tool IDs (`tools`)
      - Runtime environment (model, agent, command, project, branch, OS, CI)
    - Command is inferred from the leading slash token (first token) of the latest user prompt
-   - Appends only **session-durable** matches to the user message as one synthetic text part per rule (id prefix `prt_rules_`) before opencode persists it; ephemeral matches (agent, model, branch, tools) are never written here
+   - Appends all newly matched **session-durable** rules and durable hook guidance to the user message as one framed synthetic text part (id prefix `prt_rules_`) before opencode persists it; ephemeral matches (agent, model, branch, tools) are never written here
    - Synthetic parts are hidden in the TUI but included in provider requests, keeping the system prompt byte-stable across requests for provider prompt caching
-   - Content-hash dedup keys (`${relativePath}:${sha256-16(content)}`) ensure durable rules already in history are never re-appended
+   - Path-derived identity keys ensure durable rules already present in session history are not re-appended when content changes or a session resumes
    - Rule content and metadata are snapshotted per session at first evaluation; in-process file edits do not change an existing session's delivery
 
 3. **`experimental.chat.messages.transform`** - History seeding, ephemeral rule delivery, and transient hook delivery
    - Fires before each model request; history seeding runs only on the first
-     call (gated by seededFromHistory), while transient rule/hook delivery and
-     post-compaction rescans run on every request
+     call (gated by seededFromHistory), while transient rule/hook delivery runs
+     on every request
    - Seeds session state from full message history if needed
    - Rebuilds the delivery dedup ledger from request history when a session is resumed
    - Evaluates the session snapshot against the current request and appends
      matching **ephemeral** rules (agent, model, branch, tools) as transient
      synthetic user messages (`prt_rule_ephemeral_`) — request-scoped only,
      never persisted, so switching agent or model swaps the applicable rules
-   - Delivers queued hook content immediately as a transient synthetic user
-     message (`prt_hook_transient_`) appended to the very next model request -
-     never persisted
-   - After compaction, rebuilds the delivery ledger from post-compaction history so the next user message re-appends durable rules and ephemeral rules are recomputed
+   - Delivers all queued hook content together with matching ephemeral rules in the same framed transient synthetic user message (`prt_rule_ephemeral_`) appended to the very next model request - never persisted
 
 4. **`experimental.session.compacting`** - Compaction context preservation
    - Fires when a session is compacted (summarized)
    - Injects current context paths into the compaction context
-   - Invalidates the delivery ledger (unconditionally, before any context-path early return) so durable rules are re-appended after compaction
+   - Rebuilds the durable delivery ledger from post-compaction request history so rules removed by compaction are re-appended, while rules still present are not duplicated
 
 5. **`tool.execute.after`** - Post-execution corrective guidance
    - Fires after each tool completes
    - Evaluates `PostToolUse` hooks for reactive rule triggering
    - Queues corrective rule content for delivery on the next turn; hook blocking
      and `run` side effects are unchanged
-   - Hook text owned by a durable rule is delivered as synthetic parts (id `prt_hook_<hash>`) on the next user message via `chat.message` so it remains in session history; hook text owned by an ephemeral rule is delivered only as a transient synthetic message via `experimental.chat.messages.transform` and never persisted
+   - Hook text uses the same single-event framing as ordinary rules. Durable-owner hooks join the next durable `chat.message` delivery; ephemeral-owner hooks join the next transient `experimental.chat.messages.transform` delivery and are never persisted
 
 ### Experimental API Notice
 

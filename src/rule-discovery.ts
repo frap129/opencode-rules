@@ -147,7 +147,7 @@ async function scanDirectoryRecursively(
 export interface DiscoveredRule {
   /** Absolute path to the rule file */
   filePath: string;
-  /** Relative path from the rules directory root (for unique headings) */
+  /** Relative path from the rules directory root */
   relativePath: string;
 }
 
@@ -157,6 +157,8 @@ export interface DiscoveredRule {
  * existing session's snapshot.
  */
 export interface RuleSnapshot extends DiscoveredRule {
+  /** Short display name from frontmatter or the file name without extension */
+  name: string;
   /** Parsed frontmatter metadata (null when the file has none) */
   metadata: RuleMetadata | null;
   /** Content with frontmatter stripped */
@@ -176,6 +178,13 @@ export async function loadRuleSnapshots(
     if (!cachedRule) continue;
     snapshots.push({
       ...file,
+      name:
+        cachedRule.metadata?.name ??
+        file.relativePath
+          .split(/[\\/]/)
+          .at(-1)
+          ?.replace(/\.(?:md|mdc)$/i, '') ??
+        file.relativePath,
       metadata: cachedRule.metadata,
       strippedContent: cachedRule.strippedContent,
     });

@@ -390,7 +390,9 @@ export class OpenCodeRulesRuntime {
     matches: readonly MatchedRuleEntry[]
   ): MatchedRuleContent[] {
     return matches.map(rule => ({
+      identity: rule.filePath,
       relativePath: rule.relativePath,
+      name: rule.name,
       content: rule.strippedContent,
     }));
   }
@@ -530,8 +532,6 @@ export class OpenCodeRulesRuntime {
     }
 
     this.ruleDelivery.markCompacted(sessionID);
-    // A prefetch fetched before compaction would be stale: drop it so the
-    // next delivery decodes fresh post-compaction history instead.
     this.pendingHistoryPrefetch.delete(sessionID);
 
     const sessionState = this.sessionStore.get(sessionID);
@@ -651,16 +651,18 @@ export class OpenCodeRulesRuntime {
     }
 
     // No blockers: queue content and run side-effects
-    // Deduplicate content per rule (one injection per rule, regardless of how many hooks matched)
-    const seenContent = new Set<string>();
+    // Queue each matched rule once, regardless of how many hooks matched.
+    const seenRules = new Set<string>();
     const matchedHooks: MatchedHookContent[] = [];
     for (const { hook, rule } of allMatches) {
-      if (!seenContent.has(rule.strippedContent)) {
-        seenContent.add(rule.strippedContent);
+      if (!seenRules.has(rule.filePath)) {
+        seenRules.add(rule.filePath);
         const lifetime =
           matchRuleSnapshots([rule], filterContext)[0]?.lifetime ?? 'ephemeral';
         matchedHooks.push({
+          identity: rule.filePath,
           relativePath: rule.relativePath,
+          name: rule.name,
           content: rule.strippedContent,
           lifetime,
         });

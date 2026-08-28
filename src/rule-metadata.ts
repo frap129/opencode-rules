@@ -9,6 +9,7 @@ import { logWarning } from './debug.js';
  * Metadata extracted from .mdc file frontmatter
  */
 export interface RuleMetadata {
+  name?: string;
   globs?: string[];
   keywords?: string[];
   tools?: string[];
@@ -35,6 +36,7 @@ export interface RuleHook {
  * Raw parsed YAML frontmatter structure
  */
 interface ParsedFrontmatter {
+  name?: unknown;
   globs?: unknown;
   keywords?: unknown;
   tools?: unknown;
@@ -105,6 +107,10 @@ export function parseRuleMetadata(content: string): RuleMetadata | null {
     }
 
     const metadata: RuleMetadata = {};
+
+    if (typeof parsed.name === 'string' && parsed.name.trim().length > 0) {
+      metadata.name = parsed.name.trim();
+    }
 
     const arrayFields: StringArrayField[] = [
       'globs',

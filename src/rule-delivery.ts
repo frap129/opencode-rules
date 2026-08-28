@@ -1,13 +1,9 @@
 import {
-  buildDurableHookPart,
-  buildRulePart,
-  buildTransientHookMessage,
-  buildTransientRuleMessage,
+  buildDurableDeliveryPart,
+  buildTransientDeliveryMessage,
   decodeRawHistory,
   type DeliveryLedgerFacts,
   type DeliveryPart,
-  hashContent,
-  hookPartId,
   isTransientMessageId,
   ruleKeyFor,
 } from './rule-delivery-codec.js';
@@ -28,7 +24,9 @@ export interface RuleDelivery {
 export type DurableTurnResult = 'accepted' | 'deferred';
 
 export interface MatchedRuleContent {
+  identity?: string;
   relativePath: string;
+  name?: string;
   content: string;
 }
 
@@ -71,14 +69,28 @@ type RuleDeliveryOptions = {
 
 interface DeliveryState {
   ruleKeys: Set<string>;
-  hookHashes: Set<string>;
+  hookKeys: Set<string>;
   ledgerRevision: number;
   seededFromHistory: boolean;
   needsRescan: boolean;
   pendingHookQueue: MatchedHookContent[];
-  durableHookQueue: string[];
-  transientHookQueue: string[];
+  durableHookQueue: MatchedHookContent[];
+  transientHookQueue: MatchedHookContent[];
   lastUpdated: number;
+}
+
+function deliveryKey(rule: MatchedRuleContent): string {
+  return ruleKeyFor(rule.identity ?? rule.relativePath);
+}
+
+function hasDeliveryKey(
+  keys: ReadonlySet<string>,
+  rule: MatchedRuleContent
+): boolean {
+  return (
+    keys.has(deliveryKey(rule)) ||
+    (rule.identity !== undefined && keys.has(ruleKeyFor(rule.relativePath)))
+  );
 }
 
 class DefaultRuleDelivery implements RuleDelivery {
@@ -149,38 +161,36 @@ class DefaultRuleDelivery implements RuleDelivery {
     if (!input.messageID) return 'deferred';
 
     const newRuleKeys = new Set<string>();
-    const newHookHashes = new Set<string>();
-    const newParts: DeliveryPart[] = [];
+    const newHookKeys = new Set<string>();
+    const newRules: MatchedRuleContent[] = [];
+    const newHooks: MatchedHookContent[] = [];
     for (const rule of input.matchedRules) {
-      const key = ruleKeyFor(rule.relativePath, rule.content);
-      if (state.ruleKeys.has(key) || newRuleKeys.has(key)) continue;
+      const key = deliveryKey(rule);
+      if (hasDeliveryKey(state.ruleKeys, rule) || newRuleKeys.has(key))
+        continue;
       newRuleKeys.add(key);
-      newParts.push(
-        buildRulePart(rule.relativePath, rule.content, {
-          sessionID: input.sessionID,
-          messageID: input.messageID,
-        })
-      );
+      newRules.push(rule);
     }
 
-    for (const content of state.durableHookQueue) {
-      const hash = hashContent(content);
-      if (state.hookHashes.has(hash) || newHookHashes.has(hash)) continue;
-      newHookHashes.add(hash);
-      newParts.push(
-        buildDurableHookPart(content, {
-          sessionID: input.sessionID,
-          messageID: input.messageID,
-        })
-      );
+    for (const hook of state.durableHookQueue) {
+      const key = deliveryKey(hook);
+      if (hasDeliveryKey(state.hookKeys, hook) || newHookKeys.has(key))
+        continue;
+      newHookKeys.add(key);
+      newHooks.push(hook);
     }
 
-    if (newParts.length > 0) {
+    if (newRules.length > 0 || newHooks.length > 0) {
       input.output.parts ??= [];
-      input.output.parts.push(...newParts);
+      input.output.parts.push(
+        buildDurableDeliveryPart(newRules, newHooks, {
+          sessionID: input.sessionID,
+          messageID: input.messageID,
+        })
+      );
     }
     for (const key of newRuleKeys) state.ruleKeys.add(key);
-    for (const hash of newHookHashes) state.hookHashes.add(hash);
+    for (const key of newHookKeys) state.hookKeys.add(key);
     state.durableHookQueue = [];
     return 'accepted';
   }
@@ -190,10 +200,20 @@ class DefaultRuleDelivery implements RuleDelivery {
     for (const hook of input.hooks) {
       if (
         state.pendingHookQueue.some(
-          pending => pending.content === hook.content
+          pending =>
+            (pending.identity ?? pending.relativePath) ===
+            (hook.identity ?? hook.relativePath)
         ) ||
-        state.durableHookQueue.includes(hook.content) ||
-        state.transientHookQueue.includes(hook.content)
+        state.durableHookQueue.some(
+          pending =>
+            (pending.identity ?? pending.relativePath) ===
+            (hook.identity ?? hook.relativePath)
+        ) ||
+        state.transientHookQueue.some(
+          pending =>
+            (pending.identity ?? pending.relativePath) ===
+            (hook.identity ?? hook.relativePath)
+        )
       ) {
         continue;
       }
@@ -219,6 +239,8 @@ class DefaultRuleDelivery implements RuleDelivery {
       if (!target || !Array.isArray(target.parts)) return;
 
       const presentIDs = new Set<string>();
+      const presentRuleKeys = new Set<string>();
+      const presentHookKeys = new Set<string>();
       for (const message of input.messages) {
         if (typeof message.info?.id === 'string') {
           presentIDs.add(message.info.id);
@@ -228,73 +250,88 @@ class DefaultRuleDelivery implements RuleDelivery {
           if (
             typeof part === 'object' &&
             part !== null &&
-            'id' in part &&
-            typeof part.id === 'string'
+            !Array.isArray(part)
           ) {
-            presentIDs.add(part.id);
+            if ('id' in part && typeof part.id === 'string') {
+              presentIDs.add(part.id);
+            }
+            const metadata =
+              'metadata' in part &&
+              typeof part.metadata === 'object' &&
+              part.metadata !== null &&
+              !Array.isArray(part.metadata)
+                ? part.metadata
+                : undefined;
+            if (
+              metadata &&
+              'ruleKeys' in metadata &&
+              Array.isArray(metadata.ruleKeys)
+            ) {
+              for (const key of metadata.ruleKeys) {
+                if (typeof key === 'string') presentRuleKeys.add(key);
+              }
+            }
+            if (
+              metadata &&
+              'hookKeys' in metadata &&
+              Array.isArray(metadata.hookKeys)
+            ) {
+              for (const key of metadata.hookKeys) {
+                if (typeof key === 'string') presentHookKeys.add(key);
+              }
+            }
           }
         }
       }
 
       const baseInfo = this.transientBaseInfo(input.messages);
-      const pushTransient = (transientMessage: {
-        info: Record<string, unknown>;
-        parts: DeliveryPart[];
-      }): void => {
-        const part = transientMessage.parts[0];
-        if (!part) return;
-        input.messages.push({
-          info: transientMessage.info,
-          parts: [
-            {
-              ...part,
-              sessionID: input.sessionID,
-              messageID: transientMessage.info.id,
-            },
-          ],
-        });
-        presentIDs.add(transientMessage.info.id as string);
-        presentIDs.add(part.id as string);
-      };
-
+      const transientRules: MatchedRuleContent[] = [];
       for (const rule of input.matchedRules) {
-        const key = ruleKeyFor(rule.relativePath, rule.content);
-        const transientMessage = buildTransientRuleMessage(
-          rule.relativePath,
-          rule.content,
+        const key = deliveryKey(rule);
+        if (
+          hasDeliveryKey(state.ruleKeys, rule) ||
+          hasDeliveryKey(presentRuleKeys, rule)
+        ) {
+          continue;
+        }
+        presentRuleKeys.add(key);
+        transientRules.push(rule);
+      }
+
+      const transientHooks: MatchedHookContent[] = [];
+      for (const hook of [
+        ...state.durableHookQueue,
+        ...state.transientHookQueue,
+      ]) {
+        const key = deliveryKey(hook);
+        if (hasDeliveryKey(presentHookKeys, hook)) continue;
+        presentHookKeys.add(key);
+        transientHooks.push(hook);
+      }
+
+      if (transientRules.length > 0 || transientHooks.length > 0) {
+        const transientMessage = buildTransientDeliveryMessage(
+          transientRules,
+          transientHooks,
           baseInfo
         );
         const part = transientMessage.parts[0];
         if (
-          !part ||
-          state.ruleKeys.has(key) ||
-          presentIDs.has(transientMessage.info.id) ||
-          presentIDs.has(part.id)
+          part &&
+          !presentIDs.has(transientMessage.info.id) &&
+          !presentIDs.has(part.id)
         ) {
-          continue;
+          input.messages.push({
+            info: transientMessage.info,
+            parts: [
+              {
+                ...part,
+                sessionID: input.sessionID,
+                messageID: transientMessage.info.id,
+              },
+            ],
+          });
         }
-        pushTransient(transientMessage);
-      }
-
-      for (const content of [
-        ...state.durableHookQueue,
-        ...state.transientHookQueue,
-      ]) {
-        const hash = hashContent(content);
-        const transientMessage = buildTransientHookMessage(content, baseInfo);
-        const part = transientMessage.parts[0];
-        if (
-          !part ||
-          presentIDs.has(transientMessage.info.id) ||
-          presentIDs.has(part.id) ||
-          [...presentIDs].some(
-            id =>
-              id === hookPartId(hash) || id.startsWith(`${hookPartId(hash)}_`)
-          )
-        ) {
-          continue;
-        }
-        pushTransient(transientMessage);
       }
       state.transientHookQueue = [];
     } catch (error) {
@@ -315,20 +352,18 @@ class DefaultRuleDelivery implements RuleDelivery {
     facts: DeliveryLedgerFacts
   ): void {
     state.ruleKeys = new Set(facts.ruleKeys);
-    state.hookHashes = new Set(facts.hookHashes);
+    state.hookKeys = new Set(facts.hookKeys);
     state.ledgerRevision++;
   }
 
   private routePendingHooks(state: DeliveryState): void {
     for (const hook of state.pendingHookQueue) {
-      const ownerIsDurable = state.ruleKeys.has(
-        ruleKeyFor(hook.relativePath, hook.content)
-      );
+      const ownerIsDurable = hasDeliveryKey(state.ruleKeys, hook);
       const queue =
         ownerIsDurable || hook.lifetime === 'durable'
           ? state.durableHookQueue
           : state.transientHookQueue;
-      queue.push(hook.content);
+      queue.push(hook);
     }
     state.pendingHookQueue = [];
   }
@@ -351,7 +386,7 @@ class DefaultRuleDelivery implements RuleDelivery {
     if (!state) {
       state = {
         ruleKeys: new Set(),
-        hookHashes: new Set(),
+        hookKeys: new Set(),
         ledgerRevision: 0,
         seededFromHistory: false,
         needsRescan: false,
