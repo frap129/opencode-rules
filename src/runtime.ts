@@ -288,6 +288,7 @@ export class OpenCodeRulesRuntime {
       }
     }
 
+    let ephemeralRules: MatchedRuleContent[] = [];
     try {
       const currentState = this.sessionStore.get(sessionID);
       if (currentState) {
@@ -298,19 +299,22 @@ export class OpenCodeRulesRuntime {
           currentState.lastModelID,
           currentState.lastAgentType
         );
-        this.ruleDelivery.deliverTransientDispatch({
-          sessionID,
-          matchedRules: this.toDeliveryRules(
-            matches.filter(rule => rule.lifetime === 'ephemeral')
-          ),
-          messages: output.messages,
-        });
+        ephemeralRules = this.toDeliveryRules(
+          matches.filter(rule => rule.lifetime === 'ephemeral')
+        );
       }
     } catch (error) {
       this.debugLog(
         `Ephemeral rule evaluation failed for ${sessionID}: ${formatError(error)}`
       );
     }
+    // Delivery runs even when evaluation failed: ledger seeding, queue
+    // routing, and queued transient Hook content must not slip a dispatch.
+    this.ruleDelivery.deliverTransientDispatch({
+      sessionID,
+      matchedRules: ephemeralRules,
+      messages: output.messages,
+    });
 
     return output;
   }

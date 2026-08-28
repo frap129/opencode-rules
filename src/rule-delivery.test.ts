@@ -516,7 +516,19 @@ describe('RuleDelivery matched Hook queueing', () => {
       matchedRules: [],
       messages: nextMessages,
     });
-    expect(nextMessages).toHaveLength(1);
+    // Preserved pre-migration behavior: ledger membership alone does not
+    // suppress a transient copy; only request-local presence does.
+    expect(nextMessages).toHaveLength(2);
+    expect(nextMessages[1]?.parts[0]?.text).toBe('Durable owner Hook.');
+
+    const durableRetry = { parts: [] };
+    await delivery.deliverDurableTurn({
+      sessionID: 'ses_hook_queue',
+      messageID: 'msg_retry',
+      matchedRules: [],
+      output: durableRetry,
+    });
+    expect(durableRetry.parts).toEqual([]);
   });
 
   it('retains transient Hook content until a usable dispatch', () => {
@@ -731,6 +743,35 @@ describe('RuleDelivery transient dispatches', () => {
       messages: nextMessages,
     });
     expect(nextMessages).toHaveLength(1);
+  });
+
+  it('seeds or replaces the ledger from supplied messages even without a usable target', async () => {
+    const history = new MockRawHistoryAdapter({ ok: false });
+    const delivery: RuleDelivery = createRuleDelivery({ rawHistory: history });
+    await delivery.deliverDurableTurn({
+      sessionID: 'ses_gateless_seed',
+      messageID: 'msg_failed',
+      matchedRules: [],
+      output: { parts: [] },
+    });
+
+    // No usable transform target: the dispatch must still replace the
+    // ledger from supplied messages (pre-migration rescan ran regardless).
+    delivery.deliverTransientDispatch({
+      sessionID: 'ses_gateless_seed',
+      matchedRules: [],
+      messages: [],
+    });
+
+    await expect(
+      delivery.deliverDurableTurn({
+        sessionID: 'ses_gateless_seed',
+        messageID: 'msg_after',
+        matchedRules: [],
+        output: { parts: [] },
+      })
+    ).resolves.toBe('accepted');
+    expect(history.calls).toEqual(['ses_gateless_seed']);
   });
 
   it('replaces a pending rescan from supplied messages without reading history', async () => {

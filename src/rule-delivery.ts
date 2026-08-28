@@ -7,6 +7,7 @@ import {
   type DeliveryLedgerFacts,
   type DeliveryPart,
   hashContent,
+  hookPartId,
   isTransientMessageId,
   ruleKeyFor,
 } from './rule-delivery-codec.js';
@@ -140,8 +141,7 @@ class DefaultRuleDelivery implements RuleDelivery {
         return 'deferred';
       }
       if (state.ledgerRevision !== ledgerRevision) return 'deferred';
-      state.ruleKeys = new Set(facts.ruleKeys);
-      state.hookHashes = new Set(facts.hookHashes);
+      this.replaceLedger(state, facts);
       state.seededFromHistory = true;
     }
     this.routePendingHooks(state);
@@ -205,18 +205,16 @@ class DefaultRuleDelivery implements RuleDelivery {
   deliverTransientDispatch(input: TransientDispatchInput): void {
     try {
       const state = this.getState(input.sessionID);
-      const target = input.messages[input.messages.length - 1];
-      if (!target || !Array.isArray(target.parts)) return;
-
       if (!state.seededFromHistory || state.needsRescan) {
         const facts = decodeRawHistory(input.messages);
-        state.ruleKeys = new Set(facts.ruleKeys);
-        state.hookHashes = new Set(facts.hookHashes);
-        state.ledgerRevision++;
+        this.replaceLedger(state, facts);
         state.seededFromHistory = true;
         state.needsRescan = false;
       }
       this.routePendingHooks(state);
+
+      const target = input.messages[input.messages.length - 1];
+      if (!target || !Array.isArray(target.parts)) return;
 
       const presentIDs = new Set<string>();
       for (const message of input.messages) {
@@ -237,62 +235,61 @@ class DefaultRuleDelivery implements RuleDelivery {
       }
 
       const baseInfo = this.transientBaseInfo(input.messages);
-      for (const rule of input.matchedRules) {
-        const key = ruleKeyFor(rule.relativePath, rule.content);
-        const transient = buildTransientRuleMessage(
-          rule.relativePath,
-          rule.content,
-          baseInfo
-        );
-        const part = transient.parts[0];
-        if (
-          !part ||
-          state.ruleKeys.has(key) ||
-          presentIDs.has(transient.info.id) ||
-          presentIDs.has(part.id)
-        ) {
-          continue;
-        }
+      const pushTransient = (transientMessage: {
+        info: Record<string, unknown>;
+        parts: DeliveryPart[];
+      }): void => {
+        const part = transientMessage.parts[0];
+        if (!part) return;
         input.messages.push({
-          info: transient.info,
+          info: transientMessage.info,
           parts: [
             {
               ...part,
               sessionID: input.sessionID,
-              messageID: transient.info.id,
+              messageID: transientMessage.info.id,
             },
           ],
         });
-        presentIDs.add(transient.info.id);
-        presentIDs.add(part.id);
+        presentIDs.add(transientMessage.info.id as string);
+        presentIDs.add(part.id as string);
+      };
+
+      for (const rule of input.matchedRules) {
+        const key = ruleKeyFor(rule.relativePath, rule.content);
+        const transientMessage = buildTransientRuleMessage(
+          rule.relativePath,
+          rule.content,
+          baseInfo
+        );
+        const part = transientMessage.parts[0];
+        if (
+          !part ||
+          state.ruleKeys.has(key) ||
+          presentIDs.has(transientMessage.info.id) ||
+          presentIDs.has(part.id)
+        ) {
+          continue;
+        }
+        pushTransient(transientMessage);
       }
+
       for (const content of [
         ...state.durableHookQueue,
         ...state.transientHookQueue,
       ]) {
         const hash = hashContent(content);
-        const transient = buildTransientHookMessage(content, baseInfo);
-        const part = transient.parts[0];
+        const transientMessage = buildTransientHookMessage(content, baseInfo);
+        const part = transientMessage.parts[0];
         if (
           !part ||
-          state.hookHashes.has(hash) ||
-          presentIDs.has(transient.info.id) ||
+          presentIDs.has(transientMessage.info.id) ||
           presentIDs.has(part.id) ||
-          presentIDs.has(`prt_hook_${hash}`)
+          presentIDs.has(hookPartId(hash))
         ) {
           continue;
         }
-        const deliveryPart = {
-          ...part,
-          sessionID: input.sessionID,
-          messageID: transient.info.id,
-        };
-        input.messages.push({
-          info: transient.info,
-          parts: [deliveryPart],
-        });
-        presentIDs.add(transient.info.id);
-        presentIDs.add(part.id);
+        pushTransient(transientMessage);
       }
       state.transientHookQueue = [];
     } catch (error) {
@@ -306,6 +303,15 @@ class DefaultRuleDelivery implements RuleDelivery {
     const state = this.getState(sessionID);
     state.ledgerRevision++;
     state.needsRescan = true;
+  }
+
+  private replaceLedger(
+    state: DeliveryState,
+    facts: DeliveryLedgerFacts
+  ): void {
+    state.ruleKeys = new Set(facts.ruleKeys);
+    state.hookHashes = new Set(facts.hookHashes);
+    state.ledgerRevision++;
   }
 
   private routePendingHooks(state: DeliveryState): void {

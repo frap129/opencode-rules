@@ -2027,6 +2027,70 @@ describe('chat.message rule persistence', () => {
     expect(syntheticIds.some(id => id.startsWith('prt_hook_'))).toBe(true);
   });
 
+  it('still delivers queued transient Hook content when rule evaluation fails', async () => {
+    clearRuleCache();
+    const { testDir, globalRulesDir } = getTestDirs();
+    writeFileSync(
+      path.join(globalRulesDir, 'hooky.mdc'),
+      `---\nagent: [plan]\nhooks:\n  - type: PostToolUse\n    tool: bash\n    match: "grep"\n---\n\nHook rule body.`
+    );
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    let failToolIds = false;
+    mockInput.client.tool.ids = () => {
+      if (failToolIds) throw new Error('tool ids unavailable');
+      return Promise.resolve({ data: [] });
+    };
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+
+    const after = hooks['tool.execute.after'] as (
+      input: {
+        tool: string;
+        sessionID: string;
+        callID: string;
+        args: Record<string, unknown>;
+      },
+      output: { title: string; output: string; metadata: unknown }
+    ) => Promise<void>;
+    await after(
+      {
+        tool: 'bash',
+        sessionID: 'ses_eval_fail',
+        callID: 'call_1',
+        args: { command: 'grep foo' },
+      },
+      { title: '', output: '', metadata: {} }
+    );
+
+    // Only now does rule evaluation fail: the transform-time context query
+    // throws, but queued transient Hook content must still be delivered.
+    failToolIds = true;
+    const transform = hooks['experimental.chat.messages.transform'] as (
+      input: unknown,
+      output: { messages: Array<Record<string, unknown>> }
+    ) => Promise<void>;
+    const messages = [
+      {
+        info: { id: 'msg_eval_fail', role: 'user', sessionID: 'ses_eval_fail' },
+        parts: [{ type: 'text', text: 'prompt' }],
+      },
+    ];
+    await transform({}, { messages });
+
+    expect(messages).toHaveLength(2);
+    const part = (
+      messages[1]!.parts as Array<{ id?: string; text?: string }>
+    )[0];
+    expect(part?.id).toMatch(/^prt_hook_transient_/);
+    expect(part?.text).toBe('Hook rule body.');
+  });
+
   it('writes active-rules-state with matched rule paths', async () => {
     const { testDir, globalRulesDir } = getTestDirs();
     const rulePath = path.join(globalRulesDir, 'always-apply.md');
