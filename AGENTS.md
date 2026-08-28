@@ -30,3 +30,17 @@
 ## Releases
 
 - Stable publishing triggers on non-alpha/non-beta `v*` tags (the workflow does not verify branch containment). Beta tags must be contained by `dev` and publish with the npm `beta` dist-tag.
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in GitHub Issues for `frap129/opencode-rules`, using the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five-role vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` at the repo root plus `docs/adr/` for decisions. See `docs/agents/domain.md`.
