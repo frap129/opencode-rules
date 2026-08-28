@@ -18,6 +18,7 @@ export interface RuleDelivery {
   deliverDurableTurn(input: DurableTurnInput): Promise<DurableTurnResult>;
   deliverTransientDispatch(input: TransientDispatchInput): void;
   markCompacted(sessionID: string): void;
+  markHistoryChanged(sessionID: string): void;
   queueMatchedHooks(input: MatchedHooksInput): void;
 }
 
@@ -345,6 +346,13 @@ class DefaultRuleDelivery implements RuleDelivery {
     const state = this.getState(sessionID);
     state.ledgerRevision++;
     state.needsRescan = true;
+  }
+
+  markHistoryChanged(sessionID: string): void {
+    const state = this.getState(sessionID);
+    state.ledgerRevision++;
+    state.seededFromHistory = false;
+    state.needsRescan = false;
   }
 
   private replaceLedger(

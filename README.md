@@ -594,6 +594,7 @@ This plugin uses OpenCode's hook system for incremental, stateful rule delivery:
    - Appends all newly matched **session-durable** rules and durable hook guidance to the user message as one framed synthetic text part (id prefix `prt_rules_`) before opencode persists it; ephemeral matches (agent, model, branch, tools) are never written here
    - Synthetic parts are hidden in the TUI but included in provider requests, keeping the system prompt byte-stable across requests for provider prompt caching
    - Path-derived identity keys ensure durable rules already present in session history are not re-appended when content changes or a session resumes
+   - `message.removed` events invalidate the delivery ledger so rules attached to canceled or reverted messages are retried on the replacement message
    - Rule content and metadata are snapshotted per session at first evaluation; in-process file edits do not change an existing session's delivery
 
 3. **`experimental.chat.messages.transform`** - History seeding, ephemeral rule delivery, and transient hook delivery

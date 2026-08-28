@@ -123,6 +123,40 @@ describe('RuleDelivery durable turns', () => {
     expect(history.calls).toEqual(['ses_durable']);
   });
 
+  it('rebuilds the ledger after a delivered message is removed', async () => {
+    const history: RawHistoryAdapter = {
+      readHistory: async () => ({ ok: true, messages: [] }),
+    };
+    const delivery: RuleDelivery = createRuleDelivery({ rawHistory: history });
+    const rule = {
+      relativePath: 'conventional-commits.md',
+      content: 'Use Conventional Commits.',
+    };
+    const firstOutput: { parts: DeliveryPart[] } = { parts: [] };
+
+    await delivery.deliverDurableTurn({
+      sessionID: 'ses_removed',
+      messageID: 'msg_removed',
+      matchedRules: [rule],
+      output: firstOutput,
+    });
+    expect(firstOutput.parts).toHaveLength(1);
+
+    delivery.markHistoryChanged('ses_removed');
+    const replacementOutput: { parts: DeliveryPart[] } = { parts: [] };
+    await delivery.deliverDurableTurn({
+      sessionID: 'ses_removed',
+      messageID: 'msg_replacement',
+      matchedRules: [rule],
+      output: replacementOutput,
+    });
+
+    expect(replacementOutput.parts).toHaveLength(1);
+    expect(replacementOutput.parts[0]?.text).toContain(
+      'Use Conventional Commits.'
+    );
+  });
+
   it('appends deterministic identities and exact durable formats through the interface', async () => {
     const delivery: RuleDelivery = createRuleDelivery({
       rawHistory: new MockRawHistoryAdapter({ ok: true, messages: [] }),

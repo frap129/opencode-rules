@@ -218,7 +218,7 @@ describe('OpenCodeRulesPlugin', () => {
     expect(typeof hooks['chat.message']).toBe('function');
   });
 
-  it('should register all five runtime host hooks', async () => {
+  it('should register all six runtime host hooks', async () => {
     const { testDir } = getTestDirs();
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
@@ -232,6 +232,7 @@ describe('OpenCodeRulesPlugin', () => {
 
     expect(Object.keys(hooks).sort()).toEqual([
       'chat.message',
+      'event',
       'experimental.chat.messages.transform',
       'experimental.session.compacting',
       'tool.execute.after',

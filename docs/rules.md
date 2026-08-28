@@ -307,6 +307,8 @@ rules reach the model without ever touching the system prompt — the prompt
 stays byte-stable across requests, preserving provider prompt caching. Durable
 rules already present in session history are not re-appended (path-derived
 identity dedup), so content edits, restarts, and resumes do not duplicate them.
+If a delivered user message is canceled or reverted, its removal invalidates the
+ledger and the missing durable rules are attached to the replacement message.
 After compaction, the ledger is rebuilt from transformed request history and
 any durable rules removed by compaction are re-appended.
 Rule content and metadata are snapshotted per session at first evaluation;

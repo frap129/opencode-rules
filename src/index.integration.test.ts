@@ -1741,4 +1741,58 @@ describe('Synthetic-part delivery lifecycle', () => {
     );
     expect(turn3.parts.filter(p => p.synthetic)).toHaveLength(0);
   });
+
+  it('re-appends durable rules when their owning message is removed', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    writeFileSync(
+      path.join(globalRulesDir, 'always.md'),
+      '# Always Apply\nPersistent rule body.'
+    );
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+    const chatMessage = hooks['chat.message'] as (
+      input: { sessionID: string; messageID?: string },
+      output: ChatMessageOutputLike
+    ) => Promise<void>;
+    const event = hooks.event as (input: {
+      event: {
+        type: 'message.removed';
+        properties: { sessionID: string; messageID: string };
+      };
+    }) => Promise<void>;
+
+    const first: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'first' }],
+    };
+    await chatMessage(
+      { sessionID: 'ses_removed', messageID: 'msg_removed' },
+      first
+    );
+    expect(first.parts.filter(part => part.synthetic)).toHaveLength(1);
+
+    await event({
+      event: {
+        type: 'message.removed',
+        properties: { sessionID: 'ses_removed', messageID: 'msg_removed' },
+      },
+    });
+
+    const replacement: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'replacement' }],
+    };
+    await chatMessage(
+      { sessionID: 'ses_removed', messageID: 'msg_replacement' },
+      replacement
+    );
+    expect(replacement.parts.filter(part => part.synthetic)).toHaveLength(1);
+  });
 });

@@ -175,7 +175,27 @@ export class OpenCodeRulesRuntime {
         this.onMessagesTransform.bind(this),
       'chat.message': this.onChatMessage.bind(this),
       'experimental.session.compacting': this.onSessionCompacting.bind(this),
+      event: this.onEvent.bind(this),
     };
+  }
+
+  private async onEvent(input: {
+    event?: { type?: unknown; properties?: unknown };
+  }): Promise<void> {
+    if (input.event?.type !== 'message.removed') return;
+    const properties = input.event.properties;
+    if (
+      properties === null ||
+      typeof properties !== 'object' ||
+      Array.isArray(properties) ||
+      !('sessionID' in properties) ||
+      typeof properties.sessionID !== 'string'
+    ) {
+      return;
+    }
+
+    this.ruleDelivery.markHistoryChanged(properties.sessionID);
+    this.pendingHistoryPrefetch.delete(properties.sessionID);
   }
 
   private async onToolExecuteBefore(
