@@ -44,10 +44,14 @@ export function resolveStateDir(): string {
 
 /** @throws {Error} If sessionID fails validation. */
 export function getStateFilePath(sessionID: string): string {
+  return buildStateFilePath(sessionID, resolveStateDir());
+}
+
+function buildStateFilePath(sessionID: string, stateDir: string): string {
   if (!isValidSessionID(sessionID)) {
     throw new Error(`Invalid sessionID: ${sessionID}`);
   }
-  return path.join(resolveStateDir(), `${sessionID}.json`);
+  return path.join(stateDir, `${sessionID}.json`);
 }
 
 /** Write matched rule paths to state. @throws {Error} If sessionID fails validation. */
@@ -111,13 +115,13 @@ async function doAtomicWrite(
 
 /** Read active rules state. @throws {Error} If sessionID fails validation. */
 export async function readActiveRulesState(
-  sessionID: string
+  sessionID: string,
+  options: { stateDir?: string } = {}
 ): Promise<ActiveRulesState | null> {
-  if (!isValidSessionID(sessionID)) {
-    throw new Error(`Invalid sessionID: ${sessionID}`);
-  }
-
-  const filePath = getStateFilePath(sessionID);
+  const filePath = buildStateFilePath(
+    sessionID,
+    options.stateDir ?? resolveStateDir()
+  );
 
   try {
     const content = await fs.readFile(filePath, 'utf-8');

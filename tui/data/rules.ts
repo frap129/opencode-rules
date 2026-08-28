@@ -45,16 +45,20 @@ export interface LoadSidebarRulesResult {
  *
  * @param projectDir - Project directory or null (global rules only)
  * @param sessionId - Optional session ID to read active rules state
+ * @param options - Optional state read configuration
  */
 export async function loadSidebarRules(
   projectDir: string | null,
-  sessionId?: string
+  sessionId?: string,
+  options: { stateDir?: string } = {}
 ): Promise<LoadSidebarRulesResult> {
   // discoverRuleFiles accepts string | undefined, not null
   const discovered = await discoverRuleFiles(projectDir ?? undefined);
 
   // Read active rules state if sessionId provided
-  const activeState = sessionId ? await readActiveRulesState(sessionId) : null;
+  const activeState = sessionId
+    ? await readActiveRulesState(sessionId, options)
+    : null;
   const hasEvaluationState = activeState !== null;
   const matchedPathsSet = hasEvaluationState
     ? new Set(activeState.matchedRulePaths)

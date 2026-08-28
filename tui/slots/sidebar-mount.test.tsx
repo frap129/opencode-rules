@@ -1,9 +1,8 @@
 /** @jsxImportSource @opentui/solid */
-import { describe, it, expect, afterEach, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import path from 'node:path';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
-import { _setStateDirForTesting } from '../../src/active-rules-state.js';
 
 let ffiAvailable = false;
 
@@ -19,10 +18,6 @@ beforeAll(async () => {
 });
 
 describe('sidebar mount', () => {
-  afterEach(() => {
-    _setStateDirForTesting(null);
-  });
-
   it('renders rules without crashing on Solid conditions', async () => {
     if (!ffiAvailable) {
       return;
@@ -37,17 +32,6 @@ describe('sidebar mount', () => {
     writeFileSync(
       path.join(rulesDir, 'plan.mdc'),
       '---\nagent: [plan]\n---\n\nPlan body.'
-    );
-    const stateDir = path.join(tmp, 'state');
-    mkdirSync(stateDir, { recursive: true });
-    _setStateDirForTesting(stateDir);
-    writeFileSync(
-      path.join(stateDir, 'ses_x.json'),
-      JSON.stringify({
-        sessionID: 'ses_x',
-        matchedRulePaths: [path.join(rulesDir, 'plan.mdc')],
-        evaluatedAt: Date.now(),
-      })
     );
     const savedXdg = process.env.XDG_CONFIG_HOME;
     const savedOpencode = process.env.OPENCODE_CONFIG_DIR;
@@ -66,7 +50,7 @@ describe('sidebar mount', () => {
       const setup = await testRender(
         () => (
           <SidebarContent
-            sessionId="ses_x"
+            sessionId="ses_sidebar_mount_render_only"
             api={api as never}
             theme={theme as never}
           />

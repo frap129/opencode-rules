@@ -97,6 +97,33 @@ describe('active-rules-state', () => {
       expect(state).toBeNull();
     });
 
+    it('reads from an explicit state directory', async () => {
+      const explicitStateDir = path.join(
+        path.dirname(testStateDir),
+        'explicit'
+      );
+      await fs.mkdir(explicitStateDir, { recursive: true });
+      await fs.writeFile(
+        path.join(explicitStateDir, 'ses_explicit.json'),
+        JSON.stringify({
+          sessionID: 'ses_explicit',
+          matchedRulePaths: ['/rule.md'],
+          evaluatedAt: 123,
+        }),
+        'utf-8'
+      );
+
+      const state = await readActiveRulesState('ses_explicit', {
+        stateDir: explicitStateDir,
+      });
+
+      expect(state).toEqual({
+        sessionID: 'ses_explicit',
+        matchedRulePaths: ['/rule.md'],
+        evaluatedAt: 123,
+      });
+    });
+
     it('returns null for corrupt/invalid JSON', async () => {
       await fs.mkdir(testStateDir, { recursive: true });
 

@@ -19,10 +19,6 @@ import {
 } from 'node:fs';
 import { clearRuleCache } from '../../src/rule-discovery.js';
 import {
-  _setStateDirForTesting,
-  writeActiveRulesState,
-} from '../../src/active-rules-state.js';
-import {
   classifyRuleScope,
   hasConditions,
   formatConditionSummary,
@@ -385,11 +381,9 @@ describe('loadSidebarRules isActive behavior', () => {
     savedConfigDir = process.env['OPENCODE_CONFIG_DIR'];
     delete process.env['OPENCODE_CONFIG_DIR'];
     clearRuleCache();
-    _setStateDirForTesting(stateDir);
   });
 
   afterEach(() => {
-    _setStateDirForTesting(null);
     rmSync(testDir, { recursive: true, force: true });
     if (savedXDG === undefined) {
       delete process.env['XDG_CONFIG_HOME'];
@@ -402,6 +396,13 @@ describe('loadSidebarRules isActive behavior', () => {
       process.env['OPENCODE_CONFIG_DIR'] = savedConfigDir;
     }
   });
+
+  function writeStateFile(sessionID: string, matchedRulePaths: string[]): void {
+    writeFileSync(
+      path.join(stateDir, `${sessionID}.json`),
+      JSON.stringify({ sessionID, matchedRulePaths, evaluatedAt: 123 })
+    );
+  }
 
   it('sets hasEvaluationState to false when no sessionId provided', async () => {
     const globalDir = path.join(testDir, '.config', 'opencode', 'rules');
@@ -420,7 +421,9 @@ describe('loadSidebarRules isActive behavior', () => {
     writeFileSync(path.join(globalDir, 'rule.md'), '# Always');
     process.env['XDG_CONFIG_HOME'] = path.join(testDir, '.config');
 
-    const result = await loadSidebarRules(null, 'nonexistent-session');
+    const result = await loadSidebarRules(null, 'nonexistent-session', {
+      stateDir,
+    });
 
     expect(result.hasEvaluationState).toBe(false);
   });
@@ -431,11 +434,9 @@ describe('loadSidebarRules isActive behavior', () => {
     writeFileSync(path.join(globalDir, 'rule.md'), '# Always');
     process.env['XDG_CONFIG_HOME'] = path.join(testDir, '.config');
 
-    writeActiveRulesState('test-session', []);
-    // Wait for async write to complete
-    await new Promise(resolve => setTimeout(resolve, 50));
+    writeStateFile('test-session', []);
 
-    const result = await loadSidebarRules(null, 'test-session');
+    const result = await loadSidebarRules(null, 'test-session', { stateDir });
 
     expect(result.hasEvaluationState).toBe(true);
   });
@@ -476,10 +477,11 @@ describe('loadSidebarRules isActive behavior', () => {
     writeFileSync(unmatchedPath, '# Unmatched');
     process.env['XDG_CONFIG_HOME'] = path.join(testDir, '.config');
 
-    writeActiveRulesState('test-session', [matchedPath]);
-    await new Promise(resolve => setTimeout(resolve, 50));
+    writeStateFile('test-session', [matchedPath]);
 
-    const { rules } = await loadSidebarRules(null, 'test-session');
+    const { rules } = await loadSidebarRules(null, 'test-session', {
+      stateDir,
+    });
 
     const matched = rules.find(r => r.name === 'matched');
     const unmatched = rules.find(r => r.name === 'unmatched');
@@ -498,11 +500,11 @@ describe('loadSidebarRules isActive behavior', () => {
     );
     process.env['XDG_CONFIG_HOME'] = path.join(testDir, '.config');
 
-    // Conditional rule is in matchedRulePaths
-    writeActiveRulesState('test-session', [conditionalPath]);
-    await new Promise(resolve => setTimeout(resolve, 50));
+    writeStateFile('test-session', [conditionalPath]);
 
-    const { rules } = await loadSidebarRules(null, 'test-session');
+    const { rules } = await loadSidebarRules(null, 'test-session', {
+      stateDir,
+    });
 
     expect(rules[0]!.isConditional).toBe(true);
     expect(rules[0]!.isActive).toBe(true);
@@ -517,11 +519,11 @@ describe('loadSidebarRules isActive behavior', () => {
     );
     process.env['XDG_CONFIG_HOME'] = path.join(testDir, '.config');
 
-    // Empty matchedRulePaths - nothing matched
-    writeActiveRulesState('test-session', []);
-    await new Promise(resolve => setTimeout(resolve, 50));
+    writeStateFile('test-session', []);
 
-    const { rules } = await loadSidebarRules(null, 'test-session');
+    const { rules } = await loadSidebarRules(null, 'test-session', {
+      stateDir,
+    });
 
     expect(rules[0]!.isConditional).toBe(true);
     expect(rules[0]!.isActive).toBe(false);
