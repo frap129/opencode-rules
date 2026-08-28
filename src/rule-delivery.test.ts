@@ -2,11 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildDurableHookPart,
   buildRulePart,
-  buildTransientHookMessage,
-  buildTransientRuleMessage,
   type DeliveryPart,
-  hashContent,
-  ruleKeyFor,
 } from './rule-delivery-codec.js';
 import type {
   RawHistoryAdapter,
@@ -24,71 +20,6 @@ class MockRawHistoryAdapter implements RawHistoryAdapter {
     return this.result;
   }
 }
-
-describe('rule delivery codec', () => {
-  it('preserves deterministic identities and durable and transient formats', () => {
-    expect(hashContent('Durable guidance.')).toBe('8999624091e1022c');
-    expect(ruleKeyFor('rules/core.md', 'Durable guidance.')).toBe(
-      'rules/core.md:8999624091e1022c'
-    );
-    expect(buildRulePart('rules/core.md', 'Durable guidance.')).toEqual({
-      id: 'prt_rules_dad3bb218895408d',
-      type: 'text',
-      text: '## rules/core.md\n\nDurable guidance.',
-      synthetic: true,
-    });
-    expect(buildDurableHookPart('Hook guidance.')).toEqual({
-      id: 'prt_hook_1d4c59cbd8e30804',
-      type: 'text',
-      text: 'Hook guidance.',
-      synthetic: true,
-    });
-    expect(
-      buildTransientRuleMessage('rules/transient.md', 'Transient guidance.', {
-        id: 'msg_user',
-        role: 'user',
-        providerID: 'opencode-go',
-        modelID: 'deepseek-v4-flash',
-      })
-    ).toEqual({
-      info: {
-        id: 'msg_rule_ephemeral_85f42885ffa0d6d6',
-        role: 'user',
-        providerID: 'opencode-go',
-        modelID: 'deepseek-v4-flash',
-        model: {
-          providerID: 'opencode-go',
-          modelID: 'deepseek-v4-flash',
-        },
-      },
-      parts: [
-        {
-          id: 'prt_rule_ephemeral_85f42885ffa0d6d6',
-          type: 'text',
-          text: '# OpenCode transient rule: rules/transient.md\n\nTransient guidance.',
-          synthetic: true,
-        },
-      ],
-    });
-    expect(
-      buildTransientHookMessage('Hook guidance.', { role: 'user' })
-    ).toEqual({
-      info: {
-        id: 'msg_rules_hook_1d4c59cbd8e30804',
-        role: 'user',
-        model: { providerID: undefined, modelID: undefined },
-      },
-      parts: [
-        {
-          id: 'prt_hook_transient_1d4c59cbd8e30804',
-          type: 'text',
-          text: 'Hook guidance.',
-          synthetic: true,
-        },
-      ],
-    });
-  });
-});
 
 describe('RuleDelivery durable turns', () => {
   it('seeds once, appends new matched rules in order, and accepts duplicate-only turns', async () => {
@@ -146,6 +77,113 @@ describe('RuleDelivery durable turns', () => {
     expect(duplicateResult).toBe('accepted');
     expect(duplicateOutput.parts).toEqual([]);
     expect(history.calls).toEqual(['ses_durable']);
+  });
+
+  it('appends deterministic identities and exact durable formats through the interface', async () => {
+    const delivery: RuleDelivery = createRuleDelivery({
+      rawHistory: new MockRawHistoryAdapter({ ok: true, messages: [] }),
+    });
+    const output = { parts: [] };
+    await delivery.deliverDurableTurn({
+      sessionID: 'ses_identity',
+      messageID: 'msg_identity',
+      matchedRules: [
+        { relativePath: 'rules/core.md', content: 'Durable guidance.' },
+      ],
+      output,
+    });
+    delivery.queueMatchedHooks({
+      sessionID: 'ses_identity',
+      hooks: [
+        {
+          relativePath: 'rules/hook.md',
+          content: 'Hook guidance.',
+          lifetime: 'durable',
+        },
+      ],
+    });
+    await delivery.deliverDurableTurn({
+      sessionID: 'ses_identity',
+      messageID: 'msg_identity_2',
+      matchedRules: [],
+      output,
+    });
+
+    expect(output.parts).toEqual([
+      {
+        id: 'prt_rules_dad3bb218895408d',
+        type: 'text',
+        text: '## rules/core.md\n\nDurable guidance.',
+        synthetic: true,
+        sessionID: 'ses_identity',
+        messageID: 'msg_identity',
+      },
+      {
+        id: 'prt_hook_1d4c59cbd8e30804',
+        type: 'text',
+        text: 'Hook guidance.',
+        synthetic: true,
+        sessionID: 'ses_identity',
+        messageID: 'msg_identity_2',
+      },
+    ]);
+  });
+
+  it('recognizes legacy ID-less durable markers and ignores malformed history', async () => {
+    const history = new MockRawHistoryAdapter({
+      ok: true,
+      messages: [
+        42,
+        null,
+        { info: { role: 'user' } },
+        {
+          info: { role: 'user' },
+          parts: [
+            null,
+            'not-a-part',
+            { type: 'text', text: 'Plain user text.' },
+            {
+              type: 'text',
+              synthetic: true,
+              text: '## rules/legacy.md\n\nLegacy guidance.',
+            },
+            {
+              id: 'prt_rules_zzz',
+              type: 'text',
+              synthetic: true,
+              text: 'not a rule header',
+            },
+          ],
+        },
+        {
+          parts: [
+            { id: 'prt_hook_transient_zzz', type: 'text', text: 'Transient.' },
+          ],
+        },
+      ],
+    });
+    const delivery: RuleDelivery = createRuleDelivery({ rawHistory: history });
+    const output = { parts: [] };
+
+    await expect(
+      delivery.deliverDurableTurn({
+        sessionID: 'ses_legacy',
+        messageID: 'msg_legacy',
+        matchedRules: [
+          { relativePath: 'rules/legacy.md', content: 'Legacy guidance.' },
+          { relativePath: 'rules/fresh.md', content: 'Fresh guidance.' },
+        ],
+        output,
+      })
+    ).resolves.toBe('accepted');
+
+    expect(output.parts).toEqual([
+      {
+        ...buildRulePart('rules/fresh.md', 'Fresh guidance.'),
+        sessionID: 'ses_legacy',
+        messageID: 'msg_legacy',
+      },
+    ]);
   });
 
   it('defers after unavailable history and does not retry while a rescan is pending', async () => {
@@ -743,6 +781,46 @@ describe('RuleDelivery transient dispatches', () => {
       messages: nextMessages,
     });
     expect(nextMessages).toHaveLength(1);
+  });
+
+  it('falls back to the last message info and synthesizes a model object when no real user message exists', () => {
+    const delivery: RuleDelivery = createRuleDelivery({
+      rawHistory: new MockRawHistoryAdapter({ ok: true, messages: [] }),
+    });
+    delivery.queueMatchedHooks({
+      sessionID: 'ses_no_user',
+      hooks: [
+        {
+          relativePath: 'rules/hook.md',
+          content: 'Fallback Hook guidance.',
+          lifetime: 'ephemeral',
+        },
+      ],
+    });
+    const messages = [
+      {
+        info: {
+          id: 'msg_asst_1',
+          role: 'assistant',
+          providerID: 'opencode-go',
+          modelID: 'deepseek-v4-flash',
+        },
+        parts: [{ type: 'text', text: 'thinking...' }],
+      },
+    ];
+
+    delivery.deliverTransientDispatch({
+      sessionID: 'ses_no_user',
+      matchedRules: [],
+      messages,
+    });
+
+    expect(messages).toHaveLength(2);
+    expect(messages[1]?.info).toMatchObject({
+      role: 'user',
+      id: 'msg_rules_hook_5d7e86f1a847a77e',
+      model: { providerID: 'opencode-go', modelID: 'deepseek-v4-flash' },
+    });
   });
 
   it('seeds or replaces the ledger from supplied messages even without a usable target', async () => {
