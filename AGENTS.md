@@ -5,7 +5,6 @@
 - Use Aube and install with `aube install --frozen-lockfile`. Run checks in this order: `aube run lint` -> `aubx tsc --noEmit` -> `aube run test:run`.
 - There is no `typecheck` script; typecheck with `aubx tsc --noEmit`.
 - Run one colocated Vitest file with `aube run test:run src/<name>.test.ts` (or a path under `tui/`). `tsconfig.json` excludes test/spec files, so `tsc` does not typecheck them.
-- `demo-synthetic-injection.md` at the repo root is a manual E2E script for verifying synthetic-part rule delivery across turns.
 - `docs/silent-message-implementation.md` describes a superseded design; current delivery is synthetic parts via `chat.message`.
 
 ## Architecture
