@@ -25,6 +25,11 @@ export interface SyntheticPart extends DeliveryPart {
   synthetic: true;
 }
 
+export interface DurablePartOwner {
+  sessionID: string;
+  messageID: string;
+}
+
 export interface TransientMessage {
   info: { id: string; role: 'user' } & Record<string, unknown>;
   parts: SyntheticPart[];
@@ -57,13 +62,16 @@ export function isTransientMessageId(id: unknown): boolean {
 
 export function buildRulePart(
   relativePath: string,
-  content: string
+  content: string,
+  owner: DurablePartOwner
 ): SyntheticPart {
+  const keyHash = shortHash(ruleKeyFor(relativePath, content));
   return {
-    id: `${RULE_PART_PREFIX}${shortHash(ruleKeyFor(relativePath, content))}`,
+    id: `${RULE_PART_PREFIX}${keyHash}_${owner.messageID}`,
     type: 'text',
     text: `## ${relativePath}\n\n${content}`,
     synthetic: true,
+    ...owner,
   };
 }
 
@@ -71,12 +79,16 @@ export function hookPartId(hash: string): string {
   return `${HOOK_PART_PREFIX}${hash}`;
 }
 
-export function buildDurableHookPart(content: string): SyntheticPart {
+export function buildDurableHookPart(
+  content: string,
+  owner: DurablePartOwner
+): SyntheticPart {
   return {
-    id: hookPartId(shortHash(content)),
+    id: `${hookPartId(shortHash(content))}_${owner.messageID}`,
     type: 'text',
     text: content,
     synthetic: true,
+    ...owner,
   };
 }
 
@@ -164,7 +176,9 @@ export function decodeRawHistory(
           continue;
         } else if (id.startsWith(HOOK_PART_PREFIX)) {
           if (id.startsWith(TRANSIENT_HOOK_PART_PREFIX)) continue;
-          facts.hookHashes.add(id.slice(HOOK_PART_PREFIX.length));
+          facts.hookHashes.add(
+            id.slice(HOOK_PART_PREFIX.length, HOOK_PART_PREFIX.length + 16)
+          );
         }
         continue;
       }

@@ -155,22 +155,24 @@ class DefaultRuleDelivery implements RuleDelivery {
       const key = ruleKeyFor(rule.relativePath, rule.content);
       if (state.ruleKeys.has(key) || newRuleKeys.has(key)) continue;
       newRuleKeys.add(key);
-      newParts.push({
-        ...buildRulePart(rule.relativePath, rule.content),
-        sessionID: input.sessionID,
-        messageID: input.messageID,
-      });
+      newParts.push(
+        buildRulePart(rule.relativePath, rule.content, {
+          sessionID: input.sessionID,
+          messageID: input.messageID,
+        })
+      );
     }
 
     for (const content of state.durableHookQueue) {
       const hash = hashContent(content);
       if (state.hookHashes.has(hash) || newHookHashes.has(hash)) continue;
       newHookHashes.add(hash);
-      newParts.push({
-        ...buildDurableHookPart(content),
-        sessionID: input.sessionID,
-        messageID: input.messageID,
-      });
+      newParts.push(
+        buildDurableHookPart(content, {
+          sessionID: input.sessionID,
+          messageID: input.messageID,
+        })
+      );
     }
 
     if (newParts.length > 0) {
@@ -285,7 +287,10 @@ class DefaultRuleDelivery implements RuleDelivery {
           !part ||
           presentIDs.has(transientMessage.info.id) ||
           presentIDs.has(part.id) ||
-          presentIDs.has(hookPartId(hash))
+          [...presentIDs].some(
+            id =>
+              id === hookPartId(hash) || id.startsWith(`${hookPartId(hash)}_`)
+          )
         ) {
           continue;
         }

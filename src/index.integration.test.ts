@@ -1602,7 +1602,10 @@ describe('Synthetic-part delivery lifecycle', () => {
         info: { id: 'msg_u0', role: 'user', sessionID: 'ses_restart' },
         parts: [
           { type: 'text', text: 'original question' },
-          buildRulePart('persisted.md', 'Persisted rule body.'),
+          buildRulePart('persisted.md', 'Persisted rule body.', {
+            sessionID: 'ses_restart',
+            messageID: 'msg_u0',
+          }),
         ],
       },
     ];

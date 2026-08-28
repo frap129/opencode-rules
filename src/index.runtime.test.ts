@@ -851,7 +851,10 @@ describe('history scan and rescan', () => {
             },
             parts: [
               { type: 'text', text: 'resume' },
-              buildRulePart('persisted.md', 'Persisted rule body.'),
+              buildRulePart('persisted.md', 'Persisted rule body.', {
+                sessionID: 'ses_state_reconcile',
+                messageID: 'msg_history',
+              }),
             ],
           },
         ],
@@ -1874,7 +1877,12 @@ describe('chat.message rule persistence', () => {
       history: [
         {
           info: { id: 'msg_1', role: 'user', sessionID: 'ses_restart' },
-          parts: [buildRulePart('persisted.md', 'Persisted rule body.')],
+          parts: [
+            buildRulePart('persisted.md', 'Persisted rule body.', {
+              sessionID: 'ses_restart',
+              messageID: 'msg_1',
+            }),
+          ],
         },
       ],
     });

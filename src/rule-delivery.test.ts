@@ -27,7 +27,12 @@ describe('RuleDelivery durable turns', () => {
       ok: true,
       messages: [
         {
-          parts: [buildRulePart('rules/existing.md', 'Existing guidance.')],
+          parts: [
+            buildRulePart('rules/existing.md', 'Existing guidance.', {
+              sessionID: 'ses_durable',
+              messageID: 'msg_existing',
+            }),
+          ],
         },
       ],
     });
@@ -52,16 +57,14 @@ describe('RuleDelivery durable turns', () => {
     expect(firstOutput.parts).toBe(originalParts);
     expect(firstOutput.parts).toEqual([
       existingPart,
-      {
-        ...buildRulePart('rules/first.md', 'First guidance.'),
+      buildRulePart('rules/first.md', 'First guidance.', {
         sessionID: 'ses_durable',
         messageID: 'msg_first',
-      },
-      {
-        ...buildRulePart('rules/second.md', 'Second guidance.'),
+      }),
+      buildRulePart('rules/second.md', 'Second guidance.', {
         sessionID: 'ses_durable',
         messageID: 'msg_first',
-      },
+      }),
     ]);
 
     const duplicateOutput = { parts: [] };
@@ -111,7 +114,7 @@ describe('RuleDelivery durable turns', () => {
 
     expect(output.parts).toEqual([
       {
-        id: 'prt_rules_dad3bb218895408d',
+        id: 'prt_rules_dad3bb218895408d_msg_identity',
         type: 'text',
         text: '## rules/core.md\n\nDurable guidance.',
         synthetic: true,
@@ -119,7 +122,7 @@ describe('RuleDelivery durable turns', () => {
         messageID: 'msg_identity',
       },
       {
-        id: 'prt_hook_1d4c59cbd8e30804',
+        id: 'prt_hook_1d4c59cbd8e30804_msg_identity_2',
         type: 'text',
         text: 'Hook guidance.',
         synthetic: true,
@@ -127,6 +130,41 @@ describe('RuleDelivery durable turns', () => {
         messageID: 'msg_identity_2',
       },
     ]);
+  });
+
+  it('scopes durable part identities to their owning message', async () => {
+    const delivery: RuleDelivery = createRuleDelivery({
+      rawHistory: new MockRawHistoryAdapter({ ok: true, messages: [] }),
+    });
+    const outputs: { parts: DeliveryPart[] }[] = [{ parts: [] }, { parts: [] }];
+    const owners = [
+      { sessionID: 'ses_owner_one', messageID: 'msg_owner_one' },
+      { sessionID: 'ses_owner_two', messageID: 'msg_owner_two' },
+    ];
+
+    for (const [index, owner] of owners.entries()) {
+      delivery.queueMatchedHooks({
+        sessionID: owner.sessionID,
+        hooks: [
+          {
+            relativePath: 'rules/hook.md',
+            content: 'Shared Hook guidance.',
+            lifetime: 'durable',
+          },
+        ],
+      });
+      await delivery.deliverDurableTurn({
+        ...owner,
+        matchedRules: [
+          { relativePath: 'rules/core.md', content: 'Shared rule guidance.' },
+        ],
+        output: outputs[index]!,
+      });
+    }
+
+    expect(outputs[0]!.parts.map(part => part.id)).not.toEqual(
+      outputs[1]!.parts.map(part => part.id)
+    );
   });
 
   it('recognizes legacy ID-less durable markers and ignores malformed history', async () => {
@@ -178,11 +216,10 @@ describe('RuleDelivery durable turns', () => {
     ).resolves.toBe('accepted');
 
     expect(output.parts).toEqual([
-      {
-        ...buildRulePart('rules/fresh.md', 'Fresh guidance.'),
+      buildRulePart('rules/fresh.md', 'Fresh guidance.', {
         sessionID: 'ses_legacy',
         messageID: 'msg_legacy',
-      },
+      }),
     ]);
   });
 
@@ -209,7 +246,16 @@ describe('RuleDelivery durable turns', () => {
   it('retains queued Hook content on identity deferral and appends it after matched rules', async () => {
     const history = new MockRawHistoryAdapter({
       ok: true,
-      messages: [{ parts: [buildDurableHookPart('Already delivered Hook.')] }],
+      messages: [
+        {
+          parts: [
+            buildDurableHookPart('Already delivered Hook.', {
+              sessionID: 'ses_hooks',
+              messageID: 'msg_existing_hook',
+            }),
+          ],
+        },
+      ],
     });
     const delivery: RuleDelivery = createRuleDelivery({ rawHistory: history });
     delivery.queueMatchedHooks({
@@ -257,16 +303,14 @@ describe('RuleDelivery durable turns', () => {
 
     expect(accepted).toBe('accepted');
     expect(acceptedOutput.parts).toEqual([
-      {
-        ...buildRulePart('rules/core.md', 'Durable guidance.'),
+      buildRulePart('rules/core.md', 'Durable guidance.', {
         sessionID: 'ses_hooks',
         messageID: 'msg_hooks',
-      },
-      {
-        ...buildDurableHookPart('Queued Hook.'),
+      }),
+      buildDurableHookPart('Queued Hook.', {
         sessionID: 'ses_hooks',
         messageID: 'msg_hooks',
-      },
+      }),
     ]);
     expect(history.calls).toEqual(['ses_hooks']);
   });
@@ -520,16 +564,14 @@ describe('RuleDelivery matched Hook queueing', () => {
       output: durableOutput,
     });
     expect(durableOutput.parts).toEqual([
-      {
-        ...buildDurableHookPart('Durable owner Hook.'),
+      buildDurableHookPart('Durable owner Hook.', {
         sessionID: 'ses_hook_queue',
         messageID: 'msg_durable_hook',
-      },
-      {
-        ...buildDurableHookPart('Evidence durable Hook.'),
+      }),
+      buildDurableHookPart('Evidence durable Hook.', {
         sessionID: 'ses_hook_queue',
         messageID: 'msg_durable_hook',
-      },
+      }),
     ]);
 
     delivery.queueMatchedHooks({
@@ -623,7 +665,10 @@ describe('RuleDelivery matched Hook queueing', () => {
         info: { id: 'msg_user', role: 'user' },
         parts: [
           { type: 'text', text: 'Prompt.' },
-          buildRulePart('rules/recovered.md', 'Recovered durable owner.'),
+          buildRulePart('rules/recovered.md', 'Recovered durable owner.', {
+            sessionID: 'ses_recovered_owner',
+            messageID: 'msg_user',
+          }),
         ],
       },
     ];
@@ -642,11 +687,10 @@ describe('RuleDelivery matched Hook queueing', () => {
     });
 
     expect(output.parts).toEqual([
-      {
-        ...buildDurableHookPart('Recovered durable owner.'),
+      buildDurableHookPart('Recovered durable owner.', {
         sessionID: 'ses_recovered_owner',
         messageID: 'msg_recovered_hook',
-      },
+      }),
     ]);
   });
 });
@@ -866,7 +910,10 @@ describe('RuleDelivery transient dispatches', () => {
         info: { id: 'msg_user', role: 'user' },
         parts: [
           { type: 'text', text: 'Prompt.' },
-          buildRulePart('rules/recovered.md', 'Recovered guidance.'),
+          buildRulePart('rules/recovered.md', 'Recovered guidance.', {
+            sessionID: 'ses_rescan',
+            messageID: 'msg_user',
+          }),
         ],
       },
     ];
@@ -942,7 +989,10 @@ describe('RuleDelivery compaction invalidation', () => {
         info: { id: 'msg_after_compaction', role: 'user' },
         parts: [
           { type: 'text', text: 'Prompt after compaction.' },
-          buildRulePart(survivingRule.relativePath, survivingRule.content),
+          buildRulePart(survivingRule.relativePath, survivingRule.content, {
+            sessionID: 'ses_compacted',
+            messageID: 'msg_after_compaction',
+          }),
         ],
       },
     ];
@@ -966,16 +1016,14 @@ describe('RuleDelivery compaction invalidation', () => {
       })
     ).resolves.toBe('accepted');
     expect(resumedOutput.parts).toEqual([
-      {
-        ...buildRulePart(removedRule.relativePath, removedRule.content),
+      buildRulePart(removedRule.relativePath, removedRule.content, {
         sessionID: 'ses_compacted',
         messageID: 'msg_after_rescan',
-      },
-      {
-        ...buildDurableHookPart('Retained durable Hook.'),
+      }),
+      buildDurableHookPart('Retained durable Hook.', {
         sessionID: 'ses_compacted',
         messageID: 'msg_after_rescan',
-      },
+      }),
     ]);
     expect(history.calls).toEqual(['ses_compacted']);
   });
