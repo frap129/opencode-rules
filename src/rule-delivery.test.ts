@@ -1039,6 +1039,30 @@ describe('RuleDelivery transient dispatches', () => {
     expect(nextMessages).toHaveLength(1);
   });
 
+  it('aborts a dispatch on a malformed message without appending, as before', () => {
+    const delivery: RuleDelivery = createRuleDelivery({
+      rawHistory: new MockRawHistoryAdapter({ ok: true, messages: [] }),
+    });
+    const messages = [
+      null as unknown as { info: Record<string, unknown>; parts: unknown[] },
+      {
+        info: { id: 'msg_user', role: 'user' },
+        parts: [{ type: 'text', text: 'Prompt.' }],
+      },
+    ];
+
+    expect(() =>
+      delivery.deliverTransientDispatch({
+        sessionID: 'ses_malformed',
+        matchedRules: [
+          { relativePath: 'rules/transient.md', content: 'Transient.' },
+        ],
+        messages,
+      })
+    ).not.toThrow();
+    expect(messages).toHaveLength(2);
+  });
+
   it('falls back to the last message info and synthesizes a model object when no real user message exists', () => {
     const delivery: RuleDelivery = createRuleDelivery({
       rawHistory: new MockRawHistoryAdapter({ ok: true, messages: [] }),

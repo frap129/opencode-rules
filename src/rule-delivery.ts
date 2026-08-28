@@ -2,6 +2,7 @@ import {
   buildDurableDeliveryPart,
   buildTransientDeliveryMessage,
   decodeRawHistory,
+  decodeTransientPresence,
   type DeliveryLedgerFacts,
   type DeliveryPart,
   isTransientMessageId,
@@ -239,51 +240,11 @@ class DefaultRuleDelivery implements RuleDelivery {
       const target = input.messages[input.messages.length - 1];
       if (!target || !Array.isArray(target.parts)) return;
 
-      const presentIDs = new Set<string>();
-      const presentRuleKeys = new Set<string>();
-      const presentHookKeys = new Set<string>();
-      for (const message of input.messages) {
-        if (typeof message.info?.id === 'string') {
-          presentIDs.add(message.info.id);
-        }
-        if (!Array.isArray(message.parts)) continue;
-        for (const part of message.parts) {
-          if (
-            typeof part === 'object' &&
-            part !== null &&
-            !Array.isArray(part)
-          ) {
-            if ('id' in part && typeof part.id === 'string') {
-              presentIDs.add(part.id);
-            }
-            const metadata =
-              'metadata' in part &&
-              typeof part.metadata === 'object' &&
-              part.metadata !== null &&
-              !Array.isArray(part.metadata)
-                ? part.metadata
-                : undefined;
-            if (
-              metadata &&
-              'ruleKeys' in metadata &&
-              Array.isArray(metadata.ruleKeys)
-            ) {
-              for (const key of metadata.ruleKeys) {
-                if (typeof key === 'string') presentRuleKeys.add(key);
-              }
-            }
-            if (
-              metadata &&
-              'hookKeys' in metadata &&
-              Array.isArray(metadata.hookKeys)
-            ) {
-              for (const key of metadata.hookKeys) {
-                if (typeof key === 'string') presentHookKeys.add(key);
-              }
-            }
-          }
-        }
-      }
+      const {
+        ids: presentIDs,
+        ruleKeys: presentRuleKeys,
+        hookKeys: presentHookKeys,
+      } = decodeTransientPresence(input.messages);
 
       const baseInfo = this.transientBaseInfo(input.messages);
       const transientRules: MatchedRuleContent[] = [];

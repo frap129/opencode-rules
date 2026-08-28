@@ -458,7 +458,7 @@ opencode-rules/
 │   ├── index.ts              # Main plugin entry point and exports
 │   ├── runtime.ts            # OpenCodeRulesRuntime class (hook orchestration)
 │   ├── rule-delivery.ts      # Durable/transient delivery, Hook queues, and identity ledger
-│   ├── rule-delivery-codec.ts # Delivery identifiers, formats, and history decoding
+│   ├── rule-delivery-codec.ts # Delivery identifiers, formats, history decoding, and transient presence facts
 │   ├── rule-delivery-history.ts # Raw history port for delivery decoding
 │   ├── runtime-context.ts    # Context-building helpers (match context, project detection)
 │   ├── runtime-chat.ts       # Chat message handling and text extraction
@@ -497,7 +497,7 @@ The following highlights the primary runtime modules:
 
 - **runtime.ts** - Orchestrates hooks (`tool.execute.before`, `chat.message`, `experimental.chat.*`)
 - **rule-delivery.ts** - Owns durable/transient delivery, matched Hook queues, history reconstruction, and the identity ledger
-- **rule-delivery-codec.ts** - Encodes durable/transient delivery and decodes durable history facts
+- **rule-delivery-codec.ts** - Encodes durable/transient delivery and decodes durable history facts plus transient presence facts
 - **rule-delivery-history.ts** - Defines the raw host-history port used by delivery decoding
 - **runtime-context.ts** - Builds `RuleMatchContext` from session state and environment
 - **runtime-chat.ts** - Extracts text from chat message parts for keyword matching

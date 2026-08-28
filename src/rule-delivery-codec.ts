@@ -52,6 +52,18 @@ export interface DeliveryLedgerFacts {
   hookKeys: Set<string>;
 }
 
+export interface TransientPresenceFacts {
+  /** Every message and part identifier in the dispatch, not delivery IDs only. */
+  ids: Set<string>;
+  ruleKeys: Set<string>;
+  hookKeys: Set<string>;
+}
+
+export interface TransientPresenceMessage {
+  info?: Record<string, unknown>;
+  parts?: readonly unknown[];
+}
+
 function shortHash(input: string): string {
   return createHash('sha256').update(input).digest('hex').slice(0, 16);
 }
@@ -202,6 +214,47 @@ export function decodeRawHistory(
       ) {
         recordLegacyRuleText(facts, part.text);
       }
+    }
+  }
+
+  return facts;
+}
+
+/**
+ * Reads Transient delivery presence facts: identifiers and canonical metadata
+ * keys already present in a dispatch's message array. Deliberately separate
+ * from decodeRawHistory: presence counts Transient delivery parts, which the
+ * durable ledger must exclude, and ignores the legacy persisted forms the
+ * ledger must accept. Neither function calls the other.
+ *
+ * Malformed messages abort with the offending property-access TypeError,
+ * matching the inline scan this replaced; hardening is deferred.
+ */
+export function decodeTransientPresence(
+  messages: readonly TransientPresenceMessage[]
+): TransientPresenceFacts {
+  const facts: TransientPresenceFacts = {
+    ids: new Set(),
+    ruleKeys: new Set(),
+    hookKeys: new Set(),
+  };
+
+  for (const message of messages) {
+    const info = asRecord(message.info);
+    if (typeof info?.id === 'string') facts.ids.add(info.id);
+
+    if (!Array.isArray(message.parts)) continue;
+    for (const value of message.parts) {
+      const part = asRecord(value);
+      if (!part) continue;
+
+      if (typeof part.id === 'string') facts.ids.add(part.id);
+      const metadata = asRecord(part.metadata);
+      recordKeys(facts.ruleKeys, metadata?.ruleKeys);
+      recordKeys(facts.hookKeys, metadata?.hookKeys);
+      // Legacy top-level key arrays and legacy `## path` header text are
+      // persisted durable forms only; Transient presence is canonical-shape
+      // only, so they are deliberately not read here.
     }
   }
 
