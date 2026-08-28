@@ -9,13 +9,19 @@ import type { Plugin, PluginInput } from '@opencode-ai/plugin';
 import { discoverRuleFiles } from './utils.js';
 import { OpenCodeRulesRuntime } from './runtime.js';
 import { SessionStore, type SessionState } from './session-store.js';
+import { MatchedRulesStateStore } from './matched-rules-state.js';
 
 const sessionStore = new SessionStore();
+const matchedRulesStateStore = new MatchedRulesStateStore();
 import { createDebugLog } from './debug.js';
 
 const debugLog = createDebugLog();
 
-const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
+async function createRuntimeHooks(
+  pluginInput: PluginInput,
+  runtimeSessionStore: SessionStore,
+  runtimeMatchedRulesStateStore: MatchedRulesStateStore
+) {
   const ruleFiles = await discoverRuleFiles(pluginInput.directory);
   debugLog(`Discovered ${ruleFiles.length} rule file(s)`);
 
@@ -24,11 +30,16 @@ const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
     directory: pluginInput.directory,
     projectDirectory: pluginInput.directory,
     ruleFiles,
-    sessionStore,
+    sessionStore: runtimeSessionStore,
+    matchedRulesStateStore: runtimeMatchedRulesStateStore,
     debugLog,
   });
 
   return runtime.createHooks();
+}
+
+const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
+  return createRuntimeHooks(pluginInput, sessionStore, matchedRulesStateStore);
 };
 
 /**
@@ -60,6 +71,10 @@ const __testOnly = Object.freeze(
     getSeedCount: (sessionID: string): number => {
       return sessionStore.get(sessionID)?.seedCount ?? 0;
     },
+    createHooksWithMatchedRulesStateStore: (
+      pluginInput: PluginInput,
+      store: MatchedRulesStateStore
+    ) => createRuntimeHooks(pluginInput, sessionStore, store),
   })
 );
 

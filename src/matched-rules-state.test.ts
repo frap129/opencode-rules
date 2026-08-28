@@ -3,34 +3,24 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import {
-  resolveStateDir,
-  getStateFilePath,
-  writeActiveRulesState,
-  readActiveRulesState,
-  _setStateDirForTesting,
-  _resetWriteQueues,
-  _hasQueuedWrite,
-} from './active-rules-state.js';
+  MatchedRulesStateStore,
+  readMatchedRulesState,
+} from './matched-rules-state.js';
 
-describe('active-rules-state', () => {
+describe('matched-rules-state', () => {
   let testStateDir: string;
+  let store: MatchedRulesStateStore;
 
   beforeEach(async () => {
     // Create a temp directory for tests
     const testDir = await fs.mkdtemp(
-      path.join(os.tmpdir(), 'active-rules-test-')
+      path.join(os.tmpdir(), 'matched-rules-test-')
     );
     testStateDir = path.join(testDir, 'state');
-
-    // Use test override instead of mocking os.homedir
-    _setStateDirForTesting(testStateDir);
+    store = new MatchedRulesStateStore({ stateDir: testStateDir });
   });
 
   afterEach(async () => {
-    // Reset the override
-    _setStateDirForTesting(null);
-    _resetWriteQueues();
-
     // Clean up test directory
     if (testStateDir) {
       try {
@@ -43,48 +33,16 @@ describe('active-rules-state', () => {
     }
   });
 
-  describe('resolveStateDir', () => {
-    it('returns overridden path when set', () => {
-      const stateDir = resolveStateDir();
-      expect(stateDir).toBe(testStateDir);
-    });
-
-    it('returns default path when not overridden', () => {
-      _setStateDirForTesting(null);
-      const stateDir = resolveStateDir();
-      expect(stateDir).toBe(
-        path.join(os.homedir(), '.opencode', 'state', 'opencode-rules')
-      );
-    });
-  });
-
-  describe('getStateFilePath', () => {
-    it('returns session-specific JSON path', () => {
-      const filePath = getStateFilePath('ses_123');
-      expect(filePath).toBe(path.join(testStateDir, 'ses_123.json'));
-    });
-
-    it('throws for sessionID with path traversal', () => {
-      expect(() => getStateFilePath('../escape')).toThrow('Invalid sessionID');
-      expect(() => getStateFilePath('foo/bar')).toThrow('Invalid sessionID');
-      expect(() => getStateFilePath('/absolute')).toThrow('Invalid sessionID');
-    });
-
-    it('throws for sessionID with special characters', () => {
-      expect(() => getStateFilePath('ses.123')).toThrow('Invalid sessionID');
-      expect(() => getStateFilePath('ses 123')).toThrow('Invalid sessionID');
-      expect(() => getStateFilePath('')).toThrow('Invalid sessionID');
-    });
-  });
-
-  describe('writeActiveRulesState and readActiveRulesState', () => {
+  describe('write and readMatchedRulesState', () => {
     it('write/read round-trip preserves data', async () => {
       const sessionID = 'ses_roundtrip';
       const matchedPaths = ['/path/to/rule1.md', '/path/to/rule2.md'];
 
-      await writeActiveRulesState(sessionID, matchedPaths);
+      await store.write(sessionID, matchedPaths);
 
-      const state = await readActiveRulesState(sessionID);
+      const state = await readMatchedRulesState(sessionID, {
+        stateDir: testStateDir,
+      });
 
       expect(state).not.toBeNull();
       expect(state!.sessionID).toBe(sessionID);
@@ -94,7 +52,9 @@ describe('active-rules-state', () => {
     });
 
     it('returns null for missing file', async () => {
-      const state = await readActiveRulesState('ses_nonexistent');
+      const state = await readMatchedRulesState('ses_nonexistent', {
+        stateDir: testStateDir,
+      });
       expect(state).toBeNull();
     });
 
@@ -114,7 +74,7 @@ describe('active-rules-state', () => {
         'utf-8'
       );
 
-      const state = await readActiveRulesState('ses_explicit', {
+      const state = await readMatchedRulesState('ses_explicit', {
         stateDir: explicitStateDir,
       });
 
@@ -128,27 +88,31 @@ describe('active-rules-state', () => {
     it('returns null for corrupt/invalid JSON', async () => {
       await fs.mkdir(testStateDir, { recursive: true });
 
-      const filePath = getStateFilePath('ses_corrupt');
+      const filePath = path.join(testStateDir, 'ses_corrupt.json');
       await fs.writeFile(filePath, 'not valid json {{{', 'utf-8');
 
-      const state = await readActiveRulesState('ses_corrupt');
+      const state = await readMatchedRulesState('ses_corrupt', {
+        stateDir: testStateDir,
+      });
       expect(state).toBeNull();
     });
 
     it('returns null for invalid state format', async () => {
       await fs.mkdir(testStateDir, { recursive: true });
 
-      const filePath = getStateFilePath('ses_invalid');
+      const filePath = path.join(testStateDir, 'ses_invalid.json');
       await fs.writeFile(filePath, JSON.stringify({ foo: 'bar' }), 'utf-8');
 
-      const state = await readActiveRulesState('ses_invalid');
+      const state = await readMatchedRulesState('ses_invalid', {
+        stateDir: testStateDir,
+      });
       expect(state).toBeNull();
     });
 
     it('returns null for wrong-type values in state', async () => {
       await fs.mkdir(testStateDir, { recursive: true });
 
-      const filePath = getStateFilePath('ses_wrongtypes');
+      const filePath = path.join(testStateDir, 'ses_wrongtypes.json');
       await fs.writeFile(
         filePath,
         JSON.stringify({
@@ -159,14 +123,16 @@ describe('active-rules-state', () => {
         'utf-8'
       );
 
-      const state = await readActiveRulesState('ses_wrongtypes');
+      const state = await readMatchedRulesState('ses_wrongtypes', {
+        stateDir: testStateDir,
+      });
       expect(state).toBeNull();
     });
 
     it('returns null for array with non-string items', async () => {
       await fs.mkdir(testStateDir, { recursive: true });
 
-      const filePath = getStateFilePath('ses_badarray');
+      const filePath = path.join(testStateDir, 'ses_badarray.json');
       await fs.writeFile(
         filePath,
         JSON.stringify({
@@ -177,30 +143,40 @@ describe('active-rules-state', () => {
         'utf-8'
       );
 
-      const state = await readActiveRulesState('ses_badarray');
+      const state = await readMatchedRulesState('ses_badarray', {
+        stateDir: testStateDir,
+      });
       expect(state).toBeNull();
     });
 
     it('throws on write with invalid sessionID', () => {
-      expect(() => writeActiveRulesState('../escape', ['/rule.md'])).toThrow(
-        'Invalid sessionID'
-      );
-      expect(() => writeActiveRulesState('foo/bar', ['/rule.md'])).toThrow(
-        'Invalid sessionID'
-      );
+      for (const sessionID of [
+        '../escape',
+        'foo/bar',
+        '/absolute',
+        'ses.123',
+        'ses 123',
+        '',
+      ]) {
+        expect(() => store.write(sessionID, ['/rule.md'])).toThrow(
+          'Invalid sessionID'
+        );
+      }
     });
 
     it('throws for read with invalid sessionID', async () => {
-      await expect(readActiveRulesState('../escape')).rejects.toThrow(
-        'Invalid sessionID'
-      );
+      for (const sessionID of ['../escape', '/absolute', 'ses.123', '']) {
+        await expect(
+          readMatchedRulesState(sessionID, { stateDir: testStateDir })
+        ).rejects.toThrow('Invalid sessionID');
+      }
     });
 
     it('no temp file remains after write', async () => {
       const sessionID = 'ses_no_temp';
       const matchedPaths = ['/rule.md'];
 
-      await writeActiveRulesState(sessionID, matchedPaths);
+      await store.write(sessionID, matchedPaths);
 
       // Check that no temp files remain
       const files = await fs.readdir(testStateDir);
@@ -213,29 +189,31 @@ describe('active-rules-state', () => {
       const sessionID = 'ses_concurrent';
 
       // Fire multiple writes concurrently
-      const first = writeActiveRulesState(sessionID, ['path1']);
-      const second = writeActiveRulesState(sessionID, ['path2']);
-      const third = writeActiveRulesState(sessionID, ['path3']);
+      const first = store.write(sessionID, ['path1']);
+      const second = store.write(sessionID, ['path2']);
+      const third = store.write(sessionID, ['path3']);
 
-      expect(_hasQueuedWrite(sessionID)).toBe(true);
+      expect(getWriteQueues(store).has(sessionID)).toBe(true);
 
       await Promise.all([first, second, third]);
 
       // The final state should reflect the last write
-      const state = await readActiveRulesState(sessionID);
+      const state = await readMatchedRulesState(sessionID, {
+        stateDir: testStateDir,
+      });
       expect(state).not.toBeNull();
       expect(state!.matchedRulePaths).toEqual(['path3']);
-      expect(_hasQueuedWrite(sessionID)).toBe(false);
+      expect(getWriteQueues(store).has(sessionID)).toBe(false);
     });
 
     it('releases a session queue entry after its final write settles', async () => {
-      const write = writeActiveRulesState('ses_lifecycle', ['path1']);
+      const write = store.write('ses_lifecycle', ['path1']);
 
-      expect(_hasQueuedWrite('ses_lifecycle')).toBe(true);
+      expect(getWriteQueues(store).has('ses_lifecycle')).toBe(true);
 
       await write;
 
-      expect(_hasQueuedWrite('ses_lifecycle')).toBe(false);
+      expect(getWriteQueues(store).has('ses_lifecycle')).toBe(false);
     });
 
     it('creates state directory when it does not exist', async () => {
@@ -245,7 +223,7 @@ describe('active-rules-state', () => {
       // Verify directory doesn't exist yet
       await expect(fs.access(testStateDir)).rejects.toThrow();
 
-      await writeActiveRulesState(sessionID, matchedPaths);
+      await store.write(sessionID, matchedPaths);
 
       // Verify directory now exists — fs.access resolves to null on Bun, undefined on Node
       const dirExists = await fs.access(testStateDir).then(
@@ -257,15 +235,27 @@ describe('active-rules-state', () => {
 
     it('handles writes to different sessions independently', async () => {
       await Promise.all([
-        writeActiveRulesState('ses_a', ['ruleA']),
-        writeActiveRulesState('ses_b', ['ruleB']),
+        store.write('ses_a', ['ruleA']),
+        store.write('ses_b', ['ruleB']),
       ]);
 
-      const stateA = await readActiveRulesState('ses_a');
-      const stateB = await readActiveRulesState('ses_b');
+      const stateA = await readMatchedRulesState('ses_a', {
+        stateDir: testStateDir,
+      });
+      const stateB = await readMatchedRulesState('ses_b', {
+        stateDir: testStateDir,
+      });
 
       expect(stateA!.matchedRulePaths).toEqual(['ruleA']);
       expect(stateB!.matchedRulePaths).toEqual(['ruleB']);
     });
   });
 });
+
+function getWriteQueues(
+  store: MatchedRulesStateStore
+): Map<string, Promise<void>> {
+  // Pin queue ownership without adding a production test hook.
+  return (store as unknown as { writeQueues: Map<string, Promise<void>> })
+    .writeQueues;
+}

@@ -28,13 +28,13 @@ import {
   type DebugLog,
 } from './debug.js';
 import type { SessionStore } from './session-store.js';
+import type { MatchedRulesStateStore } from './matched-rules-state.js';
 import { buildRuleMatchContext } from './runtime-context.js';
 import {
   updateSessionFromChatMessage,
   type ChatMessageInput,
   type ChatMessageOutput,
 } from './runtime-chat.js';
-import { writeActiveRulesState } from './active-rules-state.js';
 import { evaluateHooks, serializeToolArgs } from './rule-hooks.js';
 import {
   createRuleDelivery,
@@ -85,6 +85,7 @@ interface OpenCodeRulesRuntimeOptions {
   projectDirectory: string;
   ruleFiles: DiscoveredRule[];
   sessionStore: SessionStore;
+  matchedRulesStateStore: MatchedRulesStateStore;
   debugLog?: DebugLog;
 }
 
@@ -94,6 +95,7 @@ export class OpenCodeRulesRuntime {
   private projectDirectory: string;
   private ruleFiles: DiscoveredRule[];
   private sessionStore: SessionStore;
+  private matchedRulesStateStore: MatchedRulesStateStore;
   private debugLog: DebugLog;
   private ruleDelivery: RuleDelivery;
   private pendingHistoryPrefetch = new Map<string, RawHistoryResult>();
@@ -105,6 +107,7 @@ export class OpenCodeRulesRuntime {
     this.projectDirectory = opts.projectDirectory;
     this.ruleFiles = opts.ruleFiles;
     this.sessionStore = opts.sessionStore;
+    this.matchedRulesStateStore = opts.matchedRulesStateStore;
     this.debugLog = opts.debugLog ?? createDebugLog();
     this.ruleDelivery = createRuleDelivery({
       rawHistory: this.createRawHistoryAdapter(),
@@ -459,7 +462,7 @@ export class OpenCodeRulesRuntime {
       });
 
       if (result === 'accepted' && captured.userPrompt) {
-        await writeActiveRulesState(
+        await this.matchedRulesStateStore.write(
           sessionID,
           matched.map(r => r.filePath)
         );

@@ -52,8 +52,8 @@ export {
   type MessagePart,
 } from './message-paths.js';
 
-// Re-export from active-rules-state (needed by TUI and external consumers)
-export { readActiveRulesState } from './active-rules-state.js';
+// Re-export from matched-rules-state (needed by TUI and external consumers)
+export { readMatchedRulesState } from './matched-rules-state.js';
 
 // Re-export from rule-hooks
 export {

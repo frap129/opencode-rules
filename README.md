@@ -471,7 +471,7 @@ opencode-rules/
 │   ├── project-fingerprint.ts # Project type detection (Node.js, Python, etc.)
 │   ├── mcp-tools.ts          # MCP tool ID extraction
 │   ├── git-branch.ts         # Git branch detection
-│   ├── active-rules-state.ts # Persists matched rules per session for TUI
+│   ├── matched-rules-state.ts # Persists Matched-rule state for TUI
 │   ├── debug.ts              # Debug logging utilities
 │   ├── utils.ts              # Re-export facade for backwards compatibility
 │   ├── test-fixtures.ts      # Shared test fixtures and builders
@@ -510,7 +510,7 @@ The following highlights the primary runtime modules:
 - **project-fingerprint.ts** - Detects project type from marker files (e.g., `package.json`)
 - **mcp-tools.ts** - Maps connected MCP clients to tool IDs for `tools` condition matching
 - **git-branch.ts** - Resolves current git branch for `branch` condition matching
-- **active-rules-state.ts** - Persists which rules matched per session to `~/.opencode/state/opencode-rules/{sessionId}.json` for TUI consumption (atomic writes, per-session queuing)
+- **matched-rules-state.ts** - Persists Matched-rule state to `~/.opencode/state/opencode-rules/{sessionId}.json` for TUI consumption (atomic writes, per-session queuing)
 - **utils.ts** - Thin facade re-exporting from decomposed modules
 
 ### TUI Sidebar

@@ -23,17 +23,30 @@ import * as ruleFilterModule from './rule-filter.js';
 import * as messagePathsModule from './message-paths.js';
 import * as utilsModule from './utils.js';
 import * as sessionStoreModule from './session-store.js';
+import * as matchedRulesStateModule from './matched-rules-state.js';
 import * as runtimeContextModule from './runtime-context.js';
 import * as runtimeChatModule from './runtime-chat.js';
 import * as ruleHooksModule from './rule-hooks.js';
 import { __testOnly } from './index.js';
 import {
-  _setStateDirForTesting,
-  readActiveRulesState,
-  writeActiveRulesState,
-} from './active-rules-state.js';
+  MatchedRulesStateStore,
+  readMatchedRulesState,
+} from './matched-rules-state.js';
 import { clearRuleCache } from './utils.js';
 import { buildDurableDeliveryPart } from './rule-delivery-codec.js';
+
+function createHooksWithMatchedRulesStateStore(
+  testDir: string,
+  store: MatchedRulesStateStore
+) {
+  const mockInput = createMockPluginInput({ testDir });
+  return __testOnly.createHooksWithMatchedRulesStateStore(
+    mockInput as unknown as Parameters<
+      typeof __testOnly.createHooksWithMatchedRulesStateStore
+    >[0],
+    store
+  );
+}
 
 describe('module boundary tests', () => {
   it('should re-export discoverRuleFiles from rule-discovery module', () => {
@@ -832,6 +845,7 @@ describe('history scan and rescan', () => {
   let savedEnvXDG: string | undefined;
   let savedEnvConfigDir: string | undefined;
   let stateDir: string;
+  let matchedRulesStateStore: MatchedRulesStateStore;
 
   beforeEach(() => {
     setupTestDirs();
@@ -841,12 +855,11 @@ describe('history scan and rescan', () => {
     const { testDir } = getTestDirs();
     stateDir = path.join(testDir, 'state');
     mkdirSync(stateDir, { recursive: true });
-    _setStateDirForTesting(stateDir);
+    matchedRulesStateStore = new MatchedRulesStateStore({ stateDir });
   });
 
   afterEach(async () => {
     teardownTestDirs();
-    _setStateDirForTesting(null);
     const { __testOnly } = await import('./index.js');
     __testOnly.resetSessionState();
     if (savedEnvXDG === undefined) {
@@ -861,17 +874,16 @@ describe('history scan and rescan', () => {
     }
   });
 
-  it('does not let a history rescan overwrite the last complete active state', async () => {
+  it('does not let a history rescan overwrite the last complete matched state', async () => {
     const { testDir } = getTestDirs();
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-    await writeActiveRulesState('ses_state_reconcile', ['/rules/current.mdc']);
+    await matchedRulesStateStore.write('ses_state_reconcile', [
+      '/rules/current.mdc',
+    ]);
 
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
+    const hooks = await createHooksWithMatchedRulesStateStore(
+      testDir,
+      matchedRulesStateStore
     );
     const transform = hooks['experimental.chat.messages.transform'] as (
       input: unknown,
@@ -908,7 +920,9 @@ describe('history scan and rescan', () => {
       }
     );
 
-    const current = await readActiveRulesState('ses_state_reconcile');
+    const current = await readMatchedRulesState('ses_state_reconcile', {
+      stateDir,
+    });
     expect(current?.matchedRulePaths).toEqual(['/rules/current.mdc']);
   });
 
@@ -924,12 +938,9 @@ describe('history scan and rescan', () => {
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
+    const hooks = await createHooksWithMatchedRulesStateStore(
+      testDir,
+      matchedRulesStateStore
     );
     const chatMessage = hooks['chat.message'] as ChatMessageHook;
     const compacting = hooks['experimental.session.compacting'] as (
@@ -968,10 +979,11 @@ describe('history scan and rescan', () => {
   });
 });
 
-describe('Active rules state persistence', () => {
+describe('Matched rules state persistence', () => {
   let savedEnvXDG: string | undefined;
   let savedEnvConfigDir: string | undefined;
   let stateDir: string;
+  let matchedRulesStateStore: MatchedRulesStateStore;
 
   beforeEach(() => {
     setupTestDirs();
@@ -981,12 +993,11 @@ describe('Active rules state persistence', () => {
     const { testDir } = getTestDirs();
     stateDir = path.join(testDir, 'state');
     mkdirSync(stateDir, { recursive: true });
-    _setStateDirForTesting(stateDir);
+    matchedRulesStateStore = new MatchedRulesStateStore({ stateDir });
   });
 
   afterEach(async () => {
     teardownTestDirs();
-    _setStateDirForTesting(null);
     const { __testOnly } = await import('./index.js');
     __testOnly.resetSessionState();
     if (savedEnvXDG === undefined) {
@@ -1007,12 +1018,9 @@ describe('Active rules state persistence', () => {
     writeFileSync(rulePath, '# Always Apply\nThis rule always applies.');
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
+    const hooks = await createHooksWithMatchedRulesStateStore(
+      testDir,
+      matchedRulesStateStore
     );
 
     const sessionID = 'ses-state-match';
@@ -1034,7 +1042,7 @@ describe('Active rules state persistence', () => {
     // Wait for fire-and-forget write to complete
     await new Promise(resolve => setTimeout(resolve, 50));
 
-    const state = await readActiveRulesState(sessionID);
+    const state = await readMatchedRulesState(sessionID, { stateDir });
     expect(state).not.toBeNull();
     expect(state?.sessionID).toBe(sessionID);
     expect(state?.matchedRulePaths).toHaveLength(1);
@@ -1055,12 +1063,9 @@ Conditional rule for gpt-5 only.`
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
+    const hooks = await createHooksWithMatchedRulesStateStore(
+      testDir,
+      matchedRulesStateStore
     );
 
     const sessionID = 'ses-state-nomatch';
@@ -1081,7 +1086,7 @@ Conditional rule for gpt-5 only.`
     // Wait for fire-and-forget write to complete
     await new Promise(resolve => setTimeout(resolve, 50));
 
-    const state = await readActiveRulesState(sessionID);
+    const state = await readMatchedRulesState(sessionID, { stateDir });
     expect(state).not.toBeNull();
     expect(state?.sessionID).toBe(sessionID);
     expect(state?.matchedRulePaths).toHaveLength(0);
@@ -1092,12 +1097,9 @@ Conditional rule for gpt-5 only.`
     writeFileSync(path.join(globalRulesDir, 'rule.md'), '# Test Rule\nContent');
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
+    const hooks = await createHooksWithMatchedRulesStateStore(
+      testDir,
+      matchedRulesStateStore
     );
 
     const chatMessage = hooks['chat.message'] as (
@@ -1134,7 +1136,7 @@ describe('utils runtime exports', () => {
       'hasConditions',
       'parseRuleMetadata',
       'promptMatchesKeywords',
-      'readActiveRulesState',
+      'readMatchedRulesState',
       'serializeToolArgs',
       'toolsMatchAvailable',
     ]);
@@ -1145,6 +1147,16 @@ describe('session-store runtime exports', () => {
   it('exports only SessionStore at runtime', () => {
     const exportedKeys = Object.keys(sessionStoreModule).sort();
     expect(exportedKeys).toEqual(['SessionStore']);
+  });
+});
+
+describe('matched-rules-state runtime exports', () => {
+  it('exports only the store and reader at runtime', () => {
+    const exportedKeys = Object.keys(matchedRulesStateModule).sort();
+    expect(exportedKeys).toEqual([
+      'MatchedRulesStateStore',
+      'readMatchedRulesState',
+    ]);
   });
 });
 
@@ -1370,6 +1382,7 @@ describe('chat.message rule persistence', () => {
   let savedEnvXDG: string | undefined;
   let savedEnvConfigDir: string | undefined;
   let stateDir: string;
+  let matchedRulesStateStore: MatchedRulesStateStore;
 
   beforeEach(() => {
     setupTestDirs();
@@ -1379,12 +1392,11 @@ describe('chat.message rule persistence', () => {
     const { testDir } = getTestDirs();
     stateDir = path.join(testDir, 'state');
     mkdirSync(stateDir, { recursive: true });
-    _setStateDirForTesting(stateDir);
+    matchedRulesStateStore = new MatchedRulesStateStore({ stateDir });
   });
 
   afterEach(async () => {
     teardownTestDirs();
-    _setStateDirForTesting(null);
     vi.resetAllMocks();
     const { __testOnly } = await import('./index.js');
     __testOnly.resetSessionState();
@@ -1401,11 +1413,10 @@ describe('chat.message rule persistence', () => {
   });
 
   async function getHooks(testDir: string) {
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    return plugin(mockInput as unknown as Parameters<typeof plugin>[0]);
+    return createHooksWithMatchedRulesStateStore(
+      testDir,
+      matchedRulesStateStore
+    );
   }
 
   it('appends all matched rules as one named delivery event', async () => {
@@ -1959,7 +1970,7 @@ describe('chat.message rule persistence', () => {
     expect(part?.text).toContain('Hook rule body.');
   });
 
-  it('writes active-rules-state with matched rule paths', async () => {
+  it('writes matched-rules-state with matched rule paths', async () => {
     const { testDir, globalRulesDir } = getTestDirs();
     const rulePath = path.join(globalRulesDir, 'always-apply.md');
     writeFileSync(rulePath, '# Always Apply\nThis rule always applies.');
@@ -1976,7 +1987,7 @@ describe('chat.message rule persistence', () => {
     );
 
     await new Promise(resolve => setTimeout(resolve, 50));
-    const state = await readActiveRulesState('ses-state-match');
+    const state = await readMatchedRulesState('ses-state-match', { stateDir });
     expect(state?.sessionID).toBe('ses-state-match');
     expect(state?.matchedRulePaths).toEqual([rulePath]);
   });
@@ -2029,20 +2040,20 @@ describe('chat.message rule persistence', () => {
     expect(output.parts.filter(p => p.synthetic)).toHaveLength(0);
   });
 
-  it('does not project active rules when the durable delivery is rejected', async () => {
+  it('does not project matched rules when the durable delivery is rejected', async () => {
     const { testDir, globalRulesDir } = getTestDirs();
     writeFileSync(path.join(globalRulesDir, 'always.md'), '# Always Apply');
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
     mockInput.client.session.messages = async () => {
       throw new Error('server down');
     };
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
+    const hooks = await __testOnly.createHooksWithMatchedRulesStateStore(
+      mockInput as unknown as Parameters<
+        typeof __testOnly.createHooksWithMatchedRulesStateStore
+      >[0],
+      matchedRulesStateStore
     );
 
     const chatMessage = hooks['chat.message'] as ChatMessageHook;
@@ -2056,7 +2067,9 @@ describe('chat.message rule persistence', () => {
     );
 
     expect(output.parts.filter(p => p.synthetic)).toHaveLength(0);
-    expect(await readActiveRulesState('ses_fetchfail')).toBeNull();
+    expect(
+      await readMatchedRulesState('ses_fetchfail', { stateDir })
+    ).toBeNull();
   });
 
   it('invokes session.messages with its receiver so sdk methods stay bound', async () => {
@@ -2287,7 +2300,7 @@ describe('chat.message rule persistence', () => {
     expect(hookPart?.text).not.toContain('Version two.');
   });
 
-  it('writes ephemeral matches to active state without persisting their parts', async () => {
+  it('writes ephemeral matches to matched state without persisting their parts', async () => {
     const { testDir, globalRulesDir } = getTestDirs();
     const rulePath = path.join(globalRulesDir, 'plan-only.mdc');
     writeFileSync(rulePath, `---\nagent: [plan]\n---\n\nPlan guidance.`);
@@ -2296,7 +2309,7 @@ describe('chat.message rule persistence', () => {
     const hooks = await getHooks(testDir);
     const chatMessage = hooks['chat.message'] as ChatMessageHook;
     await chatMessage(
-      { sessionID: 'ses_active_eph', messageID: 'msg_active_eph' },
+      { sessionID: 'ses_matched_eph', messageID: 'msg_matched_eph' },
       {
         message: { role: 'user', agent: 'plan' },
         parts: [{ type: 'text', text: 'plan this' }],
@@ -2304,7 +2317,7 @@ describe('chat.message rule persistence', () => {
     );
 
     await new Promise(resolve => setTimeout(resolve, 50));
-    const state = await readActiveRulesState('ses_active_eph');
+    const state = await readMatchedRulesState('ses_matched_eph', { stateDir });
     expect(state?.matchedRulePaths).toEqual([rulePath]);
   });
 });

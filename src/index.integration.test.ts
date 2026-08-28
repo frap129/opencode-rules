@@ -15,8 +15,20 @@ import {
   createMockPluginInput,
 } from './test-fixtures.js';
 import { buildDurableDeliveryPart } from './rule-delivery-codec.js';
-import { _setStateDirForTesting } from './active-rules-state.js';
+import { MatchedRulesStateStore } from './matched-rules-state.js';
 import { __testOnly } from './index.js';
+
+function createHooksWithMatchedRulesStateStore(
+  mockInput: ReturnType<typeof createMockPluginInput>,
+  store: MatchedRulesStateStore
+) {
+  return __testOnly.createHooksWithMatchedRulesStateStore(
+    mockInput as unknown as Parameters<
+      typeof __testOnly.createHooksWithMatchedRulesStateStore
+    >[0],
+    store
+  );
+}
 
 type ChatMessageOutputLike = {
   message: { role: string };
@@ -552,6 +564,7 @@ describe('Synthetic-part delivery lifecycle', () => {
   let savedEnvXDG: string | undefined;
   let savedEnvConfigDir: string | undefined;
   let stateDir: string;
+  let matchedRulesStateStore: MatchedRulesStateStore;
 
   beforeEach(() => {
     setupTestDirs();
@@ -561,13 +574,12 @@ describe('Synthetic-part delivery lifecycle', () => {
     const { testDir } = getTestDirs();
     stateDir = path.join(testDir, 'state');
     mkdirSync(stateDir, { recursive: true });
-    _setStateDirForTesting(stateDir);
+    matchedRulesStateStore = new MatchedRulesStateStore({ stateDir });
     clearRuleCache();
   });
 
   afterEach(async () => {
     teardownTestDirs();
-    _setStateDirForTesting(null);
     vi.resetAllMocks();
     __testOnly.resetSessionState();
     if (savedEnvXDG === undefined) {
@@ -594,12 +606,10 @@ describe('Synthetic-part delivery lifecycle', () => {
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
+    const hooks = await createHooksWithMatchedRulesStateStore(
+      mockInput,
+      matchedRulesStateStore
     );
     const chatMessage = hooks['chat.message'] as (
       input: { sessionID: string; messageID?: string },
@@ -718,15 +728,13 @@ describe('Synthetic-part delivery lifecycle', () => {
       },
     ];
 
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
     const mockInput = createMockPluginInput({
       testDir,
       history,
     });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
+    const hooks = await createHooksWithMatchedRulesStateStore(
+      mockInput,
+      matchedRulesStateStore
     );
     const chatMessage = hooks['chat.message'] as (
       input: { sessionID: string; messageID?: string },
@@ -756,12 +764,10 @@ describe('Synthetic-part delivery lifecycle', () => {
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
+    const hooks = await createHooksWithMatchedRulesStateStore(
+      mockInput,
+      matchedRulesStateStore
     );
     const chatMessage = hooks['chat.message'] as (
       input: { sessionID: string; messageID?: string },
@@ -851,12 +857,10 @@ describe('Synthetic-part delivery lifecycle', () => {
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const {
-      default: { server: plugin },
-    } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
+    const hooks = await createHooksWithMatchedRulesStateStore(
+      mockInput,
+      matchedRulesStateStore
     );
     const chatMessage = hooks['chat.message'] as (
       input: { sessionID: string; messageID?: string },

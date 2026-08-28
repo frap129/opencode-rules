@@ -2,7 +2,7 @@
 import {
   discoverRuleFiles,
   getCachedRule,
-  readActiveRulesState,
+  readMatchedRulesState,
   hasConditions,
   type RuleMetadata,
 } from '../../src/utils.js';
@@ -35,7 +35,7 @@ export interface SidebarRuleEntry {
 export interface LoadSidebarRulesResult {
   rules: SidebarRuleEntry[];
   skippedCount: number;
-  /** Whether active rules state was successfully read from disk */
+  /** Whether matched rules state was successfully read from disk */
   hasEvaluationState: boolean;
 }
 
@@ -44,7 +44,7 @@ export interface LoadSidebarRulesResult {
  * Reuses discoverRuleFiles/getCachedRule from the server plugin.
  *
  * @param projectDir - Project directory or null (global rules only)
- * @param sessionId - Optional session ID to read active rules state
+ * @param sessionId - Optional session ID to read matched rules state
  * @param options - Optional state read configuration
  */
 export async function loadSidebarRules(
@@ -55,13 +55,13 @@ export async function loadSidebarRules(
   // discoverRuleFiles accepts string | undefined, not null
   const discovered = await discoverRuleFiles(projectDir ?? undefined);
 
-  // Read active rules state if sessionId provided
-  const activeState = sessionId
-    ? await readActiveRulesState(sessionId, options)
+  // Read matched rules state if sessionId provided
+  const matchedState = sessionId
+    ? await readMatchedRulesState(sessionId, options)
     : null;
-  const hasEvaluationState = activeState !== null;
+  const hasEvaluationState = matchedState !== null;
   const matchedPathsSet = hasEvaluationState
-    ? new Set(activeState.matchedRulePaths)
+    ? new Set(matchedState.matchedRulePaths)
     : null;
 
   const entries: SidebarRuleEntry[] = [];
