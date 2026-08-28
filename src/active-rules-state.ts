@@ -35,6 +35,11 @@ export function _resetWriteQueues(): void {
   writeQueues.clear();
 }
 
+/** @internal Test-only: report whether a session has a queued write */
+export function _hasQueuedWrite(sessionID: string): boolean {
+  return writeQueues.has(sessionID);
+}
+
 export function resolveStateDir(): string {
   if (stateDirOverride !== null) {
     return stateDirOverride;
@@ -72,9 +77,15 @@ export function writeActiveRulesState(
   // Chain onto existing queue for this session, or start fresh
   const previousWrite = writeQueues.get(sessionID) ?? Promise.resolve();
 
-  const currentWrite = previousWrite.then(async () => {
-    await doAtomicWrite(sessionID, state);
-  });
+  const currentWrite = previousWrite
+    .then(async () => {
+      await doAtomicWrite(sessionID, state);
+    })
+    .finally(() => {
+      if (writeQueues.get(sessionID) === currentWrite) {
+        writeQueues.delete(sessionID);
+      }
+    });
 
   writeQueues.set(sessionID, currentWrite);
 

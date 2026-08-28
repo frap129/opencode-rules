@@ -9,6 +9,7 @@ import {
   readActiveRulesState,
   _setStateDirForTesting,
   _resetWriteQueues,
+  _hasQueuedWrite,
 } from './active-rules-state.js';
 
 describe('active-rules-state', () => {
@@ -216,12 +217,25 @@ describe('active-rules-state', () => {
       const second = writeActiveRulesState(sessionID, ['path2']);
       const third = writeActiveRulesState(sessionID, ['path3']);
 
+      expect(_hasQueuedWrite(sessionID)).toBe(true);
+
       await Promise.all([first, second, third]);
 
       // The final state should reflect the last write
       const state = await readActiveRulesState(sessionID);
       expect(state).not.toBeNull();
       expect(state!.matchedRulePaths).toEqual(['path3']);
+      expect(_hasQueuedWrite(sessionID)).toBe(false);
+    });
+
+    it('releases a session queue entry after its final write settles', async () => {
+      const write = writeActiveRulesState('ses_lifecycle', ['path1']);
+
+      expect(_hasQueuedWrite('ses_lifecycle')).toBe(true);
+
+      await write;
+
+      expect(_hasQueuedWrite('ses_lifecycle')).toBe(false);
     });
 
     it('creates state directory when it does not exist', async () => {
