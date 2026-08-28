@@ -15,50 +15,19 @@ describe('SessionStore', () => {
     expect(ids).toContain('ses_3');
   });
 
-  it('defaults injected-rule tracking fields on new sessions', () => {
-    const store = new SessionStore();
-    store.upsert('ses_new', () => {});
-    const state = store.get('ses_new');
-    expect(state?.injectedRuleKeys).toBeInstanceOf(Set);
-    expect(state?.injectedRuleKeys.size).toBe(0);
-    expect(state?.injectedHookHashes.size).toBe(0);
-    expect(state?.needsRuleRescan).toBe(false);
-  });
-
-  it('snapshots injected-rule key sets without aliasing the live sets', () => {
+  it('snapshots context paths without aliasing the live set', () => {
     const store = new SessionStore();
     store.upsert('ses_snap', s => {
-      s.injectedRuleKeys.add('rule.md:abc');
-      s.injectedHookHashes.add('def');
-      s.needsRuleRescan = true;
+      s.contextPaths.add('src/example.ts');
     });
     const snapshot = store.snapshot('ses_snap');
-    snapshot?.injectedRuleKeys.add('rule.md:xyz');
-    expect(store.get('ses_snap')?.injectedRuleKeys.has('rule.md:xyz')).toBe(
-      false
-    );
-    snapshot?.injectedHookHashes.add('xyz');
-    expect(store.get('ses_snap')?.injectedHookHashes.has('xyz')).toBe(false);
-    expect(snapshot?.needsRuleRescan).toBe(true);
+    snapshot?.contextPaths.add('src/other.ts');
+    expect(store.get('ses_snap')?.contextPaths.has('src/other.ts')).toBe(false);
   });
 });
 
-describe('pending hook injections', () => {
-  it('stores and retrieves pending hook injections', () => {
-    const store = new SessionStore();
-    store.upsert('ses_hooks', state => {
-      state.pendingHookInjections = ['Injection A', 'Injection B'];
-    });
-    const snapshot = store.snapshot('ses_hooks');
-    expect(snapshot?.pendingHookInjections).toEqual([
-      'Injection A',
-      'Injection B',
-    ]);
-  });
-});
-
-describe('SessionStore lifetime fields', () => {
-  it('clones rule snapshots and ephemeral hook queues', () => {
+describe('SessionStore rule snapshots', () => {
+  it('clones rule snapshots', () => {
     const store = new SessionStore();
     store.upsert('ses_clone', state => {
       state.ruleSnapshots = [
@@ -69,16 +38,11 @@ describe('SessionStore lifetime fields', () => {
           strippedContent: 'Plan body.',
         },
       ];
-      state.pendingEphemeralHookInjections = ['Transient hook.'];
     });
 
     const copied = store.snapshot('ses_clone');
     copied!.ruleSnapshots!.pop();
-    copied!.pendingEphemeralHookInjections!.pop();
 
     expect(store.get('ses_clone')?.ruleSnapshots).toHaveLength(1);
-    expect(store.get('ses_clone')?.pendingEphemeralHookInjections).toEqual([
-      'Transient hook.',
-    ]);
   });
 });

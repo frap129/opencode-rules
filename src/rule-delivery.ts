@@ -17,7 +17,6 @@ import {
 import { createDebugLog, formatError, type DebugLog } from './debug.js';
 
 export interface RuleDelivery {
-  decodeHistory(sessionID: string): Promise<DeliveryLedgerFacts | undefined>;
   deliverDurableTurn(input: DurableTurnInput): Promise<DurableTurnResult>;
   deliverTransientDispatch(input: TransientDispatchInput): void;
   markCompacted(sessionID: string): void;
@@ -94,7 +93,7 @@ class DefaultRuleDelivery implements RuleDelivery {
     this.maxSessions = Math.max(1, options.maxSessions ?? 100);
   }
 
-  async decodeHistory(
+  private async decodeHistory(
     sessionID: string
   ): Promise<DeliveryLedgerFacts | undefined> {
     let result: RawHistoryResult;

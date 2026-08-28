@@ -2,7 +2,6 @@ import {
   matchRuleSnapshots,
   type RuleFilterContext,
   type MatchedRuleEntry,
-  type RuleLifetime,
 } from './rule-filter.js';
 import { extractFilePathsFromMessages } from './message-paths.js';
 import {
@@ -35,28 +34,26 @@ import {
 import { writeActiveRulesState } from './active-rules-state.js';
 import { evaluateHooks, serializeToolArgs } from './rule-hooks.js';
 import {
-  buildRulePart,
-  buildHookInjectionPart,
-  buildTransientHookMessage,
-  buildTransientRuleMessage,
-  hashContent,
-  isTransientMessageId,
-  ruleKeyFor,
-  scanInjectedParts,
-  type InjectedPartsScan,
-  type SyntheticPart,
-} from './synthetic-injection.js';
+  createRuleDelivery,
+  type MatchedHookContent,
+  type MatchedRuleContent,
+  type RuleDelivery,
+} from './rule-delivery.js';
+import type {
+  RawHistoryAdapter,
+  RawHistoryResult,
+} from './rule-delivery-history.js';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execAsync = promisify(exec);
 
+// Prefetched history entries are consumed by the first durable turn; a
+// transform-first seed can leave them unconsumed, so bound the map.
+const MAX_PENDING_HISTORY_PREFETCH = 128;
+
 interface MessagesTransformOutput {
   messages: MessageWithInfo[];
-}
-
-interface HistoryScanResult extends InjectedPartsScan {
-  contextPaths: string[];
 }
 
 interface OpenCodeClient {
@@ -94,6 +91,8 @@ export class OpenCodeRulesRuntime {
   private ruleFiles: DiscoveredRule[];
   private sessionStore: SessionStore;
   private debugLog: DebugLog;
+  private ruleDelivery: RuleDelivery;
+  private pendingHistoryPrefetch = new Map<string, RawHistoryResult>();
   private snapshotPromises = new Map<string, Promise<RuleSnapshot[]>>();
 
   constructor(opts: OpenCodeRulesRuntimeOptions) {
@@ -103,6 +102,68 @@ export class OpenCodeRulesRuntime {
     this.ruleFiles = opts.ruleFiles;
     this.sessionStore = opts.sessionStore;
     this.debugLog = opts.debugLog ?? createDebugLog();
+    this.ruleDelivery = createRuleDelivery({
+      rawHistory: this.createRawHistoryAdapter(),
+      debugLog: this.debugLog,
+    });
+  }
+
+  private createRawHistoryAdapter(): RawHistoryAdapter {
+    return {
+      readHistory: async sessionID => {
+        const cached = this.pendingHistoryPrefetch.get(sessionID);
+        if (cached) {
+          this.pendingHistoryPrefetch.delete(sessionID);
+          return cached;
+        }
+        return this.readClientHistory(sessionID);
+      },
+    };
+  }
+
+  private async readClientHistory(
+    sessionID: string
+  ): Promise<RawHistoryResult> {
+    const session = this.client.session;
+    if (!session?.messages) return { ok: true, messages: [] };
+    try {
+      const result = await session.messages({
+        path: { id: sessionID },
+        query: { directory: this.directory },
+      });
+      return { ok: true, messages: result?.data ?? [] };
+    } catch (error) {
+      logWarning('Failed to fetch session history', error);
+      return { ok: false };
+    }
+  }
+
+  private async seedContextFromHistory(sessionID: string): Promise<void> {
+    if (this.sessionStore.get(sessionID)?.seededFromHistory) return;
+    const history = await this.readClientHistory(sessionID);
+    this.pendingHistoryPrefetch.delete(sessionID);
+    this.pendingHistoryPrefetch.set(sessionID, history);
+    while (this.pendingHistoryPrefetch.size > MAX_PENDING_HISTORY_PREFETCH) {
+      const oldest = this.pendingHistoryPrefetch.keys().next().value;
+      if (oldest === undefined) break;
+      this.pendingHistoryPrefetch.delete(oldest);
+    }
+    if (!history.ok) return;
+    const messages = history.messages.filter(
+      (message): message is MessageWithInfo =>
+        typeof message === 'object' && message !== null
+    );
+    const contextPaths = extractFilePathsFromMessages(
+      filterValidMessages(messages)
+    );
+    this.sessionStore.upsert(sessionID, state => {
+      for (const contextPath of contextPaths) {
+        state.contextPaths.add(
+          normalizeContextPath(contextPath, this.projectDirectory)
+        );
+      }
+      state.seededFromHistory = true;
+    });
   }
 
   createHooks(): Record<string, unknown> {
@@ -224,16 +285,11 @@ export class OpenCodeRulesRuntime {
           `Seeded user prompt for session ${sessionID} (len=${userPrompt.length})`
         );
       }
-
-      await this.rescanInjectedParts(sessionID, output.messages);
-    } else if (existingState.needsRuleRescan) {
-      this.debugLog(`Session ${sessionID} needs rule rescan - rescanning now`);
-      await this.rescanInjectedParts(sessionID, output.messages);
     }
 
     try {
       const currentState = this.sessionStore.get(sessionID);
-      if (currentState && !currentState.needsRuleRescan) {
+      if (currentState) {
         const prompt = extractLatestUserPrompt(output.messages);
         const matches = await this.evaluateSessionRules(
           sessionID,
@@ -241,7 +297,13 @@ export class OpenCodeRulesRuntime {
           currentState.lastModelID,
           currentState.lastAgentType
         );
-        this.appendTransientRuleInjections(sessionID, output.messages, matches);
+        this.ruleDelivery.deliverTransientDispatch({
+          sessionID,
+          matchedRules: this.toDeliveryRules(
+            matches.filter(rule => rule.lifetime === 'ephemeral')
+          ),
+          messages: output.messages,
+        });
       }
     } catch (error) {
       this.debugLog(
@@ -249,89 +311,7 @@ export class OpenCodeRulesRuntime {
       );
     }
 
-    this.appendTransientHookInjections(sessionID, output.messages);
-    this.appendTransientEphemeralHookInjections(sessionID, output.messages);
-
     return output;
-  }
-
-  /** Resolve the info transient synthetic messages should inherit: the latest
-   * real user message (authoritative model object and agent), skipping
-   * transient messages appended earlier in the same dispatch. Falls back to
-   * the last message's info (the builders synthesize a model object from
-   * flat fields when needed). */
-  private transientBaseInfo(
-    messages: MessageWithInfo[]
-  ): Record<string, unknown> {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const info = messages[i]?.info;
-      if (!info || info.role !== 'user') continue;
-      if (isTransientMessageId(info.id)) continue;
-      return info as Record<string, unknown>;
-    }
-    const last = messages[messages.length - 1]?.info;
-    return (last ?? {}) as Record<string, unknown>;
-  }
-
-  /** Append request-scoped synthetic user messages carrying pending hook
-   * texts. Never persisted: opencode discards messages.transform mutations
-   * after the model dispatch. Idempotent by deterministic id/content. */
-  private appendTransientHookInjections(
-    sessionID: string,
-    messages: MessageWithInfo[]
-  ): void {
-    try {
-      const state = this.sessionStore.get(sessionID);
-      const pending = state?.pendingHookInjections;
-      if (!pending || pending.length === 0 || messages.length === 0) {
-        return;
-      }
-
-      // Presence check: skip contents already carried by this request.
-      const presentIds = new Set<string>();
-      for (const message of messages) {
-        if (typeof message.info?.id === 'string') {
-          presentIds.add(message.info.id);
-        }
-        for (const part of message.parts ?? []) {
-          if (typeof part.id === 'string') {
-            presentIds.add(part.id);
-          }
-        }
-      }
-
-      const lastMessage = messages[messages.length - 1];
-      if (!lastMessage?.parts) {
-        return;
-      }
-
-      for (const content of new Set(pending)) {
-        const hash = hashContent(content);
-        const transientMessageId = `msg_rules_hook_${hash}`;
-        const transientPartId = `prt_hook_transient_${hash}`;
-        if (
-          presentIds.has(transientMessageId) ||
-          presentIds.has(transientPartId) ||
-          presentIds.has(`prt_hook_${hash}`)
-        ) {
-          continue;
-        }
-        const transient = buildTransientHookMessage(
-          content,
-          this.transientBaseInfo(messages)
-        );
-        transient.parts[0] = {
-          ...transient.parts[0],
-          sessionID,
-          messageID: transient.info.id,
-        };
-        messages.push(transient as MessageWithInfo);
-      }
-    } catch (error) {
-      this.debugLog(
-        `Transient injection failed for ${sessionID}: ${formatError(error)}`
-      );
-    }
   }
 
   /** Load the per-session rule snapshot exactly once per process/session,
@@ -401,128 +381,13 @@ export class OpenCodeRulesRuntime {
     return matchRuleSnapshots(snapshots, context);
   }
 
-  /** Append request-scoped synthetic user messages carrying ephemeral rule
-   * matches for the current model dispatch. Never persisted: transform
-   * mutations are discarded after dispatch. Idempotent by deterministic
-   * ids and durable-key dedup. */
-  private appendTransientRuleInjections(
-    sessionID: string,
-    messages: MessageWithInfo[],
-    matches: MatchedRuleEntry[]
-  ): void {
-    const state = this.sessionStore.get(sessionID);
-    const lastMessage = messages[messages.length - 1];
-    if (!state || !lastMessage?.parts) return;
-
-    const presentIds = new Set<string>();
-    for (const message of messages) {
-      if (typeof message.info?.id === 'string') presentIds.add(message.info.id);
-      for (const part of message.parts ?? []) {
-        if (typeof part.id === 'string') presentIds.add(part.id);
-      }
-    }
-    const persistedKeys = new Set([
-      ...state.injectedRuleKeys,
-      ...scanInjectedParts(messages).ruleKeys,
-    ]);
-
-    for (const rule of matches) {
-      if (rule.lifetime !== 'ephemeral') continue;
-      const key = ruleKeyFor(rule.relativePath, rule.strippedContent);
-      if (persistedKeys.has(key)) continue;
-      const transient = buildTransientRuleMessage(
-        rule.relativePath,
-        rule.strippedContent,
-        this.transientBaseInfo(messages)
-      );
-      if (
-        presentIds.has(transient.info.id) ||
-        presentIds.has(transient.parts[0]!.id)
-      )
-        continue;
-      transient.parts[0] = {
-        ...transient.parts[0]!,
-        sessionID,
-        messageID: transient.info.id,
-      };
-      messages.push(transient as MessageWithInfo);
-      presentIds.add(transient.info.id);
-      presentIds.add(transient.parts[0]!.id);
-    }
-  }
-
-  /** Append request-scoped synthetic user messages carrying ephemeral hook
-   * texts owned by ephemeral rules. Consumed only by transform; the queue
-   * is cleared after a successful or duplicate-free delivery and retained
-   * when no message can be transformed. */
-  private appendTransientEphemeralHookInjections(
-    sessionID: string,
-    messages: MessageWithInfo[]
-  ): void {
-    const state = this.sessionStore.get(sessionID);
-    if (!state?.pendingEphemeralHookInjections?.length) return;
-    const lastMessage = messages[messages.length - 1];
-    if (!lastMessage?.parts) return;
-
-    const pending = [...new Set(state.pendingEphemeralHookInjections)];
-    const presentIds = new Set<string>();
-    for (const message of messages) {
-      if (typeof message.info?.id === 'string') presentIds.add(message.info.id);
-      for (const part of message.parts ?? []) {
-        if (typeof part.id === 'string') presentIds.add(part.id);
-      }
-    }
-
-    for (const content of pending) {
-      const transient = buildTransientHookMessage(
-        content,
-        this.transientBaseInfo(messages)
-      );
-      const hash = hashContent(content);
-      if (
-        !presentIds.has(transient.info.id) &&
-        !presentIds.has(transient.parts[0]!.id) &&
-        !presentIds.has(`prt_hook_${hash}`)
-      ) {
-        transient.parts[0] = {
-          ...transient.parts[0]!,
-          sessionID,
-          messageID: transient.info.id,
-        };
-        messages.push(transient as MessageWithInfo);
-        presentIds.add(transient.info.id);
-        presentIds.add(transient.parts[0]!.id);
-      }
-    }
-
-    this.sessionStore.upsert(sessionID, next => {
-      next.pendingEphemeralHookInjections = [];
-    });
-  }
-
-  /** Rebuild injected-part tracking from the message array (history is ground truth).
-   * Never writes active-rules state: history is not the source of current
-   * activity; only the complete user-turn evaluation in chat.message is. */
-  private async rescanInjectedParts(
-    sessionID: string,
-    messages: MessageWithInfo[]
-  ): Promise<void> {
-    try {
-      const scan = scanInjectedParts(messages);
-      this.sessionStore.upsert(sessionID, state => {
-        state.injectedRuleKeys = new Set(scan.ruleKeys);
-        state.injectedHookHashes = new Set(scan.hookHashes);
-        state.needsRuleRescan = false;
-      });
-      this.debugLog(
-        `Rescanned injected parts for session ${sessionID}: ${scan.ruleKeys.size} rule key(s), ${scan.hookHashes.size} hook hash(es)`
-      );
-    } catch (error) {
-      // Keep existing state; the flag (if set) stays for the next dispatch.
-      this.debugLog(
-        `History scan failed for ${sessionID}: ${formatError(error)}`
-      );
-    }
+  private toDeliveryRules(
+    matches: readonly MatchedRuleEntry[]
+  ): MatchedRuleContent[] {
+    return matches.map(rule => ({
+      relativePath: rule.relativePath,
+      content: rule.strippedContent,
+    }));
   }
 
   private async onChatMessage(
@@ -557,45 +422,8 @@ export class OpenCodeRulesRuntime {
         }
       }
 
-      // 2. First message of a session run: rebuild injection keys from
-      //    persisted history so restarts never duplicate parts. Once the
-      //    history scan completes, in-memory keys are authoritative for
-      //    the session; later turns must not re-derive (and potentially
-      //    drop) keys from a stale client snapshot.
-      const initialState = this.sessionStore.get(sessionID);
-      if (initialState && !initialState.seededFromHistory) {
-        const scanned = await this.scanHistoryFromClient(sessionID);
-        if (scanned === undefined) {
-          this.sessionStore.upsert(sessionID, state => {
-            state.needsRuleRescan = true;
-          });
-          this.debugLog(
-            `History fetch failed for ${sessionID} - skipping injection this turn`
-          );
-          return;
-        }
-        this.sessionStore.upsert(sessionID, state => {
-          state.injectedRuleKeys = new Set(scanned.ruleKeys);
-          state.injectedHookHashes = new Set(scanned.hookHashes);
-          for (const p of scanned.contextPaths) {
-            state.contextPaths.add(
-              normalizeContextPath(p, this.projectDirectory)
-            );
-          }
-          state.seededFromHistory = true;
-        });
-      }
+      await this.seedContextFromHistory(sessionID);
 
-      // 3. Never append while a rescan is pending (history keys unknown/stale)
-      const state = this.sessionStore.get(sessionID);
-      if (!state || state.needsRuleRescan) {
-        this.debugLog(
-          `Session ${sessionID} needs rule rescan - skipping injection this turn`
-        );
-        return;
-      }
-
-      // 4. Rule matching (skipped for messages without non-synthetic text)
       let matched: MatchedRuleEntry[] = [];
       if (captured.userPrompt) {
         matched = await this.evaluateSessionRules(
@@ -609,126 +437,22 @@ export class OpenCodeRulesRuntime {
         rule => rule.lifetime === 'durable'
       );
 
-      // 5. Resolve the owning message id and guard before any part
-      //    construction or store mutation: persisted parts must carry
-      //    sessionID/messageID (SDK schema), so skip rather than emit
-      //    schema-invalid parts. The pending queue stays intact for retry.
       const messageID = input.messageID ?? output.message?.id;
-      if (!messageID) {
-        this.debugLog(
-          `No messageID available for session ${sessionID} - skipping synthetic part injection`
-        );
-        return;
-      }
-
-      // 6. Append one synthetic part per not-yet-injected durable rule
-      const newParts: SyntheticPart[] = [];
-      const newRuleKeys: string[] = [];
-      for (const rule of durableMatches) {
-        const key = ruleKeyFor(rule.relativePath, rule.strippedContent);
-        if (state.injectedRuleKeys.has(key) || newRuleKeys.includes(key)) {
-          continue;
-        }
-        newParts.push({
-          ...buildRulePart(rule.relativePath, rule.strippedContent),
-          sessionID,
-          messageID,
-        });
-        newRuleKeys.push(key);
-      }
-
-      // 7. Flush queued hook injections as durable parts (content-hash dedup)
-      const newHookHashes: string[] = [];
-      const pending = state.pendingHookInjections ?? [];
-      for (const content of new Set(pending)) {
-        const hash = hashContent(content);
-        if (
-          state.injectedHookHashes.has(hash) ||
-          newHookHashes.includes(hash)
-        ) {
-          continue;
-        }
-        newParts.push({
-          ...buildHookInjectionPart(content),
-          sessionID,
-          messageID,
-        });
-        newHookHashes.push(hash);
-      }
-
-      if (newParts.length > 0) {
-        if (!output.parts) {
-          output.parts = [];
-        }
-        output.parts.push(...newParts);
-      }
-
-      this.sessionStore.upsert(sessionID, s => {
-        for (const key of newRuleKeys) {
-          s.injectedRuleKeys.add(key);
-        }
-        for (const hash of newHookHashes) {
-          s.injectedHookHashes.add(hash);
-        }
-        s.pendingHookInjections = [];
+      const result = await this.ruleDelivery.deliverDurableTurn({
+        sessionID,
+        ...(messageID ? { messageID } : {}),
+        matchedRules: this.toDeliveryRules(durableMatches),
+        output,
       });
 
-      if (captured.userPrompt) {
+      if (result === 'accepted' && captured.userPrompt) {
         await writeActiveRulesState(
           sessionID,
           matched.map(r => r.filePath)
         );
       }
-
-      this.debugLog(
-        `Appended ${newParts.length} synthetic part(s) for session ${sessionID}`
-      );
     } catch (error) {
       this.debugLog(`chat.message handler failed: ${formatError(error)}`);
-    }
-  }
-
-  /** Fetch persisted history via the client and scan it for injected parts.
-   * Returns undefined when the fetch fails (history state unknown). */
-  private async scanHistoryFromClient(
-    sessionID: string
-  ): Promise<HistoryScanResult | undefined> {
-    const session = this.client.session;
-    if (!session?.messages) {
-      // Client without the session API (older host or test mock):
-      // assume a fresh session with empty history.
-      this.debugLog(
-        `Client lacks session.messages - assuming empty history for ${sessionID}`
-      );
-      return {
-        ruleKeys: new Set<string>(),
-        hookHashes: new Set<string>(),
-        ruleRelativePaths: new Set<string>(),
-        contextPaths: [],
-      };
-    }
-    try {
-      // SDK methods rely on instance state via `this`; must not be called detached.
-      const result = await session.messages({
-        path: { id: sessionID },
-        query: { directory: this.directory },
-      });
-      const messages = (result?.data ?? []) as MessageWithInfo[];
-      const scan = scanInjectedParts(messages);
-      let contextPaths: string[] = [];
-      try {
-        contextPaths = extractFilePathsFromMessages(
-          filterValidMessages(messages)
-        );
-      } catch (error) {
-        this.debugLog(
-          `History context path extraction failed for ${sessionID}: ${formatError(error)}`
-        );
-      }
-      return { ...scan, contextPaths };
-    } catch (error) {
-      logWarning('Failed to fetch session history', error);
-      return undefined;
     }
   }
 
@@ -800,11 +524,10 @@ export class OpenCodeRulesRuntime {
       return;
     }
 
-    // Rule re-append must be decoupled from path tracking: pure chat
-    // sessions compact too. Consumed by the first post-compaction rescan.
-    this.sessionStore.upsert(sessionID, state => {
-      state.needsRuleRescan = true;
-    });
+    this.ruleDelivery.markCompacted(sessionID);
+    // A prefetch fetched before compaction would be stale: drop it so the
+    // next delivery decodes fresh post-compaction history instead.
+    this.pendingHistoryPrefetch.delete(sessionID);
 
     const sessionState = this.sessionStore.get(sessionID);
     if (!sessionState || sessionState.contextPaths.size === 0) {
@@ -855,21 +578,6 @@ export class OpenCodeRulesRuntime {
     } catch (error) {
       logWarning('Hook side-effect failed', error);
     }
-  }
-
-  /** Classify the delivery lifetime of a hook-owning rule. A rule whose
-   * durable part is already persisted is durable; otherwise the current
-   * condition provenance decides, defaulting to ephemeral when unproven. */
-  private classifyHookRuleLifetime(
-    sessionID: string,
-    rule: RuleSnapshot,
-    context: RuleFilterContext
-  ): RuleLifetime {
-    const key = ruleKeyFor(rule.relativePath, rule.strippedContent);
-    if (this.sessionStore.get(sessionID)?.injectedRuleKeys.has(key)) {
-      return 'durable';
-    }
-    return matchRuleSnapshots([rule], context)[0]?.lifetime ?? 'ephemeral';
   }
 
   /** Evaluate hooks for a tool invocation and queue matches.
@@ -940,27 +648,16 @@ export class OpenCodeRulesRuntime {
     // No blockers: queue content and run side-effects
     // Deduplicate content per rule (one injection per rule, regardless of how many hooks matched)
     const seenContent = new Set<string>();
+    const matchedHooks: MatchedHookContent[] = [];
     for (const { hook, rule } of allMatches) {
       if (!seenContent.has(rule.strippedContent)) {
         seenContent.add(rule.strippedContent);
-        const lifetime = this.classifyHookRuleLifetime(
-          sessionID,
-          rule,
-          filterContext
-        );
-
-        this.sessionStore.upsert(sessionID, state => {
-          const queue =
-            lifetime === 'durable'
-              ? state.pendingHookInjections
-              : state.pendingEphemeralHookInjections;
-          if (queue) {
-            queue.push(rule.strippedContent);
-          } else if (lifetime === 'durable') {
-            state.pendingHookInjections = [rule.strippedContent];
-          } else {
-            state.pendingEphemeralHookInjections = [rule.strippedContent];
-          }
+        const lifetime =
+          matchRuleSnapshots([rule], filterContext)[0]?.lifetime ?? 'ephemeral';
+        matchedHooks.push({
+          relativePath: rule.relativePath,
+          content: rule.strippedContent,
+          lifetime,
         });
 
         this.debugLog(
@@ -971,6 +668,12 @@ export class OpenCodeRulesRuntime {
       if (hook.run) {
         await this.executeHookSideEffect(hook.run, sessionID);
       }
+    }
+    if (matchedHooks.length > 0) {
+      this.ruleDelivery.queueMatchedHooks({
+        sessionID,
+        hooks: matchedHooks,
+      });
     }
   }
 }

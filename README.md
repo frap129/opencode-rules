@@ -457,7 +457,7 @@ opencode-rules/
 ├── src/
 │   ├── index.ts              # Main plugin entry point and exports
 │   ├── runtime.ts            # OpenCodeRulesRuntime class (hook orchestration)
-│   ├── rule-delivery.ts      # RuleDelivery seam and history decoding (migration foundation)
+│   ├── rule-delivery.ts      # Durable/transient delivery, Hook queues, and compaction invalidation
 │   ├── rule-delivery-codec.ts # Delivery identifiers, formats, and history decoding
 │   ├── rule-delivery-history.ts # Raw history port for delivery decoding
 │   ├── runtime-context.ts    # Context-building helpers (filter context, project detection)
@@ -496,7 +496,7 @@ opencode-rules/
 The following highlights the primary runtime modules:
 
 - **runtime.ts** - Orchestrates hooks (`tool.execute.before`, `chat.message`, `experimental.chat.*`)
-- **rule-delivery.ts** - Defines the Rule delivery seam and history reconstruction for the pending runtime migration
+- **rule-delivery.ts** - Owns durable/transient delivery, matched Hook queues, history reconstruction, and compaction invalidation
 - **rule-delivery-codec.ts** - Encodes durable/transient delivery and decodes durable history facts
 - **rule-delivery-history.ts** - Defines the raw host-history port used by delivery decoding
 - **runtime-context.ts** - Builds `RuleFilterContext` from session state and environment
@@ -601,18 +601,18 @@ This plugin uses OpenCode's hook system for incremental, stateful rule injection
      call (gated by seededFromHistory), while transient rule/hook delivery and
      post-compaction rescans run on every request
    - Seeds session state from full message history if needed
-   - Rebuilds dedup key sets from client history when a session is resumed
+   - Rebuilds the delivery dedup ledger from request history when a session is resumed
    - Evaluates the session snapshot against the current request and appends
      matching **ephemeral** rules (agent, model, branch, tools) as transient
      synthetic user messages (`prt_rule_ephemeral_`) — request-scoped only,
      never persisted, so switching agent or model swaps the applicable rules
    - Delivers pending hook injections immediately as a transient synthetic user message (`prt_hook_transient_`) appended to the very next model request - never persisted
-   - After compaction, rescans history and empties the injection key sets so the next user message re-appends durable rules and ephemeral rules are recomputed
+   - After compaction, rebuilds the delivery ledger from post-compaction history so the next user message re-appends durable rules and ephemeral rules are recomputed
 
 4. **`experimental.session.compacting`** - Compaction context preservation
    - Fires when a session is compacted (summarized)
    - Injects current context paths into the compaction context
-   - Sets `needsRuleRescan` (unconditionally, before any context-path early return) so durable rules are re-appended after compaction
+   - Invalidates the delivery ledger (unconditionally, before any context-path early return) so durable rules are re-appended after compaction
 
 5. **`tool.execute.after`** - Post-execution corrective guidance
    - Fires after each tool completes

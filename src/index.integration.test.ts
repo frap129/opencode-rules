@@ -16,7 +16,7 @@ import {
   toRules,
   createMockPluginInput,
 } from './test-fixtures.js';
-import { buildRulePart } from './synthetic-injection.js';
+import { buildRulePart } from './rule-delivery-codec.js';
 import { _setStateDirForTesting } from './active-rules-state.js';
 import { __testOnly } from './index.js';
 
@@ -1250,7 +1250,6 @@ describe('Session compacting behavior', () => {
 
     const {
       default: { server: plugin },
-      __testOnly,
     } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
     const hooks = await plugin(
@@ -1648,7 +1647,6 @@ describe('Synthetic-part delivery lifecycle', () => {
 
     const {
       default: { server: plugin },
-      __testOnly,
     } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
     const hooks = await plugin(
@@ -1684,7 +1682,7 @@ describe('Synthetic-part delivery lifecycle', () => {
     // Compaction fires (empty contextPaths is fine — flag set unconditionally)
     await compacting({ sessionID: 'ses_comp' }, { context: [] });
 
-    // Post-compaction dispatch: rescan runs, keys emptied
+    // Post-compaction dispatch rebuilds the durable history ledger.
     await messagesTransform(
       {},
       {
@@ -1696,10 +1694,6 @@ describe('Synthetic-part delivery lifecycle', () => {
         ],
       }
     );
-    expect(
-      __testOnly.getSessionStateSnapshot('ses_comp')?.injectedRuleKeys.size
-    ).toBe(0);
-
     // Turn 2: rule re-appended
     const turn2: ChatMessageOutputLike = {
       message: { role: 'user' },

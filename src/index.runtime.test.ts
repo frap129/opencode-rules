@@ -33,12 +33,7 @@ import {
   writeActiveRulesState,
 } from './active-rules-state.js';
 import { clearRuleCache } from './utils.js';
-import {
-  buildRulePart,
-  buildHookInjectionPart,
-  ruleKeyFor,
-  hashContent,
-} from './synthetic-injection.js';
+import { buildRulePart } from './rule-delivery-codec.js';
 
 describe('module boundary tests', () => {
   it('should re-export discoverRuleFiles from rule-discovery module', () => {
@@ -223,6 +218,30 @@ describe('OpenCodeRulesPlugin', () => {
     expect(typeof hooks['chat.message']).toBe('function');
   });
 
+  it('should register all five runtime host hooks', async () => {
+    const { testDir } = getTestDirs();
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+
+    expect(Object.keys(hooks).sort()).toEqual([
+      'chat.message',
+      'experimental.chat.messages.transform',
+      'experimental.session.compacting',
+      'tool.execute.after',
+      'tool.execute.before',
+    ]);
+    for (const hook of Object.values(hooks)) {
+      expect(typeof hook).toBe('function');
+    }
+  });
+
   it('should return transform hooks when rules exist', async () => {
     const { testDir, globalRulesDir } = getTestDirs();
     writeFileSync(path.join(globalRulesDir, 'rule.md'), '# Test Rule');
@@ -368,89 +387,6 @@ describe('OpenCodeRulesPlugin', () => {
     expect(snapshot?.seededFromHistory).toBe(true);
   });
 
-  it('queues PreToolUse hook injection when bash command matches', async () => {
-    const { testDir, globalRulesDir } = getTestDirs();
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
-    // Clear rule cache to ensure fresh reads
-    utilsModule.clearRuleCache();
-
-    writeFileSync(
-      path.join(globalRulesDir, 'security.mdc'),
-      `---\nhooks:\n  - type: PreToolUse\n    tool: bash\n    match: "0\\\\.0\\\\.0\\\\.0"\n---\n\nDo not bind to 0.0.0.0.`
-    );
-
-    const {
-      default: { server: plugin },
-      __testOnly,
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-
-    const before = hooks['tool.execute.before'] as (
-      input: { tool: string; sessionID: string; callID: string },
-      output: { args: Record<string, unknown> }
-    ) => Promise<void>;
-
-    await before(
-      { tool: 'bash', sessionID: 'ses_pre', callID: 'call_1' },
-      { args: { command: 'node server.js --host 0.0.0.0' } }
-    );
-
-    const snapshot = __testOnly.getSessionStateSnapshot('ses_pre');
-    expect(snapshot?.pendingHookInjections).toHaveLength(1);
-    expect(snapshot?.pendingHookInjections?.[0]).toContain(
-      'Do not bind to 0.0.0.0'
-    );
-  });
-
-  it('registers tool.execute.after hook and queues PostToolUse injection', async () => {
-    clearRuleCache();
-    const { testDir, globalRulesDir } = getTestDirs();
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
-    writeFileSync(
-      path.join(globalRulesDir, 'steering.mdc'),
-      `---\nhooks:\n  - type: PostToolUse\n    tool: bash\n    match: "grep"\n---\n\nUse ripgrep (rg) instead of grep.`
-    );
-
-    const {
-      default: { server: plugin },
-      __testOnly,
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-
-    const after = hooks['tool.execute.after'] as (
-      input: {
-        tool: string;
-        sessionID: string;
-        callID: string;
-        args: Record<string, unknown>;
-      },
-      output: { title: string; output: string; metadata: unknown }
-    ) => Promise<void>;
-    expect(after).toBeDefined();
-
-    await after(
-      {
-        tool: 'bash',
-        sessionID: 'ses_post',
-        callID: 'call_1',
-        args: { command: 'grep foo' },
-      },
-      { title: '', output: '', metadata: {} }
-    );
-
-    const snapshot = __testOnly.getSessionStateSnapshot('ses_post');
-    expect(snapshot?.pendingHookInjections).toHaveLength(1);
-    expect(snapshot?.pendingHookInjections?.[0]).toContain('Use ripgrep');
-  });
-
   it('delivers pending PreToolUse injection as a durable synthetic part', async () => {
     clearRuleCache();
     const { testDir, globalRulesDir } = getTestDirs();
@@ -463,7 +399,6 @@ describe('OpenCodeRulesPlugin', () => {
 
     const {
       default: { server: plugin },
-      __testOnly,
     } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
     const hooks = await plugin(
@@ -497,10 +432,6 @@ describe('OpenCodeRulesPlugin', () => {
     );
     expect(hookParts).toHaveLength(1);
     expect(hookParts[0]?.text).toBe('Do not bind to 0.0.0.0.');
-
-    // Pending injections should be cleared after delivery
-    const snapshot = __testOnly.getSessionStateSnapshot('ses_deliver');
-    expect(snapshot?.pendingHookInjections).toHaveLength(0);
   });
 
   it('throws when PreToolUse hook has block: true', async () => {
@@ -939,46 +870,6 @@ describe('history scan and rescan', () => {
     }
   });
 
-  it('rebuilds injected rule keys and hook hashes from history during seeding', async () => {
-    const { testDir } = getTestDirs();
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
-    const {
-      default: { server: plugin },
-      __testOnly,
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-    const messagesTransform = hooks['experimental.chat.messages.transform'] as (
-      input: unknown,
-      output: { messages: unknown[] }
-    ) => Promise<{ messages: unknown[] }>;
-
-    const rulePart = buildRulePart('persisted.md', 'Persisted rule body.');
-    const hookPart = buildHookInjectionPart('Persisted hook text.');
-    await messagesTransform(
-      {},
-      {
-        messages: [
-          {
-            info: { id: 'msg_1', role: 'user', sessionID: 'ses_scan' },
-            parts: [rulePart, hookPart],
-          },
-        ],
-      }
-    );
-
-    const snapshot = __testOnly.getSessionStateSnapshot('ses_scan');
-    expect(snapshot?.injectedRuleKeys).toContain(
-      ruleKeyFor('persisted.md', 'Persisted rule body.')
-    );
-    expect(snapshot?.injectedHookHashes).toContain(
-      hashContent('Persisted hook text.')
-    );
-  });
-
   it('does not let a history rescan overwrite the last complete active state', async () => {
     const { testDir } = getTestDirs();
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
@@ -1032,7 +923,6 @@ describe('history scan and rescan', () => {
 
     const {
       default: { server: plugin },
-      __testOnly,
     } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
     const hooks = await plugin(
@@ -1057,9 +947,6 @@ describe('history scan and rescan', () => {
       output
     );
     expect(output.parts.filter(p => p.synthetic)).toHaveLength(1);
-    expect(
-      __testOnly.getSessionStateSnapshot('ses_comp_eph')?.injectedRuleKeys.size
-    ).toBe(1);
 
     await compacting({ sessionID: 'ses_comp_eph' }, { context: [] });
 
@@ -1075,95 +962,6 @@ describe('history scan and rescan', () => {
       .map(part => part.text ?? '')
       .join('\n');
     expect(transformedText).toContain('Plan guidance.');
-    const snapshot = __testOnly.getSessionStateSnapshot('ses_comp_eph');
-    expect(snapshot?.injectedRuleKeys.size).toBe(0);
-    expect(
-      [...snapshot!.injectedRuleKeys].some(key => key.includes('plan-only'))
-    ).toBe(false);
-  });
-
-  it('compacting sets needsRuleRescan even with empty context paths', async () => {
-    const { testDir } = getTestDirs();
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
-    const {
-      default: { server: plugin },
-      __testOnly,
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-    const compacting = hooks['experimental.session.compacting'] as (
-      input: { sessionID: string },
-      output: { context: string[] }
-    ) => Promise<void>;
-
-    const output = { context: [] as string[] };
-    await compacting({ sessionID: 'ses_compact_empty' }, output);
-
-    expect(
-      __testOnly.getSessionStateSnapshot('ses_compact_empty')?.needsRuleRescan
-    ).toBe(true);
-    expect(output.context).toHaveLength(0);
-  });
-
-  it('rescan replaces keys and clears the flag when history lost the parts', async () => {
-    const { testDir } = getTestDirs();
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-
-    const {
-      default: { server: plugin },
-      __testOnly,
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-    const messagesTransform = hooks['experimental.chat.messages.transform'] as (
-      input: unknown,
-      output: { messages: unknown[] }
-    ) => Promise<{ messages: unknown[] }>;
-
-    // Seed once with parts present
-    await messagesTransform(
-      {},
-      {
-        messages: [
-          {
-            info: { id: 'msg_1', role: 'user', sessionID: 'ses_rescan' },
-            parts: [
-              buildRulePart('persisted.md', 'Persisted rule body.'),
-              { sessionID: 'ses_rescan', type: 'text', text: 'hi' },
-            ],
-          },
-        ],
-      }
-    );
-    expect(
-      __testOnly.getSessionStateSnapshot('ses_rescan')?.injectedRuleKeys.size
-    ).toBe(1);
-
-    // Simulate compaction: flag set, post-compaction history has no parts
-    __testOnly.upsertSessionState(
-      'ses_rescan',
-      s => void (s.needsRuleRescan = true)
-    );
-    await messagesTransform(
-      {},
-      {
-        messages: [
-          {
-            info: { id: 'msg_1', role: 'user', sessionID: 'ses_rescan' },
-            parts: [{ sessionID: 'ses_rescan', type: 'text', text: 'hi' }],
-          },
-        ],
-      }
-    );
-
-    const snapshot = __testOnly.getSessionStateSnapshot('ses_rescan');
-    expect(snapshot?.injectedRuleKeys.size).toBe(0);
-    expect(snapshot?.needsRuleRescan).toBe(false);
   });
 });
 
@@ -1671,13 +1469,6 @@ describe('chat.message rule persistence', () => {
       output: ChatMessageOutputLike
     ) => Promise<void>;
 
-    // Pre-queue a hook injection: the guard must preserve it for retry
-    // rather than flushing it without an owning message id.
-    const { __testOnly } = await import('./index.js');
-    __testOnly.upsertSessionState('sans_message_id', s => {
-      s.pendingHookInjections = ['Queued text.'];
-    });
-
     const output: ChatMessageOutputLike = {
       message: { role: 'user' }, // no id field
       parts: [{ type: 'text', text: 'hello' }],
@@ -1685,10 +1476,6 @@ describe('chat.message rule persistence', () => {
     await chatMessage({ sessionID: 'sans_message_id' }, output);
 
     expect(output.parts.filter(p => p.synthetic)).toHaveLength(0);
-    expect(
-      __testOnly.getSessionStateSnapshot('sans_message_id')
-        ?.pendingHookInjections
-    ).toEqual(['Queued text.']);
   });
 
   it('falls back to output.message.id when input omits it', async () => {
@@ -1930,12 +1717,6 @@ describe('chat.message rule persistence', () => {
       .join('\n');
     expect(transformedText).toContain('Build-only guidance.');
     expect(transformedText).not.toContain('Plan-only guidance.');
-
-    const state = __testOnly.getSessionStateSnapshot('ses_route');
-    expect(state?.injectedRuleKeys.size).toBe(1);
-    expect(
-      [...state!.injectedRuleKeys].some(key => key.includes('testing'))
-    ).toBe(true);
   });
 
   it('inherits the user message model so host hooks can read info.model', async () => {
@@ -2155,7 +1936,6 @@ describe('chat.message rule persistence', () => {
 
     const {
       default: { server: plugin },
-      __testOnly,
     } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
     const hooks = await plugin(
@@ -2188,9 +1968,6 @@ describe('chat.message rule persistence', () => {
     expect(hookParts[0]?.text).toBe('Do not bind to 0.0.0.0.');
     expect(hookParts[0]?.sessionID).toBe('ses_hookflush');
     expect(hookParts[0]?.messageID).toBe('msg_hookflush_1');
-    expect(
-      __testOnly.getSessionStateSnapshot('ses_hookflush')?.pendingHookInjections
-    ).toHaveLength(0);
   });
 
   it('skips rule matching but still flushes hooks for text-less messages', async () => {
@@ -2280,7 +2057,7 @@ describe('chat.message rule persistence', () => {
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const { buildRulePart } = await import('./synthetic-injection.js');
+    const { buildRulePart } = await import('./rule-delivery-codec.js');
     const {
       default: { server: plugin },
     } = await import('./index.js');
@@ -2310,14 +2087,13 @@ describe('chat.message rule persistence', () => {
     expect(output.parts.filter(p => p.synthetic)).toHaveLength(0);
   });
 
-  it('skips appending and flags rescan when the history fetch fails', async () => {
+  it('does not project active rules when the durable delivery is rejected', async () => {
     const { testDir, globalRulesDir } = getTestDirs();
     writeFileSync(path.join(globalRulesDir, 'always.md'), '# Always Apply');
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
     const {
       default: { server: plugin },
-      __testOnly,
     } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
     mockInput.client.session.messages = async () => {
@@ -2332,12 +2108,13 @@ describe('chat.message rule persistence', () => {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'hello' }],
     };
-    await chatMessage({ sessionID: 'ses_fetchfail' }, output);
+    await chatMessage(
+      { sessionID: 'ses_fetchfail', messageID: 'msg_fetchfail_1' },
+      output
+    );
 
     expect(output.parts.filter(p => p.synthetic)).toHaveLength(0);
-    expect(
-      __testOnly.getSessionStateSnapshot('ses_fetchfail')?.needsRuleRescan
-    ).toBe(true);
+    expect(await readActiveRulesState('ses_fetchfail')).toBeNull();
   });
 
   it('invokes session.messages with its receiver so sdk methods stay bound', async () => {
@@ -2347,7 +2124,6 @@ describe('chat.message rule persistence', () => {
 
     const {
       default: { server: plugin },
-      __testOnly,
     } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
     // Simulate the real SDK: a prototype-style method that reads instance
@@ -2381,9 +2157,6 @@ describe('chat.message rule persistence', () => {
     );
 
     expect(output.parts.filter(p => p.synthetic)).toHaveLength(1);
-    expect(
-      __testOnly.getSessionStateSnapshot('ses_receiver')?.needsRuleRescan
-    ).toBe(false);
   });
 
   it('does not persist hook text owned by an ephemeral rule', async () => {
@@ -2455,10 +2228,6 @@ describe('chat.message rule persistence', () => {
     expect(
       nextUserMessage.parts.some(part => part.text === 'Plan hook guidance.')
     ).toBe(false);
-    expect(
-      __testOnly.getSessionStateSnapshot('ses_hook_eph')
-        ?.pendingEphemeralHookInjections
-    ).toEqual([]);
   });
 
   it('keeps a mixed any hook durable when a durable condition matches', async () => {
@@ -2495,9 +2264,23 @@ describe('chat.message rule persistence', () => {
       { title: '', output: '', metadata: {} }
     );
 
-    const snapshot = __testOnly.getSessionStateSnapshot('ses_hook_mixed');
-    expect(snapshot?.pendingHookInjections).toEqual(['Mixed hook guidance.']);
-    expect(snapshot?.pendingEphemeralHookInjections).toBeUndefined();
+    const chatMessage = hooks['chat.message'] as ChatMessageHook;
+    const output: ChatMessageOutputLike = {
+      message: { role: 'user', agent: 'plan' },
+      parts: [{ type: 'text', text: 'continue' }],
+    };
+    await chatMessage(
+      { sessionID: 'ses_hook_mixed', messageID: 'msg_hook_mixed_1' },
+      output
+    );
+    expect(
+      output.parts.some(
+        part =>
+          part.synthetic &&
+          part.id?.startsWith('prt_hook_') &&
+          part.text === 'Mixed hook guidance.'
+      )
+    ).toBe(true);
   });
 
   it('uses the original snapshot body for hook text after an in-process edit', async () => {
@@ -2581,203 +2364,5 @@ describe('chat.message rule persistence', () => {
     await new Promise(resolve => setTimeout(resolve, 50));
     const state = await readActiveRulesState('ses_active_eph');
     expect(state?.matchedRulePaths).toEqual([rulePath]);
-    expect(
-      __testOnly.getSessionStateSnapshot('ses_active_eph')?.injectedRuleKeys
-        .size
-    ).toBe(0);
-  });
-});
-
-describe('transient hook injection delivery', () => {
-  let savedEnvXDG: string | undefined;
-  let savedEnvConfigDir: string | undefined;
-
-  beforeEach(() => {
-    setupTestDirs();
-    savedEnvXDG = process.env.XDG_CONFIG_HOME;
-    savedEnvConfigDir = process.env.OPENCODE_CONFIG_DIR;
-    delete process.env.OPENCODE_CONFIG_DIR;
-  });
-
-  afterEach(async () => {
-    teardownTestDirs();
-    vi.resetAllMocks();
-    const { __testOnly } = await import('./index.js');
-    __testOnly.resetSessionState();
-    if (savedEnvXDG === undefined) {
-      delete process.env.XDG_CONFIG_HOME;
-    } else {
-      process.env.XDG_CONFIG_HOME = savedEnvXDG;
-    }
-    if (savedEnvConfigDir === undefined) {
-      delete process.env.OPENCODE_CONFIG_DIR;
-    } else {
-      process.env.OPENCODE_CONFIG_DIR = savedEnvConfigDir;
-    }
-  });
-
-  async function setup(
-    sessionID: string,
-    queue: string[]
-  ): Promise<{
-    messagesTransform: (
-      input: unknown,
-      output: { messages: unknown[] }
-    ) => Promise<{ messages: unknown[] }>;
-  }> {
-    const { testDir } = getTestDirs();
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-    const {
-      default: { server: plugin },
-      __testOnly,
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-    __testOnly.upsertSessionState(sessionID, s => {
-      s.pendingHookInjections = queue;
-      s.seededFromHistory = true;
-    });
-    const messagesTransform = hooks['experimental.chat.messages.transform'] as (
-      input: unknown,
-      output: { messages: unknown[] }
-    ) => Promise<{ messages: unknown[] }>;
-    return { messagesTransform };
-  }
-
-  it('appends a trailing synthetic user message for pending hooks mid-turn', async () => {
-    const { messagesTransform } = await setup('ses_mid', ['Mind the linter.']);
-    const messages = [
-      {
-        info: { id: 'msg_u1', role: 'user', sessionID: 'ses_mid' },
-        parts: [{ type: 'text', text: 'run the build' }],
-      },
-      {
-        info: { id: 'msg_a1', role: 'assistant', sessionID: 'ses_mid' },
-        parts: [{ type: 'text', text: 'building...' }],
-      },
-    ];
-    await messagesTransform({}, { messages });
-
-    expect(messages).toHaveLength(3);
-    expect((messages[1] as { info: { id: string } }).info.id).toBe('msg_a1'); // source info untouched
-    const appended = messages[2] as {
-      info: { id: string; role: string; sessionID: string };
-      parts: Array<{
-        id?: string;
-        synthetic?: boolean;
-        text?: string;
-        sessionID?: string;
-        messageID?: string;
-      }>;
-    };
-    expect(appended.info.id.startsWith('msg_rules_hook_')).toBe(true);
-    expect(appended.info.role).toBe('user');
-    expect(appended.info.sessionID).toBe('ses_mid');
-    expect(appended.parts).toHaveLength(1);
-    expect(appended.parts[0]?.id?.startsWith('prt_hook_transient_')).toBe(true);
-    expect(appended.parts[0]?.synthetic).toBe(true);
-    expect(appended.parts[0]?.text).toBe('Mind the linter.');
-    expect(appended.parts[0]?.sessionID).toBe('ses_mid');
-    expect(appended.parts[0]?.messageID).toBe(appended.info.id);
-  });
-
-  it('is idempotent across dispatches within the turn', async () => {
-    const { messagesTransform } = await setup('ses_idem', ['Mind the linter.']);
-    const messages: Array<Record<string, unknown>> = [
-      {
-        info: { id: 'msg_u1', role: 'user', sessionID: 'ses_idem' },
-        parts: [{ type: 'text', text: 'hi' }],
-      },
-    ];
-    await messagesTransform({}, { messages });
-    await messagesTransform({}, { messages });
-
-    expect(messages).toHaveLength(2);
-    const appended = messages[1] as {
-      info: { id: string };
-    };
-    expect(appended.info.id.startsWith('msg_rules_hook_')).toBe(true);
-  });
-
-  it('skips content whose durable part is already in history', async () => {
-    const { buildHookInjectionPart } = await import('./synthetic-injection.js');
-    const durable = buildHookInjectionPart('Already persisted.');
-    const { messagesTransform } = await setup('ses_dur', [
-      'Already persisted.',
-    ]);
-    const messages = [
-      {
-        info: { id: 'msg_u1', role: 'user', sessionID: 'ses_dur' },
-        parts: [durable, { type: 'text', text: 'hi' }],
-      },
-    ];
-    await messagesTransform({}, { messages });
-
-    expect(messages).toHaveLength(1);
-  });
-
-  it('does not inject when the queue is empty', async () => {
-    const { messagesTransform } = await setup('ses_empty', []);
-    const messages = [
-      {
-        info: { id: 'msg_u1', role: 'user', sessionID: 'ses_empty' },
-        parts: [{ type: 'text', text: 'hi' }],
-      },
-    ];
-    await messagesTransform({}, { messages });
-
-    expect(messages).toHaveLength(1);
-  });
-
-  it('guards against empty message arrays', async () => {
-    const { messagesTransform } = await setup('ses_none', ['Text.']);
-    const messages: unknown[] = [];
-    await messagesTransform({}, { messages });
-
-    expect(messages).toHaveLength(0);
-  });
-
-  it('retains the ephemeral hook queue until a transform can deliver it', async () => {
-    const { testDir } = getTestDirs();
-    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
-    const {
-      default: { server: plugin },
-      __testOnly,
-    } = await import('./index.js');
-    const mockInput = createMockPluginInput({ testDir });
-    const hooks = await plugin(
-      mockInput as unknown as Parameters<typeof plugin>[0]
-    );
-    __testOnly.upsertSessionState('ses_eph_retain', s => {
-      s.pendingEphemeralHookInjections = ['Transient hook text.'];
-      s.seededFromHistory = true;
-    });
-    const messagesTransform = hooks['experimental.chat.messages.transform'] as (
-      input: unknown,
-      output: { messages: unknown[] }
-    ) => Promise<{ messages: unknown[] }>;
-
-    // No target message: queue retained for retry.
-    await messagesTransform({}, { messages: [] });
-    expect(
-      __testOnly.getSessionStateSnapshot('ses_eph_retain')
-        ?.pendingEphemeralHookInjections
-    ).toEqual(['Transient hook text.']);
-
-    // A valid request consumes the queue and delivers the text transiently.
-    const messages = [
-      {
-        info: { id: 'msg_u1', role: 'user', sessionID: 'ses_eph_retain' },
-        parts: [{ type: 'text', text: 'hi' }],
-      },
-    ];
-    await messagesTransform({}, { messages });
-    expect(messages).toHaveLength(2);
-    expect(
-      __testOnly.getSessionStateSnapshot('ses_eph_retain')
-        ?.pendingEphemeralHookInjections
-    ).toEqual([]);
   });
 });

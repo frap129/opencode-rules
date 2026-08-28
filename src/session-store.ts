@@ -8,12 +8,7 @@ export interface SessionState {
   seedCount?: number;
   lastModelID?: string;
   lastAgentType?: string;
-  pendingHookInjections?: string[];
-  injectedRuleKeys: Set<string>;
-  injectedHookHashes: Set<string>;
-  needsRuleRescan: boolean;
   ruleSnapshots?: RuleSnapshot[];
-  pendingEphemeralHookInjections?: string[];
 }
 
 interface SessionStoreOptions {
@@ -47,19 +42,9 @@ export class SessionStore {
     const snapshot: SessionState = {
       ...s,
       contextPaths: new Set(s.contextPaths),
-      injectedRuleKeys: new Set(s.injectedRuleKeys),
-      injectedHookHashes: new Set(s.injectedHookHashes),
     };
-    if (s.pendingHookInjections) {
-      snapshot.pendingHookInjections = [...s.pendingHookInjections];
-    }
     if (s.ruleSnapshots) {
       snapshot.ruleSnapshots = s.ruleSnapshots.map(rule => ({ ...rule }));
-    }
-    if (s.pendingEphemeralHookInjections) {
-      snapshot.pendingEphemeralHookInjections = [
-        ...s.pendingEphemeralHookInjections,
-      ];
     }
     return snapshot;
   }
@@ -106,9 +91,6 @@ export class SessionStore {
       lastUpdated: ++this.tick,
       seededFromHistory: false,
       seedCount: 0,
-      injectedRuleKeys: new Set<string>(),
-      injectedHookHashes: new Set<string>(),
-      needsRuleRescan: false,
     };
   }
 }

@@ -31,9 +31,6 @@ When a session is compacted, the `experimental.session.compacting` hook injects 
 
   // Add to output context array
   output.context.push(contextString);
-
-  // Mark rules for rescan after compaction (set unconditionally on compaction)
-  sessionState.needsRuleRescan = true;
 };
 ```
 
@@ -42,6 +39,7 @@ When a session is compacted, the `experimental.session.compacting` hook injects 
 - During compaction, OpenCode calls the `experimental.session.compacting` hook
 - We extract the current working set (file paths the user was working with)
 - We add a minimal context string that the compaction LLM includes in the summary
+- We invalidate the RuleDelivery ledger (`markCompacted`) so durable rules are re-appended after compaction
 - This prevents conditional rules from becoming "invisible" when their matching paths are lost
 
 **Why this works:**
@@ -78,19 +76,17 @@ interface SessionState {
   seedCount?: number; // Count of history scans
   lastModelID?: string; // Latest model ID
   lastAgentType?: string; // Latest agent type
-  pendingHookInjections?: string[]; // Queued durable hook injection texts
-  injectedRuleKeys: Set<string>; // Content-hash dedup keys for delivered durable rules
-  injectedHookHashes: Set<string>; // Hashes of delivered durable hook injections
-  needsRuleRescan: boolean; // Flag: re-append rules after compaction
   ruleSnapshots?: RuleSnapshot[]; // Per-session rule snapshot (process lifetime)
-  pendingEphemeralHookInjections?: string[]; // Queued transient hook texts
 }
 ```
+
+Delivery bookkeeping (dedup ledger, pending Hook queues, rescan flag) lives in
+the runtime-owned `RuleDelivery` instance, not in SessionState.
 
 - Maximum of 100 concurrent sessions in memory (LRU eviction)
 - Each entry is tagged with `lastUpdated` for age tracking
 - Sessions are automatically pruned when limit is exceeded
-- After compaction, persisted synthetic parts are gone from history; the next `experimental.chat.messages.transform` rescan empties the injection key sets, the next user message re-appends durable rules from the session snapshot, and ephemeral rules are recomputed per request
+- After compaction, persisted synthetic parts are gone from history; `markCompacted` invalidates the RuleDelivery ledger, the next `experimental.chat.messages.transform` rebuilds it from post-compaction history, the next user message re-appends durable rules from the session snapshot, and ephemeral rules are recomputed per request
 
 ## Data Flow
 
@@ -123,7 +119,7 @@ Compaction LLM generates summary including injected file paths
     ↓
 Session context preserved through compaction
     ↓
-Post-compaction transform rescans history and empties injection key sets
+Post-compaction transform rebuilds the delivery ledger from history
     ↓
 Next user message re-appends durable rules from the session snapshot;
 ephemeral rules are recomputed per request
