@@ -248,6 +248,15 @@ The plugin uses OpenCode's hook system to track context and inject rules:
    - `tool.execute.before` hook captures file paths as tools execute (read, edit, write, glob, grep, etc.)
    - `chat.message` hook captures the latest user prompt as messages arrive
    - `experimental.chat.messages.transform` hook seeds session state from message history on first call only
+   - Live tool calls and history parts (legacy `tool-invocation` and current
+     `tool` with `state.input`) share one tool-to-path mapping, so the same
+     call contributes the same context paths whether observed live or restored
+     after a restart:
+     - `read` / `edit` / `write` -> `filePath`
+     - `grep` -> `path` only (`pattern`/`include` are search terms, not paths)
+     - `glob` -> explicit `path` plus the directory derived from `pattern`
+     - `bash` -> `workdir`
+     - unknown tools -> nothing
 
 2. **Rule Injection**:
    - Matching rules are evaluated against the accumulated context on every user message

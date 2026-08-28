@@ -3,7 +3,10 @@ import {
   type RuleMatchContext,
   type MatchedRuleEntry,
 } from './rule-filter.js';
-import { extractFilePathsFromMessages } from './message-paths.js';
+import {
+  extractFilePathsFromMessages,
+  extractToolCallPaths,
+} from './message-paths.js';
 import {
   loadRuleSnapshots,
   type DiscoveredRule,
@@ -210,26 +213,9 @@ export class OpenCodeRulesRuntime {
       return;
     }
 
-    let filePath: string | undefined;
+    const contextPaths = extractToolCallPaths(toolName, args);
 
-    if (['read', 'edit', 'write'].includes(toolName)) {
-      const arg = args.filePath;
-      if (typeof arg === 'string' && arg.length > 0) {
-        filePath = arg;
-      }
-    } else if (['glob', 'grep'].includes(toolName)) {
-      const arg = args.path;
-      if (typeof arg === 'string' && arg.length > 0) {
-        filePath = arg;
-      }
-    } else if (toolName === 'bash') {
-      const arg = args.workdir;
-      if (typeof arg === 'string' && arg.length > 0) {
-        filePath = arg;
-      }
-    }
-
-    if (filePath) {
+    for (const filePath of contextPaths) {
       const normalized = normalizeContextPath(filePath, this.projectDirectory);
       this.sessionStore.upsert(sessionID, state => {
         state.contextPaths.add(normalized);

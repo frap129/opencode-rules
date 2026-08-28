@@ -781,6 +781,51 @@ describe('SessionState', () => {
       'React best practices'
     );
   });
+
+  it('records glob pattern-derived directory during live tool execution', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    writeFileSync(
+      path.join(globalRulesDir, 'legacy.mdc'),
+      `---\nglobs:\n  - "src/legacy"\n---\n\nLegacy module guidance.`
+    );
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+
+    const before = hooks['tool.execute.before'] as (
+      input: { tool: string; sessionID: string; callID: string },
+      output: { args: Record<string, unknown> }
+    ) => Promise<void>;
+
+    await before(
+      { tool: 'glob', sessionID: 'ses_glob_live', callID: 'call_glob_1' },
+      { args: { pattern: 'src/legacy/**/*.ts' } }
+    );
+
+    const snapshot = __testOnly.getSessionStateSnapshot('ses_glob_live');
+    expect(snapshot?.contextPaths).toContain('src/legacy');
+
+    const chatMessage = hooks['chat.message'] as ChatMessageHook;
+    const output: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'check this' }],
+    };
+    await chatMessage(
+      { sessionID: 'ses_glob_live', messageID: 'msg_ses_glob_live_1' },
+      output
+    );
+
+    expect(output.parts.filter(p => p.synthetic)[0]?.text).toContain(
+      'Legacy module guidance'
+    );
+  });
 });
 
 describe('history scan and rescan', () => {
@@ -1570,6 +1615,59 @@ describe('chat.message rule persistence', () => {
     const snapshot = __testOnly.getSessionStateSnapshot('ses_current_restart');
     expect(snapshot?.seededFromHistory).toBe(true);
     expect(snapshot?.contextPaths).toContain('src/restarted.ts');
+  });
+
+  it('rehydrates bash workdirs from history and delivers directory-gated rules', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+    writeFileSync(
+      path.join(globalRulesDir, 'tools-dir.md'),
+      `---\nglobs:\n  - "src/tools"\n---\n\nTools directory guidance.`
+    );
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({
+      testDir,
+      history: [
+        {
+          info: {
+            role: 'assistant',
+            sessionID: 'ses_bash_restart',
+          },
+          parts: [
+            {
+              type: 'tool',
+              tool: 'bash',
+              state: {
+                status: 'completed',
+                input: { command: 'ls', workdir: 'src/tools' },
+              },
+            },
+          ],
+        },
+      ],
+    });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+
+    const chatMessage = hooks['chat.message'] as ChatMessageHook;
+    const output: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'continue' }],
+    };
+    await chatMessage(
+      { sessionID: 'ses_bash_restart', messageID: 'msg_bash_restart' },
+      output
+    );
+
+    const snapshot = __testOnly.getSessionStateSnapshot('ses_bash_restart');
+    expect(snapshot?.contextPaths).toContain('src/tools');
+    expect(output.parts.filter(p => p.synthetic)[0]?.text).toContain(
+      'Tools directory guidance'
+    );
   });
 
   it('keeps the original rule content after an in-process file edit', async () => {

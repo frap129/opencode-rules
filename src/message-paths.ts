@@ -52,17 +52,23 @@ export function extractFilePathsFromMessages(messages: Message[]): string[] {
       // Extract from tool invocations
       if (part.type === 'tool-invocation') {
         const toolPart = part as ToolInvocationPart;
-        extractPathsFromToolCall(
+        for (const path of extractToolCallPaths(
           toolPart.toolInvocation.toolName,
-          toolPart.toolInvocation.args,
-          paths
-        );
+          toolPart.toolInvocation.args
+        )) {
+          paths.add(path);
+        }
       }
 
       // Extract from persisted OpenCode tool parts
       if (part.type === 'tool') {
         const toolPart = part as OpenCodeToolPart;
-        extractPathsFromToolCall(toolPart.tool, toolPart.state?.input, paths);
+        for (const path of extractToolCallPaths(
+          toolPart.tool,
+          toolPart.state?.input
+        )) {
+          paths.add(path);
+        }
       }
 
       // Extract from text content
@@ -77,39 +83,52 @@ export function extractFilePathsFromMessages(messages: Message[]): string[] {
 }
 
 /**
- * Extract file paths from tool call arguments
+ * Tool-name to context-path argument mapping, shared by live tool execution
+ * and history extraction so identical calls contribute identical paths either
+ * way:
+ *
+ * - read / edit / write -> filePath
+ * - grep -> path only (pattern/include are search terms, not paths)
+ * - glob -> directory derived from pattern, plus explicit path
+ * - bash -> workdir
+ * - unknown tools -> nothing
  */
-function extractPathsFromToolCall(
+const PATH_ARG_TOOLS: ReadonlyMap<string, readonly string[]> = new Map([
+  ['read', ['filePath']],
+  ['edit', ['filePath']],
+  ['write', ['filePath']],
+  ['glob', ['pattern', 'path']],
+  ['grep', ['path']],
+  ['bash', ['workdir']],
+]);
+
+/**
+ * Extract the context paths a single tool call contributes.
+ */
+export function extractToolCallPaths(
   toolName: string,
-  args: unknown,
-  paths: Set<string>
-): void {
-  if (!args || typeof args !== 'object') return;
+  args: unknown
+): string[] {
+  if (!args || typeof args !== 'object') return [];
 
-  // Tools that have a direct file path argument
-  const pathArgTools: Record<string, string[]> = {
-    read: ['filePath'],
-    edit: ['filePath'],
-    write: ['filePath'],
-    glob: ['pattern', 'path'],
-    grep: ['path'],
-  };
+  const argNames = PATH_ARG_TOOLS.get(toolName);
+  if (!argNames) return [];
 
-  const argNames = pathArgTools[toolName];
-  if (argNames) {
-    for (const argName of argNames) {
-      const value = (args as Record<string, unknown>)[argName];
-      if (typeof value === 'string' && value.length > 0) {
-        // For glob patterns, extract the directory part
-        if (argName === 'pattern') {
-          const dirPart = extractDirFromGlob(value);
-          if (dirPart) paths.add(dirPart);
-        } else {
-          paths.add(value);
-        }
+  const paths: string[] = [];
+  for (const argName of argNames) {
+    const value = (args as Record<string, unknown>)[argName];
+    if (typeof value === 'string' && value.length > 0) {
+      // For glob patterns, extract the directory part
+      if (argName === 'pattern') {
+        const dirPart = extractDirFromGlob(value);
+        if (dirPart) paths.push(dirPart);
+      } else {
+        paths.push(value);
       }
     }
   }
+
+  return paths;
 }
 
 /**

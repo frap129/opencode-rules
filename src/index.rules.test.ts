@@ -14,6 +14,7 @@ import {
   clearRuleCache,
   type Message,
 } from './utils.js';
+import { extractToolCallPaths } from './message-paths.js';
 import {
   setupTestDirs,
   teardownTestDirs,
@@ -630,6 +631,168 @@ describe('extractFilePathsFromMessages', () => {
 
     const paths = extractFilePathsFromMessages(messages);
     expect(paths).toContain('src');
+  });
+});
+
+describe('extractToolCallPaths', () => {
+  it('maps read/edit/write to filePath', () => {
+    for (const tool of ['read', 'edit', 'write']) {
+      expect(extractToolCallPaths(tool, { filePath: 'src/a.ts' })).toEqual([
+        'src/a.ts',
+      ]);
+    }
+  });
+
+  it('maps grep to path only, ignoring pattern and include', () => {
+    expect(
+      extractToolCallPaths('grep', {
+        pattern: 'Button',
+        path: 'src',
+        include: '*.ts',
+      })
+    ).toEqual(['src']);
+  });
+
+  it('maps glob to pattern-derived directory plus explicit path', () => {
+    expect(
+      extractToolCallPaths('glob', {
+        pattern: 'src/components/**/*.ts',
+        path: 'src/lib',
+      })
+    ).toEqual(['src/components', 'src/lib']);
+  });
+
+  it('maps glob pattern-only calls to the pattern-derived directory', () => {
+    expect(extractToolCallPaths('glob', { pattern: 'src/lib/*' })).toEqual([
+      'src/lib',
+    ]);
+  });
+
+  it('maps bash to workdir', () => {
+    expect(
+      extractToolCallPaths('bash', { command: 'ls', workdir: 'src/tools' })
+    ).toEqual(['src/tools']);
+  });
+
+  it('returns nothing for unknown tools', () => {
+    expect(extractToolCallPaths('websearch', { filePath: 'src/a.ts' })).toEqual(
+      []
+    );
+  });
+
+  it('returns nothing for Object.prototype property names', () => {
+    expect(
+      extractToolCallPaths('constructor', { filePath: 'src/a.ts' })
+    ).toEqual([]);
+    expect(extractToolCallPaths('toString', { workdir: 'src/a' })).toEqual([]);
+  });
+
+  it('ignores missing, empty, malformed, or non-string arguments', () => {
+    expect(extractToolCallPaths('read', undefined)).toEqual([]);
+    expect(extractToolCallPaths('read', null)).toEqual([]);
+    expect(extractToolCallPaths('read', 'not-an-object')).toEqual([]);
+    expect(extractToolCallPaths('read', {})).toEqual([]);
+    expect(extractToolCallPaths('read', { filePath: '' })).toEqual([]);
+    expect(extractToolCallPaths('read', { filePath: 42 })).toEqual([]);
+    expect(extractToolCallPaths('bash', { command: 'ls' })).toEqual([]);
+    expect(extractToolCallPaths('glob', { pattern: 'test*' })).toEqual([]);
+  });
+
+  it('produces the same paths from legacy and current history part shapes', () => {
+    const calls: Array<[string, Record<string, unknown>]> = [
+      ['read', { filePath: 'src/utils.ts' }],
+      ['edit', { filePath: 'src/components/Button.tsx' }],
+      ['write', { filePath: 'test/data.json' }],
+      ['grep', { pattern: 'Button', path: 'src', include: '*.ts' }],
+      ['glob', { pattern: 'src/components/**/*.ts', path: 'src/lib' }],
+      ['glob', { pattern: 'src/lib/*' }],
+      ['bash', { command: 'ls', workdir: 'src/tools' }],
+    ];
+
+    for (const [toolName, args] of calls) {
+      const direct = extractToolCallPaths(toolName, args);
+      const fromLegacy = extractFilePathsFromMessages([
+        {
+          role: 'assistant',
+          parts: [
+            {
+              type: 'tool-invocation' as const,
+              toolInvocation: { toolName, args },
+            },
+          ],
+        },
+      ]);
+      const currentMessages = [
+        {
+          role: 'assistant',
+          parts: [
+            {
+              type: 'tool' as const,
+              tool: toolName,
+              state: { status: 'completed', input: args },
+            },
+          ],
+        },
+      ];
+      const fromCurrent = extractFilePathsFromMessages(currentMessages);
+      expect(fromLegacy).toEqual(expect.arrayContaining(direct));
+      expect(fromCurrent).toEqual(expect.arrayContaining(direct));
+      expect(new Set(fromLegacy)).toEqual(new Set(fromCurrent));
+    }
+  });
+
+  it('extracts bash workdirs from history parts', () => {
+    const legacyMessages = [
+      {
+        role: 'assistant',
+        parts: [
+          {
+            type: 'tool-invocation' as const,
+            toolInvocation: {
+              toolName: 'bash',
+              args: { command: 'ls', workdir: 'src/tools' },
+            },
+          },
+        ],
+      },
+    ];
+    const currentMessages = [
+      {
+        role: 'assistant',
+        parts: [
+          {
+            type: 'tool' as const,
+            tool: 'bash',
+            state: {
+              status: 'completed',
+              input: { command: 'ls', workdir: 'src/tools' },
+            },
+          },
+        ],
+      },
+    ];
+    expect(extractFilePathsFromMessages(legacyMessages)).toContain('src/tools');
+    expect(extractFilePathsFromMessages(currentMessages)).toContain(
+      'src/tools'
+    );
+  });
+
+  it('ignores historical tool status when extracting paths', () => {
+    for (const status of ['completed', 'running', 'pending', 'error']) {
+      const messages = [
+        {
+          role: 'assistant',
+          parts: [
+            {
+              type: 'tool' as const,
+              tool: 'bash',
+              state: { status, input: { workdir: 'src/tools' } },
+            },
+          ],
+        },
+      ];
+      expect(extractFilePathsFromMessages(messages)).toContain('src/tools');
+    }
   });
 });
 
