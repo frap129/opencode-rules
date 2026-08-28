@@ -78,6 +78,13 @@ interface DeliveryState {
   pendingHookQueue: MatchedHookContent[];
   durableHookQueue: MatchedHookContent[];
   transientHookQueue: MatchedHookContent[];
+  transientTurn:
+    | {
+        id: string;
+        ruleKeys: Set<string>;
+        hookKeys: Set<string>;
+      }
+    | undefined;
   lastUpdated: number;
 }
 
@@ -245,14 +252,32 @@ class DefaultRuleDelivery implements RuleDelivery {
         ruleKeys: presentRuleKeys,
         hookKeys: presentHookKeys,
       } = decodeTransientPresence(input.messages);
+      const realUserInfo = this.latestRealUserInfo(input.messages);
+      const turnID =
+        typeof realUserInfo?.id === 'string' ? realUserInfo.id : undefined;
+      if (turnID && state.transientTurn?.id !== turnID) {
+        state.transientTurn = {
+          id: turnID,
+          ruleKeys: new Set(),
+          hookKeys: new Set(),
+        };
+      }
+      const transientTurn = turnID ? state.transientTurn : undefined;
+      if (transientTurn) {
+        for (const key of presentRuleKeys) transientTurn.ruleKeys.add(key);
+        for (const key of presentHookKeys) transientTurn.hookKeys.add(key);
+      }
 
-      const baseInfo = this.transientBaseInfo(input.messages);
+      const baseInfo =
+        realUserInfo ?? input.messages[input.messages.length - 1]?.info ?? {};
       const transientRules: MatchedRuleContent[] = [];
       for (const rule of input.matchedRules) {
         const key = deliveryKey(rule);
         if (
           hasDeliveryKey(state.ruleKeys, rule) ||
-          hasDeliveryKey(presentRuleKeys, rule)
+          hasDeliveryKey(presentRuleKeys, rule) ||
+          (transientTurn !== undefined &&
+            hasDeliveryKey(transientTurn.ruleKeys, rule))
         ) {
           continue;
         }
@@ -266,7 +291,13 @@ class DefaultRuleDelivery implements RuleDelivery {
         ...state.transientHookQueue,
       ]) {
         const key = deliveryKey(hook);
-        if (hasDeliveryKey(presentHookKeys, hook)) continue;
+        if (
+          hasDeliveryKey(presentHookKeys, hook) ||
+          (transientTurn !== undefined &&
+            hasDeliveryKey(transientTurn.hookKeys, hook))
+        ) {
+          continue;
+        }
         presentHookKeys.add(key);
         transientHooks.push(hook);
       }
@@ -293,6 +324,14 @@ class DefaultRuleDelivery implements RuleDelivery {
               },
             ],
           });
+          if (transientTurn) {
+            for (const rule of transientRules) {
+              transientTurn.ruleKeys.add(deliveryKey(rule));
+            }
+            for (const hook of transientHooks) {
+              transientTurn.hookKeys.add(deliveryKey(hook));
+            }
+          }
         }
       }
       state.transientHookQueue = [];
@@ -307,6 +346,7 @@ class DefaultRuleDelivery implements RuleDelivery {
     const state = this.getState(sessionID);
     state.ledgerRevision++;
     state.needsRescan = true;
+    this.resetTransientTurn(state);
   }
 
   markHistoryChanged(sessionID: string): void {
@@ -314,6 +354,7 @@ class DefaultRuleDelivery implements RuleDelivery {
     state.ledgerRevision++;
     state.seededFromHistory = false;
     state.needsRescan = false;
+    this.resetTransientTurn(state);
   }
 
   private replaceLedger(
@@ -337,9 +378,9 @@ class DefaultRuleDelivery implements RuleDelivery {
     state.pendingHookQueue = [];
   }
 
-  private transientBaseInfo(
+  private latestRealUserInfo(
     messages: readonly TransientDispatchMessage[]
-  ): Record<string, unknown> {
+  ): Record<string, unknown> | undefined {
     for (let index = messages.length - 1; index >= 0; index--) {
       const info = messages[index]?.info;
       if (!info || info.role !== 'user' || isTransientMessageId(info.id)) {
@@ -347,7 +388,11 @@ class DefaultRuleDelivery implements RuleDelivery {
       }
       return info;
     }
-    return messages[messages.length - 1]?.info ?? {};
+    return undefined;
+  }
+
+  private resetTransientTurn(state: DeliveryState): void {
+    state.transientTurn = undefined;
   }
 
   private getState(sessionID: string): DeliveryState {
@@ -362,6 +407,7 @@ class DefaultRuleDelivery implements RuleDelivery {
         pendingHookQueue: [],
         durableHookQueue: [],
         transientHookQueue: [],
+        transientTurn: undefined,
         lastUpdated: 0,
       };
       this.states.set(sessionID, state);

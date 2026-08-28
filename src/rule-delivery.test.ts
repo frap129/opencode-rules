@@ -892,6 +892,113 @@ describe('RuleDelivery matched Hook queueing', () => {
 });
 
 describe('RuleDelivery transient dispatches', () => {
+  const userTurnMessage = (sessionID: string, messageID = 'msg_user') => ({
+    info: { id: messageID, role: 'user', sessionID },
+    parts: [{ type: 'text', text: 'Prompt.' }],
+  });
+
+  it('deduplicates transient rules when the agent loop reloads one user turn', () => {
+    const delivery: RuleDelivery = createRuleDelivery({
+      rawHistory: new MockRawHistoryAdapter({ ok: true, messages: [] }),
+    });
+    const userMessage = userTurnMessage('ses_repeated');
+    const matchedRules = [
+      { relativePath: 'rules/transient.md', content: 'Transient guidance.' },
+    ];
+    const firstDispatch = [structuredClone(userMessage)];
+    const repeatedDispatch = [structuredClone(userMessage)];
+    const expandedDispatch = [structuredClone(userMessage)];
+    const nextTurn = [userTurnMessage('ses_repeated', 'msg_next')];
+
+    delivery.deliverTransientDispatch({
+      sessionID: 'ses_repeated',
+      matchedRules,
+      messages: firstDispatch,
+    });
+    delivery.deliverTransientDispatch({
+      sessionID: 'ses_repeated',
+      matchedRules,
+      messages: repeatedDispatch,
+    });
+    delivery.deliverTransientDispatch({
+      sessionID: 'ses_repeated',
+      matchedRules: [
+        ...matchedRules,
+        { relativePath: 'rules/new.md', content: 'New guidance.' },
+      ],
+      messages: expandedDispatch,
+    });
+    delivery.deliverTransientDispatch({
+      sessionID: 'ses_repeated',
+      matchedRules,
+      messages: nextTurn,
+    });
+
+    expect(firstDispatch).toHaveLength(2);
+    expect(repeatedDispatch).toHaveLength(1);
+    expect(expandedDispatch).toHaveLength(2);
+    expect(expandedDispatch[1]?.parts[0]?.text).toContain('New guidance.');
+    expect(expandedDispatch[1]?.parts[0]?.text).not.toContain(
+      'Transient guidance.'
+    );
+    expect(nextTurn).toHaveLength(2);
+  });
+
+  it('deduplicates transient Hooks when the agent loop reloads one user turn', () => {
+    const delivery: RuleDelivery = createRuleDelivery({
+      rawHistory: new MockRawHistoryAdapter({ ok: true, messages: [] }),
+    });
+    const hook = {
+      relativePath: 'rules/hook.md',
+      content: 'Hook guidance.',
+      lifetime: 'ephemeral' as const,
+    };
+    const messages = () => [userTurnMessage('ses_hook_turn')];
+    const firstDispatch = messages();
+    const repeatedDispatch = messages();
+
+    delivery.queueMatchedHooks({ sessionID: 'ses_hook_turn', hooks: [hook] });
+    delivery.deliverTransientDispatch({
+      sessionID: 'ses_hook_turn',
+      matchedRules: [],
+      messages: firstDispatch,
+    });
+    delivery.queueMatchedHooks({ sessionID: 'ses_hook_turn', hooks: [hook] });
+    delivery.deliverTransientDispatch({
+      sessionID: 'ses_hook_turn',
+      matchedRules: [],
+      messages: repeatedDispatch,
+    });
+
+    expect(firstDispatch).toHaveLength(2);
+    expect(repeatedDispatch).toHaveLength(1);
+  });
+
+  it.each(['markCompacted', 'markHistoryChanged'] as const)(
+    're-delivers transient rules after %s invalidates the active turn',
+    invalidator => {
+      const delivery: RuleDelivery = createRuleDelivery({
+        rawHistory: new MockRawHistoryAdapter({ ok: true, messages: [] }),
+      });
+      const input = () => ({
+        sessionID: 'ses_invalidated_turn',
+        matchedRules: [
+          { relativePath: 'rules/transient.md', content: 'Guidance.' },
+        ],
+        messages: [userTurnMessage('ses_invalidated_turn')],
+      });
+      const firstDispatch = input();
+      const invalidatedDispatch = input();
+
+      delivery.deliverTransientDispatch(firstDispatch);
+      delivery[invalidator]('ses_invalidated_turn');
+      delivery.deliverTransientDispatch(invalidatedDispatch);
+
+      expect(firstDispatch.messages).toHaveLength(2);
+      expect(invalidatedDispatch.messages).toHaveLength(2);
+    }
+  );
+
   it('appends matched rules, durable Hook copies, and transient Hook content in order', async () => {
     const history = new MockRawHistoryAdapter({ ok: true, messages: [] });
     const delivery: RuleDelivery = createRuleDelivery({ rawHistory: history });
