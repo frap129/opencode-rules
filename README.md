@@ -460,11 +460,11 @@ opencode-rules/
 │   ├── rule-delivery.ts      # Durable/transient delivery, Hook queues, and identity ledger
 │   ├── rule-delivery-codec.ts # Delivery identifiers, formats, and history decoding
 │   ├── rule-delivery-history.ts # Raw history port for delivery decoding
-│   ├── runtime-context.ts    # Context-building helpers (filter context, project detection)
+│   ├── runtime-context.ts    # Context-building helpers (match context, project detection)
 │   ├── runtime-chat.ts       # Chat message handling and text extraction
 │   ├── rule-discovery.ts     # Rule file scanning, discovery, and per-session snapshots
 │   ├── rule-metadata.ts      # YAML frontmatter parsing
-│   ├── rule-filter.ts        # Rule filtering, lifetime classification (globs, keywords, tools, runtime)
+│   ├── rule-filter.ts        # Rule matching against context, lifetime classification (globs, keywords, tools, runtime)
 │   ├── message-paths.ts      # Path extraction from messages
 │   ├── message-context.ts    # User prompt extraction from message parts
 │   ├── session-store.ts      # Per-session state management
@@ -499,11 +499,11 @@ The following highlights the primary runtime modules:
 - **rule-delivery.ts** - Owns durable/transient delivery, matched Hook queues, history reconstruction, and the identity ledger
 - **rule-delivery-codec.ts** - Encodes durable/transient delivery and decodes durable history facts
 - **rule-delivery-history.ts** - Defines the raw host-history port used by delivery decoding
-- **runtime-context.ts** - Builds `RuleFilterContext` from session state and environment
+- **runtime-context.ts** - Builds `RuleMatchContext` from session state and environment
 - **runtime-chat.ts** - Extracts text from chat message parts for keyword matching
 - **rule-discovery.ts** - Recursively scans directories for `.md`/`.mdc` rule files
 - **rule-metadata.ts** - Parses YAML frontmatter into typed `RuleMetadata`
-- **rule-filter.ts** - Evaluates rules against context (globs, keywords, tools, runtime filters) and classifies each match as session-durable or ephemeral; returns `FilterResult` with `formattedRules` and `matchedPaths`
+- **rule-filter.ts** - Matches rules against context (globs, keywords, tools, runtime filters) and classifies each match as session-durable or ephemeral
 - **message-paths.ts** - Extracts file paths from tool invocation arguments and message text
 - **message-context.ts** - Extracts user prompt text, slash commands, and session IDs from message parts
 - **session-store.ts** - Manages per-session state with LRU eviction
@@ -584,7 +584,7 @@ This plugin uses OpenCode's hook system for incremental, stateful rule delivery:
    - Fires as each user message arrives
    - Extracts and stores the latest user prompt text
    - Enables keyword-based rule matching across the conversation flow
-   - Receives full runtime filter context: model, agent, command, project type, git branch, OS, and CI environment
+   - Receives full runtime match context: model, agent, command, project type, git branch, OS, and CI environment
    - Evaluates the session rule snapshot and filters based on:
      - Extracted file paths from session state (`globs`)
      - Latest user prompt (`keywords`)
@@ -644,7 +644,7 @@ This will log information about:
 
 - Rule discovery (files found)
 - Cache hits/misses
-- Rule filtering (which rules are included/skipped)
+- Rule matching (which rules are included/skipped)
 - Available tool IDs (useful for writing `tools` conditions)
 
 All plugin console output, including warnings and TUI rule-load errors, is

@@ -5,7 +5,6 @@
 import path from 'node:path';
 import os from 'node:os';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import type { DiscoveredRule } from './utils.js';
 
 // ============================================================================
 // Test Directory Management
@@ -41,20 +40,6 @@ export function getTestDirs(): TestDirs {
     throw new Error('Test dirs not initialized. Call setupTestDirs() first.');
   }
   return currentTestDirs;
-}
-
-// ============================================================================
-// Rule Helpers
-// ============================================================================
-
-/**
- * Converts file paths to DiscoveredRule objects for testing.
- */
-export function toRules(paths: string[]): DiscoveredRule[] {
-  return paths.map(filePath => ({
-    filePath,
-    relativePath: path.basename(filePath),
-  }));
 }
 
 // ============================================================================

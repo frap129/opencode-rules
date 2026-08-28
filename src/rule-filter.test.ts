@@ -1,11 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, afterEach } from 'vitest';
+import path from 'node:path';
+import { writeFileSync } from 'node:fs';
 import {
   classifyRuleLifetime,
   matchRuleSnapshots,
   type RuleConditionKind,
 } from './rule-filter.js';
+import { loadRuleSnapshots } from './rule-discovery.js';
 import type { RuleSnapshot } from './rule-discovery.js';
 import type { RuleMetadata } from './rule-metadata.js';
+import { setupTestDirs, teardownTestDirs } from './test-fixtures.js';
 
 const snapshot = (
   metadata: RuleMetadata | null,
@@ -231,5 +235,65 @@ describe('matchRuleSnapshots condition semantics (live delivery)', () => {
 
     expect(entries[0]?.strippedContent).toBe('Ship carefully.');
     expect(entries[0]?.name).toBe('deploy');
+  });
+});
+
+describe('loader-to-matcher composition (disk-loaded rules)', () => {
+  afterEach(teardownTestDirs);
+
+  it('matches a multi-dimension rule loaded through loadRuleSnapshots', async () => {
+    const { globalRulesDir } = setupTestDirs();
+    const matchingPath = path.join(globalRulesDir, 'cross-dim.mdc');
+    const missingPath = path.join(globalRulesDir, 'cross-dim-miss.mdc');
+    writeFileSync(
+      matchingPath,
+      `---
+globs:
+  - "**/*.ts"
+keywords:
+  - refactor
+tools:
+  - mcp_bash
+model:
+  - claude-opus
+agent:
+  - programmer
+os:
+  - linux
+match: all
+---
+
+All dimensions match rule.`
+    );
+    writeFileSync(
+      missingPath,
+      `---
+globs:
+  - "**/*.ts"
+keywords:
+  - database
+match: all
+---
+
+Keywords fail rule.`
+    );
+
+    const snapshots = await loadRuleSnapshots([
+      { filePath: matchingPath, relativePath: 'cross-dim.mdc' },
+      { filePath: missingPath, relativePath: 'cross-dim-miss.mdc' },
+    ]);
+
+    const entries = matchRuleSnapshots(snapshots, {
+      contextFilePaths: ['src/utils.ts'],
+      userPrompt: 'help me refactor this code',
+      availableToolIDs: ['mcp_bash', 'mcp_read'],
+      modelID: 'claude-opus',
+      agentType: 'programmer',
+      os: 'linux',
+    });
+
+    expect(entries.map(entry => entry.relativePath)).toEqual(['cross-dim.mdc']);
+    expect(entries[0]?.filePath).toBe(matchingPath);
+    expect(entries[0]?.lifetime).toBe('ephemeral');
   });
 });

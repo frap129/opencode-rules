@@ -12,13 +12,13 @@
  * - mcp-tools.ts: internal MCP integration
  * - runtime.ts: internal orchestration (entry point is index.ts)
  * - runtime-chat.ts: internal chat hook handler
- * - runtime-context.ts: internal filter context builder
+ * - runtime-context.ts: internal match context builder
  * - session-store.ts: internal session state
  *
  * Re-exported public modules:
  * - rule-discovery.ts: File discovery and caching
  * - rule-metadata.ts: Frontmatter parsing
- * - rule-filter.ts: Rule filtering and formatting
+ * - rule-filter.ts: Rule matching and lifetime classification
  * - message-paths.ts: Message path extraction
  * - rule-hooks.ts: Hook evaluation and serialization
  */
@@ -42,9 +42,7 @@ export {
 export {
   promptMatchesKeywords,
   toolsMatchAvailable,
-  readAndFormatRules,
-  type RuleFilterContext,
-  type FilterResult,
+  type RuleMatchContext,
 } from './rule-filter.js';
 
 // Re-export from message-paths

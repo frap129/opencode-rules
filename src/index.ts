@@ -1,7 +1,8 @@
 /**
  * OpenCode Rules Plugin
  *
- * Discovers markdown rule files and injects them into the system prompt.
+ * Discovers markdown rule files and delivers them into sessions as
+ * synthetic rule parts.
  */
 
 import type { Plugin, PluginInput } from '@opencode-ai/plugin';

@@ -23,13 +23,12 @@ import {
 } from 'vitest';
 import path from 'node:path';
 import { writeFileSync, mkdirSync } from 'node:fs';
-import { readAndFormatRules, clearRuleCache } from './utils.js';
+import { clearRuleCache } from './utils.js';
 import { __testOnly } from './index.js';
 import {
   setupTestDirs,
   teardownTestDirs,
   getTestDirs,
-  toRules,
   saveCiEnvVars,
   clearCiEnvVars,
   restoreCiEnvVars,
@@ -60,8 +59,8 @@ type ChatMessageOutputLike = {
   }>;
 };
 
-// Retained plugin-level tests with complex runtime filter context
-describe('Runtime filter context integration (plugin-level)', () => {
+// Retained plugin-level tests with complex runtime match context
+describe('Runtime match context integration (plugin-level)', () => {
   let savedEnvXDG: string | undefined;
   let savedEnvConfigDir: string | undefined;
   let savedCiEnv: CiEnvSnapshot;
@@ -851,123 +850,5 @@ Feature branch guidelines.`
       .map(p => p.text)
       .join('\n');
     expect(injectedText).toContain('Always apply this rule');
-  });
-});
-
-// Retained API contract tests
-describe('readAndFormatRules API contract', () => {
-  let savedEnvXDG: string | undefined;
-  let savedEnvConfigDir: string | undefined;
-
-  beforeEach(() => {
-    setupTestDirs();
-    savedEnvXDG = process.env.XDG_CONFIG_HOME;
-    savedEnvConfigDir = process.env.OPENCODE_CONFIG_DIR;
-    delete process.env.OPENCODE_CONFIG_DIR;
-    clearRuleCache();
-  });
-
-  afterEach(() => {
-    teardownTestDirs();
-    if (savedEnvXDG === undefined) {
-      delete process.env.XDG_CONFIG_HOME;
-    } else {
-      process.env.XDG_CONFIG_HOME = savedEnvXDG;
-    }
-    if (savedEnvConfigDir === undefined) {
-      delete process.env.OPENCODE_CONFIG_DIR;
-    } else {
-      process.env.OPENCODE_CONFIG_DIR = savedEnvConfigDir;
-    }
-  });
-
-  it('should only accept RuleFilterContext object as second argument', async () => {
-    const { globalRulesDir } = getTestDirs();
-    const rulePath = path.join(globalRulesDir, 'tools-rule.mdc');
-    writeFileSync(
-      rulePath,
-      `---
-tools:
-  - mcp_websearch
----
-
-Tools rule.`
-    );
-
-    const { formattedRules } = await readAndFormatRules(toRules([rulePath]), {
-      userPrompt: 'some prompt',
-      availableToolIDs: ['mcp_websearch', 'mcp_bash'],
-    });
-
-    expect(formattedRules).toContain('tools-rule.mdc');
-    expect(formattedRules).toContain('Tools rule');
-  });
-
-  it('should ignore array passed as second arg (legacy positional pattern rejected)', async () => {
-    const { globalRulesDir } = getTestDirs();
-    const rulePath = path.join(globalRulesDir, 'legacy-reject-globs.mdc');
-    writeFileSync(
-      rulePath,
-      `---
-globs:
-  - "src/**/*.ts"
----
-
-Legacy globs rule.`
-    );
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { formattedRules } = await readAndFormatRules(toRules([rulePath]), [
-      'src/app.ts',
-    ] as any);
-
-    expect(formattedRules).toBe('');
-  });
-
-  it('should ignore third positional arg (legacy userPrompt rejected)', async () => {
-    const { globalRulesDir } = getTestDirs();
-    const rulePath = path.join(globalRulesDir, 'legacy-reject-keywords.mdc');
-    writeFileSync(
-      rulePath,
-      `---
-keywords:
-  - testing
----
-
-Legacy keywords rule.`
-    );
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { formattedRules } = await (readAndFormatRules as any)(
-      toRules([rulePath]),
-      {},
-      'help with testing'
-    );
-
-    expect(formattedRules).toBe('');
-  });
-
-  it('should ignore fourth positional arg (legacy availableToolIDs rejected)', async () => {
-    const { globalRulesDir } = getTestDirs();
-    const rulePath = path.join(globalRulesDir, 'legacy-reject-tools.mdc');
-    writeFileSync(
-      rulePath,
-      `---
-tools:
-  - mcp_websearch
----
-
-Legacy tools rule.`
-    );
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { formattedRules } = await (readAndFormatRules as any)(
-      toRules([rulePath]),
-      {},
-      undefined,
-      ['mcp_websearch', 'mcp_bash']
-    );
-
-    expect(formattedRules).toBe('');
   });
 });

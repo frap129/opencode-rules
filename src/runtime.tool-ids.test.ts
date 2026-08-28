@@ -13,9 +13,9 @@ describe('runtime module runtime exports', () => {
 });
 
 describe('runtime module boundaries', () => {
-  it('exports buildFilterContext from runtime-context module', () => {
-    expect(runtimeContextModule.buildFilterContext).toBeDefined();
-    expect(typeof runtimeContextModule.buildFilterContext).toBe('function');
+  it('exports buildRuleMatchContext from runtime-context module', () => {
+    expect(runtimeContextModule.buildRuleMatchContext).toBeDefined();
+    expect(typeof runtimeContextModule.buildRuleMatchContext).toBe('function');
   });
 
   it('exports detectCiEnvironment from runtime-context module', () => {

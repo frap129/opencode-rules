@@ -1,10 +1,10 @@
 import { extractSlashCommand } from './message-context.js';
 import { detectProjectTags } from './project-fingerprint.js';
 import { getGitBranch } from './git-branch.js';
-import type { RuleFilterContext } from './rule-filter.js';
+import type { RuleMatchContext } from './rule-filter.js';
 import type { DebugLog } from './debug.js';
 
-export interface BuildFilterContextOptions {
+export interface BuildRuleMatchContextOptions {
   contextFilePaths: string[];
   userPrompt: string | undefined;
   availableToolIDs: string[];
@@ -49,12 +49,12 @@ export function detectCiEnvironment(): boolean {
 }
 
 /**
- * Build the filter context object used for rule matching.
+ * Build the match context object used for rule matching.
  * Assembles runtime information from various sources.
  */
-export async function buildFilterContext(
-  opts: BuildFilterContextOptions
-): Promise<RuleFilterContext> {
+export async function buildRuleMatchContext(
+  opts: BuildRuleMatchContextOptions
+): Promise<RuleMatchContext> {
   const {
     contextFilePaths,
     userPrompt,
@@ -89,7 +89,7 @@ export async function buildFilterContext(
   const os = process.platform;
   const ci = detectCiEnvironment();
 
-  const context: RuleFilterContext = {
+  const context: RuleMatchContext = {
     os,
     ci,
   };
@@ -120,7 +120,7 @@ export async function buildFilterContext(
   }
 
   debugLog(
-    `Filter context: model=${modelID ?? 'none'}, agent=${agentType ?? 'none'}, ` +
+    `Match context: model=${modelID ?? 'none'}, agent=${agentType ?? 'none'}, ` +
       `command=${command ?? 'none'}, branch=${gitBranch ?? 'none'}, ` +
       `os=${os}, ci=${ci}, projectTags=${projectTags?.join(',') ?? 'none'}`
   );

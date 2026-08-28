@@ -75,14 +75,6 @@ describe('module boundary tests', () => {
     );
   });
 
-  it('should re-export readAndFormatRules from rule-filter module', () => {
-    expect(ruleFilterModule.readAndFormatRules).toBeDefined();
-    expect(typeof ruleFilterModule.readAndFormatRules).toBe('function');
-    expect(utilsModule.readAndFormatRules).toBe(
-      ruleFilterModule.readAndFormatRules
-    );
-  });
-
   it('should re-export clearRuleCache from rule-discovery module', () => {
     expect(ruleDiscoveryModule.clearRuleCache).toBeDefined();
     expect(typeof ruleDiscoveryModule.clearRuleCache).toBe('function');
@@ -98,8 +90,8 @@ describe('module boundary tests', () => {
     expect(ruleFromDiscovery.filePath).toBe('/test/rule.md');
   });
 
-  it('should re-export RuleFilterContext type via utils facade', () => {
-    const context: utilsModule.RuleFilterContext = {
+  it('should re-export RuleMatchContext type via utils facade', () => {
+    const context: utilsModule.RuleMatchContext = {
       userPrompt: 'test',
       contextFilePaths: ['src/test.ts'],
     };
@@ -115,9 +107,9 @@ describe('module boundary tests', () => {
   });
 
   // Runtime decomposition module boundary tests
-  it('should export buildFilterContext from runtime-context module', () => {
-    expect(runtimeContextModule.buildFilterContext).toBeDefined();
-    expect(typeof runtimeContextModule.buildFilterContext).toBe('function');
+  it('should export buildRuleMatchContext from runtime-context module', () => {
+    expect(runtimeContextModule.buildRuleMatchContext).toBeDefined();
+    expect(typeof runtimeContextModule.buildRuleMatchContext).toBe('function');
   });
 
   it('should export detectCiEnvironment from runtime-context module', () => {
@@ -1098,7 +1090,6 @@ describe('utils runtime exports', () => {
       'parseRuleMetadata',
       'promptMatchesKeywords',
       'readActiveRulesState',
-      'readAndFormatRules',
       'serializeToolArgs',
       'toolsMatchAvailable',
     ]);

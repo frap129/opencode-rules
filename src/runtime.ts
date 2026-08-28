@@ -1,6 +1,6 @@
 import {
   matchRuleSnapshots,
-  type RuleFilterContext,
+  type RuleMatchContext,
   type MatchedRuleEntry,
 } from './rule-filter.js';
 import { extractFilePathsFromMessages } from './message-paths.js';
@@ -25,7 +25,7 @@ import {
   type DebugLog,
 } from './debug.js';
 import type { SessionStore } from './session-store.js';
-import { buildFilterContext } from './runtime-context.js';
+import { buildRuleMatchContext } from './runtime-context.js';
 import {
   updateSessionFromChatMessage,
   type ChatMessageInput,
@@ -366,19 +366,19 @@ export class OpenCodeRulesRuntime {
     }
   }
 
-  /** Assemble the shared filter context from session state and live queries. */
-  private async buildSessionFilterContext(
+  /** Assemble the shared match context from session state and live queries. */
+  private async buildSessionRuleMatchContext(
     sessionID: string,
     userPrompt: string | undefined,
     modelID: string | undefined,
     agentType: string | undefined
-  ): Promise<RuleFilterContext> {
+  ): Promise<RuleMatchContext> {
     const state = this.sessionStore.get(sessionID);
     const contextFilePaths = Array.from(state?.contextPaths ?? []).sort(
       (a, b) => a.localeCompare(b)
     );
     const availableToolIDs = await this.queryAvailableToolIDs();
-    return buildFilterContext({
+    return buildRuleMatchContext({
       contextFilePaths,
       userPrompt,
       availableToolIDs,
@@ -397,7 +397,7 @@ export class OpenCodeRulesRuntime {
     agentType: string | undefined
   ): Promise<MatchedRuleEntry[]> {
     const snapshots = await this.ensureSessionRuleSnapshot(sessionID);
-    const context = await this.buildSessionFilterContext(
+    const context = await this.buildSessionRuleMatchContext(
       sessionID,
       userPrompt,
       modelID,
@@ -646,7 +646,7 @@ export class OpenCodeRulesRuntime {
     // matched: the context query (tool RPCs, project tags, git branch) is
     // the expensive part of the tool-event path.
     const state = this.sessionStore.get(sessionID);
-    const filterContext = await this.buildSessionFilterContext(
+    const matchContext = await this.buildSessionRuleMatchContext(
       sessionID,
       state?.lastUserPrompt,
       state?.lastModelID,
@@ -678,7 +678,7 @@ export class OpenCodeRulesRuntime {
       if (!seenRules.has(rule.filePath)) {
         seenRules.add(rule.filePath);
         const lifetime =
-          matchRuleSnapshots([rule], filterContext)[0]?.lifetime ?? 'ephemeral';
+          matchRuleSnapshots([rule], matchContext)[0]?.lifetime ?? 'ephemeral';
         matchedHooks.push({
           identity: rule.filePath,
           relativePath: rule.relativePath,

@@ -1,14 +1,10 @@
 /**
- * Rule filtering and matching utilities
+ * Rule matching and lifetime classification utilities
  */
 
 import { minimatch } from 'minimatch';
 import { createDebugLog } from './debug.js';
-import {
-  loadRuleSnapshots,
-  type DiscoveredRule,
-  type RuleSnapshot,
-} from './rule-discovery.js';
+import type { RuleSnapshot } from './rule-discovery.js';
 import { hasConditions } from './rule-metadata.js';
 import type { RuleMetadata } from './rule-metadata.js';
 
@@ -122,7 +118,7 @@ export function toolsMatchAvailable(
  */
 function evaluateConditionChecks(
   metadata: RuleMetadata,
-  context: RuleFilterContext,
+  context: RuleMatchContext,
   availableToolSet?: Set<string>
 ): ConditionEvaluation[] {
   const checks: ConditionEvaluation[] = [];
@@ -245,22 +241,14 @@ function evaluateConditionChecks(
 }
 
 /**
- * Result of reading and formatting rules
+ * Runtime match context for conditional rule matching
  */
-export interface FilterResult {
-  formattedRules: string;
-  matchedPaths: string[];
-}
-
-/**
- * Runtime filter context for conditional rule matching
- */
-export interface RuleFilterContext {
+export interface RuleMatchContext {
   /** File paths from conversation context (for glob matching) */
   contextFilePaths?: string[];
   /** User's prompt text (for keyword matching) */
   userPrompt?: string;
-  /** Available tool IDs (for tool-based filtering) */
+  /** Available tool IDs (for tool-based matching) */
   availableToolIDs?: string[];
   /** Current model ID */
   modelID?: string;
@@ -298,16 +286,17 @@ export interface MatchedRuleEntry {
 
 /**
  * Match already-loaded rule snapshots against the runtime context.
- * Performs no filesystem I/O. Unconditional rules are always included;
- * conditional rules are included when their declared checks pass
- * (match: any|all). Entry order follows snapshot order.
+ * Performs no filesystem I/O: callers load snapshots first (live delivery
+ * uses loadRuleSnapshots, which is mtime-cached per session). Unconditional
+ * rules are always included; conditional rules are included when their
+ * declared checks pass (match: any|all). Entry order follows snapshot order.
  *
- * @param snapshots - Per-session rule snapshots from loadRuleSnapshots
- * @param context - Optional RuleFilterContext for conditional rule matching
+ * @param snapshots - Rule snapshots loaded by the caller
+ * @param context - Optional RuleMatchContext for conditional rule matching
  */
 export function matchRuleSnapshots(
   snapshots: readonly RuleSnapshot[],
-  context: RuleFilterContext = {}
+  context: RuleMatchContext = {}
 ): MatchedRuleEntry[] {
   if (snapshots.length === 0) {
     return [];
@@ -378,44 +367,4 @@ export function matchRuleSnapshots(
   }
 
   return matched;
-}
-
-/**
- * Match discovered rule files against the runtime context.
- * Loads current rule data from disk (mtime-cached) for legacy one-shot
- * callers, then delegates to matchRuleSnapshots.
- * Unreadable rules are skipped. Entry order follows discovery order.
- *
- * @param files - Array of discovered rule files with paths
- * @param context - Optional RuleFilterContext for conditional rule matching
- */
-export async function matchRules(
-  files: DiscoveredRule[],
-  context: RuleFilterContext = {}
-): Promise<MatchedRuleEntry[]> {
-  const snapshots = await loadRuleSnapshots(files);
-  return matchRuleSnapshots(snapshots, context);
-}
-
-/**
- * Read and format rule files for system prompt injection
- * @param files - Array of discovered rule files with paths
- * @param context - Optional RuleFilterContext for conditional rule matching
- */
-export async function readAndFormatRules(
-  files: DiscoveredRule[],
-  context: RuleFilterContext = {}
-): Promise<FilterResult> {
-  const matched = await matchRules(files, context);
-  if (matched.length === 0) {
-    return { formattedRules: '', matchedPaths: [] };
-  }
-  return {
-    formattedRules:
-      `# OpenCode Rules\n\nPlease follow the following rules:\n\n` +
-      matched
-        .map(m => `## ${m.relativePath}\n\n${m.strippedContent}`)
-        .join('\n\n---\n\n'),
-    matchedPaths: matched.map(m => m.filePath),
-  };
 }
