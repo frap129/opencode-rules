@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/opencode-rules)](https://www.npmjs.com/package/opencode-rules)
 [![npm downloads](https://img.shields.io/npm/dm/opencode-rules)](https://www.npmjs.com/package/opencode-rules)
 
-A lightweight OpenCode plugin that discovers and injects markdown rule files into AI agent conversations, enabling flexible behavior customization without per-project configuration.
+A lightweight OpenCode plugin that discovers markdown rule files and delivers them into AI agent conversations, enabling flexible behavior customization without per-project configuration.
 
 ## Overview
 
@@ -33,7 +33,7 @@ approach.
 - **Keyword matching**: Apply rules when the user's prompt contains specific keywords
 - **Tool-based rules**: Apply rules only when specific MCP tools are available
 - **Global and project-level rules**: Define rules at both system and project scopes
-- **Context-aware injection**: Rules filtered by extracted file paths and user prompts
+- **Context-aware delivery**: Rules filtered by extracted file paths and user prompts
 - **Hook-based triggers**: Reactively fire rules when tools are invoked via `PreToolUse` (before execution, optionally blocking) and `PostToolUse` (after execution, delivering corrective guidance on the next turn)
 - **Zero-configuration**: Works out of the box with XDG Base Directory specification
 - **TypeScript-first**: Built with TypeScript for type safety and developer experience
@@ -102,7 +102,7 @@ opencode plugin opencode-rules@beta --global
    EOF
    ```
 
-That's it! The rule will now be automatically injected into all AI agent prompts.
+That's it! The rule will now be automatically delivered to all AI agent conversations.
 
 ## How It Works
 
@@ -110,7 +110,7 @@ That's it! The rule will now be automatically injected into all AI agent prompts
 2. **Parsing**: Extract metadata from files with YAML front matter
 3. **Tool Execution**: `tool.execute.before` hook captures file paths before tools run
 4. **Message Flow**: `chat.message` hook updates user prompt as messages arrive
-5. **Initial Seeding**: `experimental.chat.messages.transform` extracts context from message history once and rebuilds dedup keys when resuming a session; pending hook injections are delivered as a transient synthetic message on the next request
+5. **Initial Seeding**: `experimental.chat.messages.transform` extracts context from message history once and rebuilds dedup keys when resuming a session; queued hook content is delivered as a transient synthetic message on the next request
 6. **Rule Delivery**: Session-durable rules (unconditional, `globs`, `keywords`, `command`, `project`, `os`, and `ci`) are appended once to the user message as persisted synthetic text parts via `chat.message` (one per rule), hidden in the TUI but included in provider requests so the system prompt stays byte-stable for prompt caching. Agent, `model`, `branch`, and `tools` rules are appended only to the transformed model request as transient synthetic messages, so changing agent or model does not leave stale rule text in new history. Content-hash deduplication applies only to durable parts.
 7. **State Persistence**: Matched rule paths are written to `~/.opencode/state/opencode-rules/{sessionId}.json` for TUI consumption
 8. **Compaction Persistence**: `experimental.session.compacting` preserves context during session compression and marks rules for rescan, so durable rules are re-appended on the next user message while ephemeral rules are recomputed per request
@@ -568,7 +568,7 @@ bun run lint
 
 ## Architecture
 
-This plugin uses OpenCode's hook system for incremental, stateful rule injection:
+This plugin uses OpenCode's hook system for incremental, stateful rule delivery:
 
 ### Hook-Based Approach
 
@@ -576,7 +576,7 @@ This plugin uses OpenCode's hook system for incremental, stateful rule injection
    - Fires before each tool runs (read, edit, write, glob, grep, etc.)
    - Captures `filePath` or `path` arguments authoritative from the tool definition
    - Evaluates `PreToolUse` hooks: rules with `block: true` can prevent execution
-   - Queues matched rule content as pending hook injections for the next user message
+   - Queues matched rule content for delivery on the next user message
    - Updates session state with normalized, verified context paths
    - Provides real-time context as tools are executed
 
@@ -606,7 +606,9 @@ This plugin uses OpenCode's hook system for incremental, stateful rule injection
      matching **ephemeral** rules (agent, model, branch, tools) as transient
      synthetic user messages (`prt_rule_ephemeral_`) — request-scoped only,
      never persisted, so switching agent or model swaps the applicable rules
-   - Delivers pending hook injections immediately as a transient synthetic user message (`prt_hook_transient_`) appended to the very next model request - never persisted
+   - Delivers queued hook content immediately as a transient synthetic user
+     message (`prt_hook_transient_`) appended to the very next model request -
+     never persisted
    - After compaction, rebuilds the delivery ledger from post-compaction history so the next user message re-appends durable rules and ephemeral rules are recomputed
 
 4. **`experimental.session.compacting`** - Compaction context preservation
@@ -617,7 +619,7 @@ This plugin uses OpenCode's hook system for incremental, stateful rule injection
 5. **`tool.execute.after`** - Post-execution corrective guidance
    - Fires after each tool completes
    - Evaluates `PostToolUse` hooks for reactive rule triggering
-   - Queues corrective rule content into pending hook injections; hook blocking
+   - Queues corrective rule content for delivery on the next turn; hook blocking
      and `run` side effects are unchanged
    - Hook text owned by a durable rule is delivered as synthetic parts (id `prt_hook_<hash>`) on the next user message via `chat.message` so it remains in session history; hook text owned by an ephemeral rule is delivered only as a transient synthetic message via `experimental.chat.messages.transform` and never persisted
 
