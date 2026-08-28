@@ -1,5 +1,5 @@
 import {
-  buildHookInjectionPart,
+  buildDurableHookPart,
   buildRulePart,
   buildTransientHookMessage,
   buildTransientRuleMessage,
@@ -15,6 +15,7 @@ import {
   type RawHistoryResult,
 } from './rule-delivery-history.js';
 import { createDebugLog, formatError, type DebugLog } from './debug.js';
+import type { RuleLifetime } from './rule-filter.js';
 
 export interface RuleDelivery {
   deliverDurableTurn(input: DurableTurnInput): Promise<DurableTurnResult>;
@@ -42,7 +43,7 @@ export interface DurableTurnInput {
 }
 
 export interface MatchedHookContent extends MatchedRuleContent {
-  lifetime: 'durable' | 'ephemeral';
+  lifetime: RuleLifetime;
 }
 
 export interface MatchedHooksInput {
@@ -166,7 +167,7 @@ class DefaultRuleDelivery implements RuleDelivery {
       if (state.hookHashes.has(hash) || newHookHashes.has(hash)) continue;
       newHookHashes.add(hash);
       newParts.push({
-        ...buildHookInjectionPart(content),
+        ...buildDurableHookPart(content),
         sessionID: input.sessionID,
         messageID: input.messageID,
       });

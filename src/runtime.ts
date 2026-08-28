@@ -49,8 +49,9 @@ import { promisify } from 'node:util';
 const execAsync = promisify(exec);
 
 // Prefetched history entries are consumed by the first durable turn; a
-// transform-first seed can leave them unconsumed, so bound the map.
-const MAX_PENDING_HISTORY_PREFETCH = 128;
+// transform-first seed can leave them unconsumed. A small bound keeps the
+// worst case (full histories per session) negligible.
+const MAX_PENDING_HISTORY_PREFETCH = 8;
 
 interface MessagesTransformOutput {
   messages: MessageWithInfo[];

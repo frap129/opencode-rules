@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildHookInjectionPart,
+  buildDurableHookPart,
   buildRulePart,
   buildTransientHookMessage,
   buildTransientRuleMessage,
@@ -37,7 +37,7 @@ describe('rule delivery codec', () => {
       text: '## rules/core.md\n\nDurable guidance.',
       synthetic: true,
     });
-    expect(buildHookInjectionPart('Hook guidance.')).toEqual({
+    expect(buildDurableHookPart('Hook guidance.')).toEqual({
       id: 'prt_hook_1d4c59cbd8e30804',
       type: 'text',
       text: 'Hook guidance.',
@@ -171,9 +171,7 @@ describe('RuleDelivery durable turns', () => {
   it('retains queued Hook content on identity deferral and appends it after matched rules', async () => {
     const history = new MockRawHistoryAdapter({
       ok: true,
-      messages: [
-        { parts: [buildHookInjectionPart('Already delivered Hook.')] },
-      ],
+      messages: [{ parts: [buildDurableHookPart('Already delivered Hook.')] }],
     });
     const delivery: RuleDelivery = createRuleDelivery({ rawHistory: history });
     delivery.queueMatchedHooks({
@@ -227,7 +225,7 @@ describe('RuleDelivery durable turns', () => {
         messageID: 'msg_hooks',
       },
       {
-        ...buildHookInjectionPart('Queued Hook.'),
+        ...buildDurableHookPart('Queued Hook.'),
         sessionID: 'ses_hooks',
         messageID: 'msg_hooks',
       },
@@ -485,12 +483,12 @@ describe('RuleDelivery matched Hook queueing', () => {
     });
     expect(durableOutput.parts).toEqual([
       {
-        ...buildHookInjectionPart('Durable owner Hook.'),
+        ...buildDurableHookPart('Durable owner Hook.'),
         sessionID: 'ses_hook_queue',
         messageID: 'msg_durable_hook',
       },
       {
-        ...buildHookInjectionPart('Evidence durable Hook.'),
+        ...buildDurableHookPart('Evidence durable Hook.'),
         sessionID: 'ses_hook_queue',
         messageID: 'msg_durable_hook',
       },
@@ -595,7 +593,7 @@ describe('RuleDelivery matched Hook queueing', () => {
 
     expect(output.parts).toEqual([
       {
-        ...buildHookInjectionPart('Recovered durable owner.'),
+        ...buildDurableHookPart('Recovered durable owner.'),
         sessionID: 'ses_recovered_owner',
         messageID: 'msg_recovered_hook',
       },
@@ -855,7 +853,7 @@ describe('RuleDelivery compaction invalidation', () => {
         messageID: 'msg_after_rescan',
       },
       {
-        ...buildHookInjectionPart('Retained durable Hook.'),
+        ...buildDurableHookPart('Retained durable Hook.'),
         sessionID: 'ses_compacted',
         messageID: 'msg_after_rescan',
       },

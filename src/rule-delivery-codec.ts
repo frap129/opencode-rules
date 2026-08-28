@@ -33,7 +33,6 @@ export interface TransientMessage {
 export interface DeliveryLedgerFacts {
   ruleKeys: Set<string>;
   hookHashes: Set<string>;
-  ruleRelativePaths: Set<string>;
 }
 
 function shortHash(input: string): string {
@@ -68,9 +67,13 @@ export function buildRulePart(
   };
 }
 
-export function buildHookInjectionPart(content: string): SyntheticPart {
+export function hookPartId(hash: string): string {
+  return `${HOOK_PART_PREFIX}${hash}`;
+}
+
+export function buildDurableHookPart(content: string): SyntheticPart {
   return {
-    id: `${HOOK_PART_PREFIX}${shortHash(content)}`,
+    id: hookPartId(shortHash(content)),
     type: 'text',
     text: content,
     synthetic: true,
@@ -143,7 +146,6 @@ export function decodeRawHistory(
   const facts: DeliveryLedgerFacts = {
     ruleKeys: new Set(),
     hookHashes: new Set(),
-    ruleRelativePaths: new Set(),
   };
 
   for (const message of messages) {
@@ -188,5 +190,4 @@ function recordRuleText(facts: DeliveryLedgerFacts, text: unknown): void {
   const match = RULE_HEADER_PATTERN.exec(text);
   if (!match) return;
   facts.ruleKeys.add(ruleKeyFor(match[1], match[2]));
-  facts.ruleRelativePaths.add(match[1]);
 }
