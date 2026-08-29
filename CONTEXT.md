@@ -11,6 +11,10 @@ Authored guidance with optional matching conditions and hooks.
 A rule whose conditions apply to the current session context.
 _Avoid_: Active rule
 
+**File observation**:
+The path and file text one successful file-handling tool event exposes for matching.
+_Avoid_: Tool output blob
+
 **Rule delivery**:
 Making matched rule content, including content activated by a hook, available to the conversation with the appropriate lifetime.
 _Avoid_: Rule injection
