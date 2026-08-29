@@ -1,7 +1,7 @@
 import {
-  extractFilePathsFromMessages,
-  extractToolCallPaths,
-} from './message-paths.js';
+  extractObservationsFromMessageParts,
+  type FileObservation,
+} from './file-observation.js';
 import {
   normalizeContextPath,
   sanitizePathForContext,
@@ -21,8 +21,9 @@ const COMPACT_PROJECTION_MAX_PATHS = 20;
 
 /**
  * Runtime-owned per-session Working context: the monotonic set of observed
- * file paths used when determining Matched rules and retained across
- * compaction.
+ * file paths retained for compaction projection. It is rebuilt from eligible
+ * history parts but is never a Rule-matching source; live File observations
+ * in the separate FileObservationContext are the only matching input.
  */
 export interface WorkingContext {
   /** Seed from the supplied transform messages. First successful source
@@ -36,12 +37,13 @@ export interface WorkingContext {
    * Concurrent preparation for one session shares one in-flight read, and
    * a settled read seeds at most once for its generation. */
   prepareDurableTurn(sessionID: string): Promise<void>;
-  /** Accumulate file paths from the current user message's parts. */
+  /** Accumulate paths from the current user message's tool parts. */
   recordMessageParts(sessionID: string, parts: readonly unknown[]): void;
-  /** Accumulate the paths a live tool call observes. */
-  recordToolCall(sessionID: string, toolName: string, args: unknown): void;
-  /** Detached, deterministic view of observed paths for matching. */
-  getPathsForMatching(sessionID: string): string[];
+  /** Accumulate paths from already normalized observations. */
+  recordObservations(
+    sessionID: string,
+    observations: readonly FileObservation[]
+  ): void;
   /** Invalidate in-flight and prefetched history reads for the session.
    * Observed paths are never subtracted. */
   invalidateHistoryReads(sessionID: string): void;
@@ -66,19 +68,6 @@ export interface SessionWorkingContextOptions {
 
 const pathComparator = (a: string, b: string) => a.localeCompare(b);
 
-function extractWorkingContextPaths(
-  messages: readonly MessageWithInfo[]
-): string[] {
-  return extractFilePathsFromMessages(
-    filterValidMessages(
-      messages.filter(
-        (message): message is MessageWithInfo =>
-          typeof message === 'object' && message !== null
-      )
-    )
-  );
-}
-
 interface SettledRead {
   revision: number;
   result: RawHistoryResult;
@@ -97,17 +86,19 @@ export function createSessionWorkingContext(
   /** Shared in-flight reads, keyed by session. */
   const inFlightReads = new Map<string, Promise<SettledRead>>();
 
-  const addPaths = (
+  const addObservations = (
     sessionID: string,
-    workingContextPaths: readonly string[]
+    observations: readonly FileObservation[],
+    markSeeded = false
   ): void => {
-    if (workingContextPaths.length === 0) return;
+    if (observations.length === 0 && !markSeeded) return;
     sessionStore.upsert(sessionID, state => {
-      for (const p of workingContextPaths) {
+      for (const observation of observations) {
         state.workingContextPaths.add(
-          normalizeContextPath(p, projectDirectory)
+          normalizeContextPath(observation.path, projectDirectory)
         );
       }
+      if (markSeeded) state.workingContextSeeded = true;
     });
   };
 
@@ -143,20 +134,14 @@ export function createSessionWorkingContext(
     messages: readonly MessageWithInfo[]
   ): boolean => {
     if (seeded(sessionID)) return false;
-    const workingContextPaths = extractWorkingContextPaths(messages);
-    sessionStore.upsert(sessionID, state => {
-      for (const p of workingContextPaths) {
-        state.workingContextPaths.add(
-          normalizeContextPath(p, projectDirectory)
-        );
-      }
-      state.workingContextSeeded = true;
-    });
-    if (workingContextPaths.length > 0) {
+    const observations = extractObservationsFromSuppliedMessages(messages);
+    addObservations(sessionID, observations, true);
+    if (observations.length > 0) {
       debugLog(
-        `Seeded ${workingContextPaths.length} Working-context path(s) for session ${sessionID}: ${workingContextPaths
+        `Seeded ${observations.length} Working-context observation(s) for session ${sessionID}: ${observations
           .slice(0, 5)
-          .join(', ')}${workingContextPaths.length > 5 ? '...' : ''}`
+          .map(o => o.path)
+          .join(', ')}${observations.length > 5 ? '...' : ''}`
       );
     }
     return true;
@@ -167,34 +152,17 @@ export function createSessionWorkingContext(
     parts: readonly unknown[]
   ): void => {
     if (!Array.isArray(parts) || parts.length === 0) return;
-    addPaths(
+    addObservations(
       sessionID,
-      extractFilePathsFromMessages([
-        { role: 'user', parts: [...parts] as never[] },
-      ])
+      extractObservationsFromMessageParts(
+        parts.filter(
+          part =>
+            typeof part === 'object' &&
+            part !== null &&
+            !((part as { synthetic?: boolean }).synthetic === true)
+        )
+      )
     );
-  };
-
-  const recordToolCall = (
-    sessionID: string,
-    toolName: string,
-    args: unknown
-  ): void => {
-    for (const filePath of extractToolCallPaths(toolName, args)) {
-      const normalized = normalizeContextPath(filePath, projectDirectory);
-      sessionStore.upsert(sessionID, state => {
-        state.workingContextPaths.add(normalized);
-      });
-      debugLog(
-        `Recorded Working-context path from tool ${toolName}: ${normalized}`
-      );
-    }
-  };
-
-  const getPathsForMatching = (sessionID: string): string[] => {
-    return Array.from(
-      sessionStore.get(sessionID)?.workingContextPaths ?? []
-    ).sort(pathComparator);
   };
 
   const invalidateHistoryReads = (sessionID: string): void => {
@@ -204,12 +172,12 @@ export function createSessionWorkingContext(
   };
 
   const compactionProjection = (sessionID: string): string | undefined => {
-    const workingContextPaths =
-      sessionStore.get(sessionID)?.workingContextPaths;
-    if (!workingContextPaths || workingContextPaths.size === 0)
-      return undefined;
+    const paths = Array.from(
+      sessionStore.get(sessionID)?.workingContextPaths ?? []
+    );
+    if (paths.length === 0) return undefined;
 
-    const sortedPaths = Array.from(workingContextPaths).sort(pathComparator);
+    const sortedPaths = [...paths].sort(pathComparator);
     const pathsToInclude = sortedPaths.slice(0, COMPACT_PROJECTION_MAX_PATHS);
     return [
       'OpenCode Rules: Working context',
@@ -254,18 +222,13 @@ export function createSessionWorkingContext(
 
     storePrefetch(sessionID, settled.result);
     if (settled.result.ok) {
-      addPaths(
+      addObservations(
         sessionID,
-        extractWorkingContextPaths(
-          settled.result.messages.filter(
-            (message): message is MessageWithInfo =>
-              typeof message === 'object' && message !== null
-          )
-        )
+        extractObservationsFromSuppliedMessages(
+          settled.result.messages as MessageWithInfo[]
+        ),
+        true
       );
-      sessionStore.upsert(sessionID, state => {
-        state.workingContextSeeded = true;
-      });
     }
   }
 
@@ -285,8 +248,8 @@ export function createSessionWorkingContext(
       seedFromSuppliedMessages,
       prepareDurableTurn,
       recordMessageParts,
-      recordToolCall,
-      getPathsForMatching,
+      recordObservations: (sessionID, observations) =>
+        addObservations(sessionID, observations),
       invalidateHistoryReads,
       prepareForCompaction: (sessionID: string): string | undefined => {
         invalidateHistoryReads(sessionID);
@@ -295,4 +258,19 @@ export function createSessionWorkingContext(
     },
     rawHistory,
   };
+}
+
+function extractObservationsFromSuppliedMessages(
+  messages: readonly MessageWithInfo[]
+): FileObservation[] {
+  const result: FileObservation[] = [];
+  for (const message of filterValidMessages(
+    messages.filter(
+      (message): message is MessageWithInfo =>
+        typeof message === 'object' && message !== null
+    )
+  )) {
+    result.push(...extractObservationsFromMessageParts(message.parts));
+  }
+  return result;
 }

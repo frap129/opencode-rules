@@ -146,6 +146,7 @@ export function formatConditionSummary(meta: RuleMetadata): string {
 
   const arrayFields: Array<[keyof RuleMetadata, string]> = [
     ['globs', 'globs'],
+    ['fileContains', 'fileContains'],
     ['keywords', 'keywords'],
     ['tools', 'tools'],
     ['model', 'model'],

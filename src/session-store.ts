@@ -1,5 +1,4 @@
 import type { RuleSnapshot } from './rule-discovery.js';
-
 export interface SessionState {
   /** Working context: monotonic set of observed file paths. Only
    * SessionWorkingContext production code reads or mutates these fields. */

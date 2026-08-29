@@ -95,6 +95,12 @@ describe('hasConditions', () => {
     expect(hasConditions({ globs: ['**/*.ts'] })).toBe(true);
   });
 
+  it('returns true when fileContains is declared', () => {
+    expect(hasConditions({ fileContains: ['TODO'] })).toBe(true);
+    // Declared but invalid still counts as a declared condition.
+    expect(hasConditions({ fileContains: [] })).toBe(true);
+  });
+
   it('returns true when ci is false (still a condition)', () => {
     expect(hasConditions({ ci: false })).toBe(true);
   });
@@ -146,14 +152,23 @@ describe('formatConditionSummary', () => {
     );
   });
 
+  it('formats fileContains literals', () => {
+    expect(formatConditionSummary({ fileContains: ['unsafe {'] })).toBe(
+      'fileContains: unsafe {'
+    );
+  });
+
   it('formats all fields in canonical order', () => {
     const result = formatConditionSummary({
       os: ['linux'],
       globs: ['*.md'],
+      fileContains: ['TODO'],
       ci: false,
       match: 'all',
     });
-    expect(result).toBe('globs: *.md, os: linux, ci: false, match: all');
+    expect(result).toBe(
+      'globs: *.md, fileContains: TODO, os: linux, ci: false, match: all'
+    );
   });
 });
 

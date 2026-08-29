@@ -11,23 +11,27 @@ Rules are markdown files with optional YAML frontmatter, injected into the syste
 
 ## Field Reference
 
-| Field      | Type               | Category   | Purpose                                                    |
-| ---------- | ------------------ | ---------- | ---------------------------------------------------------- |
-| `globs`    | `string[]`         | Legacy     | Apply when any file in context matches a pattern           |
-| `keywords` | `string[]`         | Legacy     | Apply when the user's latest prompt matches a keyword      |
-| `tools`    | `string[]`         | Legacy     | Apply when any listed tool ID is available                 |
-| `model`    | `string[]`         | Runtime    | Match against the current LLM model ID                     |
-| `agent`    | `string[]`         | Runtime    | Match against the current agent type (e.g., `programmer`)  |
-| `command`  | `string[]`         | Runtime    | Match against the current slash command (e.g., `/plan`)    |
-| `project`  | `string[]`         | Runtime    | Match against detected project tags (e.g., `node`, `rust`) |
-| `branch`   | `string[]`         | Runtime    | Match against git branch name (supports glob patterns)     |
-| `os`       | `string[]`         | Runtime    | Match against OS (`linux`, `darwin`, `win32`)              |
-| `ci`       | `boolean`          | Runtime    | Match against CI environment (`true` = in CI)              |
-| `match`    | `'any'` \| `'all'` | Combinator | `any` (default): OR logic. `all`: AND logic.               |
+| Field          | Type                   | Category   | Purpose                                                         |
+| -------------- | ---------------------- | ---------- | --------------------------------------------------------------- |
+| `globs`        | `string[]`             | Legacy     | Apply when any observed file's path matches a pattern           |
+| `fileContains` | `string` \| `string[]` | Legacy     | Apply when an observed file's text contains a literal substring |
+| `keywords`     | `string[]`             | Legacy     | Apply when the user's latest prompt matches a keyword           |
+| `tools`        | `string[]`             | Legacy     | Apply when any listed tool ID is available                      |
+| `model`        | `string[]`             | Runtime    | Match against the current LLM model ID                          |
+| `agent`        | `string[]`             | Runtime    | Match against the current agent type (e.g., `programmer`)       |
+| `command`      | `string[]`             | Runtime    | Match against the current slash command (e.g., `/plan`)         |
+| `project`      | `string[]`             | Runtime    | Match against detected project tags (e.g., `node`, `rust`)      |
+| `branch`       | `string[]`             | Runtime    | Match against git branch name (supports glob patterns)          |
+| `os`           | `string[]`             | Runtime    | Match against OS (`linux`, `darwin`, `win32`)                   |
+| `ci`           | `boolean`              | Runtime    | Match against CI environment (`true` = in CI)                   |
+| `match`        | `'any'` \| `'all'`     | Combinator | `any` (default): OR logic. `all`: AND logic.                    |
 
 - All fields are optional; no frontmatter means the rule always applies.
 - With `match: any` (default), the rule applies if ANY declared condition matches.
 - With `match: all`, the rule applies only if ALL declared conditions match.
+- `globs` and `fileContains` form one file-observation family: when both are declared, the same observed file must satisfy both. The family counts as one condition in the algebra.
+- File observations come only from successful live Read, Write, Edit, Apply Patch, and path-associated LSP tool events. Grep, Glob, shell, custom/MCP tools, message prose, and historical tool events contribute nothing to `globs`/`fileContains`.
+- A durable rule first matched by a live file observation takes effect at that earliest dispatch — not on the next user message.
 - When a runtime value is unavailable (e.g., no git repo), that dimension is a non-match.
 
 ## Rule Format
@@ -55,6 +59,7 @@ match: any
 ## Matching Strategy
 
 - Use `globs` when the rule is about code in specific files/directories.
+- Use `fileContains` when the rule targets code patterns inside files (e.g., `unsafe {`, `TODO: fix`); combine with `globs` to scope content to file types.
 - Use `keywords` when the rule is about a topic that may not include files.
 - Use `tools` when the rule depends on specific MCP tools being available.
 - Use runtime filters (`model`, `agent`, `command`, `project`, `branch`, `os`, `ci`) to scope rules to specific environments or workflows.
@@ -65,6 +70,7 @@ match: any
 Important constraints:
 
 - Keyword matching is case-insensitive word-boundary _prefix_ matching (e.g., `test` matches `tests` and `testing`).
+- `fileContains` matching is case-sensitive literal substring matching (metacharacters are literal; literals may span lines). A declared `fileContains` with no valid literal makes the rule never match.
 - Branch patterns support globs via minimatch (e.g., `feature/*`, `release/**`).
 - Missing runtime context (e.g., no git repo for `branch`) counts as a non-match for that dimension.
 
@@ -143,6 +149,20 @@ globs:
 - Avoid `any`; use `unknown` and narrow.
 ```
 
+File-content rule: unsafe Rust review
+
+```md
+---
+globs:
+  - '**/*.rs'
+fileContains: 'unsafe {'
+---
+
+# Unsafe Rust
+
+- Document every unsafe block with a SAFETY comment.
+```
+
 Keyword-based: unit test guidance (allowlisted terms)
 
 ```md
@@ -194,6 +214,7 @@ match: all
 
 - **Using denylisted keywords**: `test` fires on nearly every prompt — use `unit test` or globs instead.
 - **Forgetting `match: all`**: Two filters with default OR means EITHER triggers — add `match: all` for AND logic.
+- **Assuming globs + fileContains are separate OR conditions**: They form one family that ANDs over the same observed file; use `match: all` with other conditions for broader AND logic.
 - **Overloading a single rule**: 6+ dimensions are hard to reason about — split into focused rules.
 - **Duplicating lint/formatter config**: Check Prettier/ESLint before adding a style rule.
 - **Using `ci` as a keyword**: Prefix-matches `circuit`, `citizen` — use `ci: true` boolean filter instead.

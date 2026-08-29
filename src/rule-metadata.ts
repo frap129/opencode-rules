@@ -11,6 +11,8 @@ import { logWarning } from './debug.js';
 export interface RuleMetadata {
   name?: string;
   globs?: string[];
+  /** Case-sensitive literal substrings; empty array means declared but invalid (fail-closed). */
+  fileContains?: string[];
   keywords?: string[];
   tools?: string[];
   model?: string[];
@@ -38,6 +40,7 @@ export interface RuleHook {
 interface ParsedFrontmatter {
   name?: unknown;
   globs?: unknown;
+  fileContains?: unknown;
   keywords?: unknown;
   tools?: unknown;
   model?: unknown;
@@ -62,6 +65,26 @@ type StringArrayField =
   | 'project'
   | 'branch'
   | 'os';
+
+/**
+ * Normalize a declared `fileContains` field. Accepts a scalar string
+ * (shorthand for a one-element array) or an array; trims entries, drops
+ * non-strings and empties, and deduplicates exact case-sensitive strings.
+ * A declared field that yields no valid literal returns an empty array so
+ * the rule fails closed instead of degrading to unconditional.
+ */
+function extractFileContains(value: unknown): string[] {
+  const entries =
+    typeof value === 'string' ? [value] : Array.isArray(value) ? value : [];
+  const result: string[] = [];
+  for (const entry of entries) {
+    if (typeof entry !== 'string') continue;
+    const literal = entry.trim();
+    if (literal.length === 0 || result.includes(literal)) continue;
+    result.push(literal);
+  }
+  return result;
+}
 
 /**
  * Extract and normalize a string array from parsed frontmatter.
@@ -131,6 +154,17 @@ export function parseRuleMetadata(content: string): RuleMetadata | null {
       }
     }
 
+    if (parsed.fileContains !== undefined) {
+      const literals = extractFileContains(parsed.fileContains);
+      if (literals.length === 0) {
+        logWarning(
+          'fileContains declared with no valid literal; rule never matches',
+          new Error('empty fileContains frontmatter')
+        );
+      }
+      metadata.fileContains = literals;
+    }
+
     if (typeof parsed.ci === 'boolean') {
       metadata.ci = parsed.ci;
     }
@@ -197,6 +231,7 @@ export function hasConditions(meta: RuleMetadata | null | undefined): boolean {
   if (!meta) return false;
   return !!(
     meta.globs ||
+    meta.fileContains !== undefined ||
     meta.keywords ||
     meta.tools ||
     meta.model ||

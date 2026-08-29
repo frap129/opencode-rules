@@ -2,7 +2,7 @@
 
 This document explains how to use OpenCode Rules to inject custom instructions into the agent's context. Rules are automatically discovered and injected via OpenCode's hook system, enabling context-aware rule filtering based on:
 
-- **Legacy filters**: file paths (`globs`), user prompts (`keywords`), and available tools (`tools`)
+- **Legacy filters**: file paths (`globs`), file content (`fileContains`), user prompts (`keywords`), and available tools (`tools`)
 - **Runtime filters**: model, agent, command, project type, git branch, OS, and CI environment
 - **Match semantics**: `match: any` (default OR logic) or `match: all` (AND logic)
 
@@ -56,7 +56,7 @@ This is a rule for TypeScript components.
 
 #### File-Based Conditions (globs)
 
-The `globs` key contains a list of glob patterns. The rule applies if any file in the conversation context matches one of the patterns.
+The `globs` key contains a list of glob patterns. The rule applies if any observed file's path matches one of the patterns.
 
 ```markdown
 ---
@@ -66,6 +66,41 @@ globs:
 
 This is a rule for TypeScript components.
 ```
+
+Observed files come from successful Read, Write, Edit, Apply Patch, and LSP tool events. Prose path mentions and excluded tools (grep, glob, bash, ...) do not contribute paths.
+
+#### File-Content Conditions (fileContains)
+
+The `fileContains` key accepts a single string or a list of literal substrings. The rule applies when one observed file's text contains any literal (OR across literals). Matching is case-sensitive and literal: regex metacharacters have no special meaning, and literals may span lines.
+
+```markdown
+---
+globs:
+  - '**/*.rs'
+fileContains: 'unsafe {'
+---
+
+Review guidance for unsafe Rust.
+```
+
+When both `globs` and `fileContains` are declared, they form one file-observation family: a single observed file must satisfy the path pattern AND contain a literal. The family counts as one condition in the `match: any|all` algebra — for example, `globs` + `fileContains` + `keywords` under `match: any` means `(globs AND fileContains) OR keywords`.
+
+`fileContains` can be used without `globs` to match content alone:
+
+```markdown
+---
+fileContains:
+  - 'TODO: fix'
+---
+
+Cleanup guidance for files with unresolved todos.
+```
+
+Notes:
+
+- A declared `fileContains` that yields no valid literal (empty values) makes the rule never match and logs a warning — it never degrades to an unconditional rule.
+- `fileContains` is a durable condition: once the rule is delivered, later observations never retract it.
+- Read observations carry the returned file slice (line-number prefixes stripped); Write contributes the submitted content; Edit contributes removed plus added text; Apply Patch contributes per-file hunk lines; LSP contributes returned path-associated text.
 
 #### Prompt-Based Conditions (keywords)
 
@@ -245,23 +280,16 @@ If no conditional fields are specified, the rule is applied unconditionally to a
 The plugin uses OpenCode's hook system to track context and inject rules:
 
 1. **Context Tracking**:
-   - `tool.execute.before` hook captures file paths as tools execute (read, edit, write, glob, grep, etc.)
+   - `tool.execute.after` hook normalizes successful live file-handling tool events (read, edit, write, apply_patch, lsp) into File observations with path and content — the sole source for `globs` and `fileContains`
    - `chat.message` hook captures the latest user prompt as messages arrive
-   - `experimental.chat.messages.transform` hook seeds session state from message history on first call only
-   - Live tool calls and history parts (legacy `tool-invocation` and current
-     `tool` with `state.input`) share one tool-to-path mapping, so the same
-     call contributes the same context paths whether observed live or restored
-     after a restart:
-     - `read` / `edit` / `write` -> `filePath`
-     - `grep` -> `path` only (`pattern`/`include` are search terms, not paths)
-     - `glob` -> explicit `path` plus the directory derived from `pattern`
-     - `bash` -> `workdir`
-     - unknown tools -> nothing
+   - `experimental.chat.messages.transform` hook rebuilds the path-only Working context from message history on first call only; it never feeds rule matching
+   - Excluded tools (grep, glob, bash, task, webfetch, custom/MCP, ...) contribute
+     nothing, and historical tool parts never recreate File observations.
 
 2. **Rule Injection**:
    - Matching rules are evaluated against the accumulated context on every user message
    - Rules are filtered based on:
-     - **File paths** (`globs`): Glob patterns matched against files in context
+     - **File paths and content** (`globs`, `fileContains`): Glob and literal matching against normalized file observations in context
      - **User prompts** (`keywords`): Keyword matching against the latest user message
      - **Available tools** (`tools`): Exact match against tool IDs available in the environment
      - **Model** (`model`): Exact match against current LLM model ID
@@ -276,14 +304,18 @@ The plugin uses OpenCode's hook system to track context and inject rules:
 Rule delivery is split by the rule's **lifetime classification**:
 
 - **Session-durable rules** — unconditional rules and rules gated only by
-  `globs`, `keywords`, `command`, `project`, `os`, or `ci` — are appended once
+  `globs`, `fileContains`, `keywords`, `command`, `project`, `os`, or `ci` — are appended once
   per session via the `chat.message` hook. All newly delivered rules for an
   event are appended to the user message as one _synthetic_ text part before
   opencode persists it. Once
   persisted, a durable rule is never re-evaluated for removal during that
-  session. A durable rule matched mid-turn is appended with the **next user
-  message**, so the first request of a turn carries it one message later than
-  the evaluation that matched it.
+  session. A Durable Rule first matched by a live File observation is admitted
+  at that observation's earliest applicable dispatch: the runtime persists one
+  synthetic no-reply user part through `session.prompt`; equivalent pending
+  guidance remains available transiently if persistence fails, and persistence
+  retries on a later dispatch. Initial Durable matches continue to use the
+  current `chat.message` part, and identity-ledger evidence prevents duplicate
+  delivery.
 - **Ephemeral rules** — rules gated by `agent`, `model`, `branch`, or `tools`
   — are appended only to the transformed model request via
   `experimental.chat.messages.transform` as one transient synthetic message
@@ -426,30 +458,39 @@ respects `.gitignore` by default, and produces better formatted output.
 
 ### Scenario 1: TypeScript File Context
 
-- User edits `src/components/Button.tsx` (captured by `tool.execute.before`)
+- User edits `src/components/Button.tsx` (observed by `tool.execute.after`)
 - Plugin evaluates rules with `globs: ['**/*.ts', '**/*.tsx']`
-- TypeScript rules are appended to the user message as synthetic parts
+- The TypeScript rule is a Durable Rule first matched by a live File
+  observation, so it is admitted immediately at the earliest applicable
+  dispatch (no-reply persistence with transient fallback)
 
-### Scenario 2: User Mentions Testing
+### Scenario 2: Rust File Contains Unsafe
+
+- Agent writes `src/lib.rs` containing `unsafe {`
+- A rule with `globs: ['**/*.rs']` and `fileContains: 'unsafe {'` matches: the same observation satisfies both checks
+- The Durable Rule is persisted by no-reply admission at the earliest dispatch rather than appended to the next user message
+
+### Scenario 3: User Mentions Testing
 
 - User types prompt: "How do I write unit tests for this function?"
 - `chat.message` hook captures the prompt
 - Plugin evaluates rules with `keywords: ['testing', 'unit test']`
 - Testing rules are appended to the user message as synthetic parts
 
-### Scenario 3: Tool-Based Rules
+### Scenario 4: Tool-Based Rules
 
 - OpenCode provides websearch tool
 - Plugin evaluates rules with `tools: ['mcp_websearch']`
 - Web search best practices rules are injected
 
-### Scenario 4: Combined Conditions
+### Scenario 5: Combined Conditions
 
 - A rule has both `globs: ['**/*.test.ts']` and `keywords: ['testing']`
 - Rule is injected if EITHER condition matches (OR logic)
 - File context OR user prompt will trigger the rule
+- Contrast: `globs` + `fileContains` form one family that ANDs over the same observation
 
-### Scenario 5: Runtime Environment Filtering
+### Scenario 6: Runtime Environment Filtering
 
 - A rule has `model: ['claude-sonnet-4']`, `branch: ['feature/*']`, and `match: all`
 - Rule is only injected when BOTH the model matches AND the branch matches the glob

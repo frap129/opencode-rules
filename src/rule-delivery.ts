@@ -1,5 +1,6 @@
 import {
   buildDurableDeliveryPart,
+  buildRuleAdmissionPart,
   buildTransientDeliveryMessage,
   decodeRawHistory,
   decodeTransientPresence,
@@ -18,12 +19,17 @@ import type { RuleLifetime } from './rule-filter.js';
 export interface RuleDelivery {
   deliverDurableTurn(input: DurableTurnInput): Promise<DurableTurnResult>;
   deliverTransientDispatch(input: TransientDispatchInput): void;
+  retryPendingAdmissions(sessionID: string): Promise<void>;
+  admitDurableMatches(
+    input: DurableAdmissionInput
+  ): Promise<DurableAdmissionResult>;
   markCompacted(sessionID: string): void;
   markHistoryChanged(sessionID: string): void;
   queueMatchedHooks(input: MatchedHooksInput): void;
 }
 
 export type DurableTurnResult = 'accepted' | 'deferred';
+export type DurableAdmissionResult = 'accepted' | 'pending' | 'duplicate';
 
 export interface MatchedRuleContent {
   identity?: string;
@@ -41,6 +47,11 @@ export interface DurableTurnInput {
   messageID?: string;
   matchedRules: readonly MatchedRuleContent[];
   output: DurableTurnOutput;
+}
+
+export interface DurableAdmissionInput {
+  sessionID: string;
+  rules: readonly MatchedRuleContent[];
 }
 
 export interface MatchedHookContent extends MatchedRuleContent {
@@ -65,6 +76,7 @@ export interface TransientDispatchInput {
 
 type RuleDeliveryOptions = {
   rawHistory: RawHistoryAdapter;
+  persistAdmission?: (sessionID: string, part: DeliveryPart) => Promise<void>;
   debugLog?: DebugLog;
   maxSessions?: number;
 };
@@ -76,6 +88,7 @@ interface DeliveryState {
   seededFromHistory: boolean;
   needsRescan: boolean;
   pendingHookQueue: MatchedHookContent[];
+  pendingRuleQueue: MatchedRuleContent[];
   durableHookQueue: MatchedHookContent[];
   transientHookQueue: MatchedHookContent[];
   transientTurn:
@@ -106,6 +119,8 @@ class DefaultRuleDelivery implements RuleDelivery {
   private readonly rawHistory: RawHistoryAdapter;
   private readonly debugLog: DebugLog;
   private readonly maxSessions: number;
+  private readonly persistAdmission:
+    ((sessionID: string, part: DeliveryPart) => Promise<void>) | undefined;
   private readonly states = new Map<string, DeliveryState>();
   private readonly operationTails = new Map<string, Promise<void>>();
   private tick = 0;
@@ -114,6 +129,31 @@ class DefaultRuleDelivery implements RuleDelivery {
     this.rawHistory = options.rawHistory;
     this.debugLog = options.debugLog ?? createDebugLog();
     this.maxSessions = Math.max(1, options.maxSessions ?? 100);
+    this.persistAdmission = options.persistAdmission;
+  }
+
+  async admitDurableMatches(
+    input: DurableAdmissionInput
+  ): Promise<DurableAdmissionResult> {
+    return this.serialize(input.sessionID, async () => {
+      const state = this.getState(input.sessionID);
+      if (!state.seededFromHistory || state.needsRescan) {
+        const facts = await this.decodeHistory(input.sessionID);
+        if (!facts) {
+          this.queuePendingRules(state, input.rules);
+          return 'pending';
+        }
+        this.replaceLedger(state, facts);
+        state.seededFromHistory = true;
+        state.needsRescan = false;
+      }
+
+      const added = this.queuePendingRules(state, input.rules);
+      if (!added && state.pendingRuleQueue.length === 0) return 'duplicate';
+      return (await this.persistPendingRules(input.sessionID, state))
+        ? 'accepted'
+        : 'pending';
+    });
   }
 
   private async decodeHistory(
@@ -271,7 +311,7 @@ class DefaultRuleDelivery implements RuleDelivery {
       const baseInfo =
         realUserInfo ?? input.messages[input.messages.length - 1]?.info ?? {};
       const transientRules: MatchedRuleContent[] = [];
-      for (const rule of input.matchedRules) {
+      for (const rule of [...input.matchedRules, ...state.pendingRuleQueue]) {
         const key = deliveryKey(rule);
         if (
           hasDeliveryKey(state.ruleKeys, rule) ||
@@ -342,6 +382,66 @@ class DefaultRuleDelivery implements RuleDelivery {
     }
   }
 
+  async retryPendingAdmissions(sessionID: string): Promise<void> {
+    await this.serialize(sessionID, async () => {
+      const state = this.getState(sessionID);
+      await this.persistPendingRules(sessionID, state);
+    });
+  }
+
+  private queuePendingRules(
+    state: DeliveryState,
+    rules: readonly MatchedRuleContent[]
+  ): boolean {
+    let added = false;
+    for (const rule of rules) {
+      if (
+        hasDeliveryKey(state.ruleKeys, rule) ||
+        state.pendingRuleQueue.some(
+          pending => deliveryKey(pending) === deliveryKey(rule)
+        )
+      ) {
+        continue;
+      }
+      state.pendingRuleQueue.push(rule);
+      added = true;
+    }
+    return added;
+  }
+
+  private async persistPendingRules(
+    sessionID: string,
+    state: DeliveryState
+  ): Promise<boolean> {
+    if (!this.persistAdmission || state.pendingRuleQueue.length === 0) {
+      return state.pendingRuleQueue.length === 0;
+    }
+    const pending = state.pendingRuleQueue.filter(
+      rule => !hasDeliveryKey(state.ruleKeys, rule)
+    );
+    if (pending.length === 0) {
+      state.pendingRuleQueue = [];
+      return true;
+    }
+    try {
+      await this.persistAdmission(
+        sessionID,
+        buildRuleAdmissionPart(pending, sessionID)
+      );
+    } catch (error) {
+      this.debugLog(
+        `Rule admission persistence failed for ${sessionID}: ${formatError(error)}`
+      );
+      return false;
+    }
+    for (const rule of pending) state.ruleKeys.add(deliveryKey(rule));
+    const accepted = new Set(pending.map(deliveryKey));
+    state.pendingRuleQueue = state.pendingRuleQueue.filter(
+      rule => !accepted.has(deliveryKey(rule))
+    );
+    return true;
+  }
+
   markCompacted(sessionID: string): void {
     const state = this.getState(sessionID);
     state.ledgerRevision++;
@@ -405,6 +505,7 @@ class DefaultRuleDelivery implements RuleDelivery {
         seededFromHistory: false,
         needsRescan: false,
         pendingHookQueue: [],
+        pendingRuleQueue: [],
         durableHookQueue: [],
         transientHookQueue: [],
         transientTurn: undefined,

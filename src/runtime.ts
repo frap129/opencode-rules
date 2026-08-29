@@ -1,4 +1,5 @@
 import {
+  hasFileObservationFamily,
   matchRuleSnapshots,
   type RuleMatchContext,
   type MatchedRuleEntry,
@@ -40,6 +41,14 @@ import {
   createSessionWorkingContext,
   type SessionWorkingContext,
 } from './session-working-context.js';
+import {
+  createFileObservationContext,
+  type FileObservationContext,
+} from './file-observation-context.js';
+import {
+  isRuleAdmissionPart,
+  type DeliveryPart,
+} from './rule-delivery-codec.js';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -65,6 +74,21 @@ interface OpenCodeClient {
       path: { id: string };
       query?: { directory?: string };
     }) => Promise<{ data?: Array<{ info?: unknown; parts?: unknown[] }> }>;
+    prompt?: (args: {
+      path: { id: string };
+      query?: { directory?: string };
+      body: {
+        messageID?: string;
+        noReply: boolean;
+        parts: Array<{
+          id?: string;
+          type: 'text';
+          text: string;
+          synthetic?: boolean;
+          metadata?: Record<string, unknown>;
+        }>;
+      };
+    }) => Promise<unknown>;
   };
 }
 
@@ -78,6 +102,15 @@ interface OpenCodeRulesRuntimeOptions {
   debugLog?: DebugLog;
 }
 
+/** One object-shaped input for the single session-rule evaluation path. */
+interface SessionRuleEvaluationInput {
+  sessionID: string;
+  userPrompt: string | undefined;
+  modelID: string | undefined;
+  agentType: string | undefined;
+  selectSnapshot?: (snapshot: RuleSnapshot) => boolean;
+}
+
 export class OpenCodeRulesRuntime {
   private client: OpenCodeClient;
   private directory: string;
@@ -88,6 +121,7 @@ export class OpenCodeRulesRuntime {
   private debugLog: DebugLog;
   private ruleDelivery: RuleDelivery;
   private sessionWorkingContext: SessionWorkingContext;
+  private fileObservationContext: FileObservationContext;
   private snapshotPromises = new Map<string, Promise<RuleSnapshot[]>>();
 
   constructor(opts: OpenCodeRulesRuntimeOptions) {
@@ -98,6 +132,9 @@ export class OpenCodeRulesRuntime {
     this.sessionStore = opts.sessionStore;
     this.matchedRulesStateStore = opts.matchedRulesStateStore;
     this.debugLog = opts.debugLog ?? createDebugLog();
+    this.fileObservationContext = createFileObservationContext({
+      projectDirectory: opts.projectDirectory,
+    });
     this.sessionWorkingContext = createSessionWorkingContext({
       sessionStore: opts.sessionStore,
       projectDirectory: opts.projectDirectory,
@@ -107,6 +144,37 @@ export class OpenCodeRulesRuntime {
     this.ruleDelivery = createRuleDelivery({
       rawHistory: this.sessionWorkingContext.rawHistory,
       debugLog: this.debugLog,
+      persistAdmission: (sessionID, part) =>
+        this.persistRuleAdmission(sessionID, part),
+    });
+  }
+
+  private async persistRuleAdmission(
+    sessionID: string,
+    part: DeliveryPart
+  ): Promise<void> {
+    const prompt = this.client.session?.prompt;
+    if (!prompt || part.type !== 'text' || typeof part.text !== 'string') {
+      throw new Error('OpenCode session.prompt is unavailable');
+    }
+    await prompt({
+      path: { id: sessionID },
+      query: { directory: this.projectDirectory },
+      body: {
+        ...(typeof part.messageID === 'string'
+          ? { messageID: part.messageID }
+          : {}),
+        noReply: true,
+        parts: [
+          {
+            ...(typeof part.id === 'string' ? { id: part.id } : {}),
+            type: 'text',
+            text: part.text,
+            synthetic: true,
+            ...(part.metadata ? { metadata: part.metadata } : {}),
+          },
+        ],
+      },
     });
   }
 
@@ -172,12 +240,9 @@ export class OpenCodeRulesRuntime {
       return;
     }
 
-    this.sessionWorkingContext.workingContext.recordToolCall(
-      sessionID,
-      toolName,
-      args
-    );
-
+    // Pre-success: no File observation is recorded here. A failed or blocked
+    // execution must never activate globs/fileContains rules; only the
+    // after-hook (successful events) feeds the observation store.
     await this.evaluateAndQueueHooks('PreToolUse', sessionID, toolName, args);
   }
 
@@ -188,7 +253,7 @@ export class OpenCodeRulesRuntime {
       callID?: string;
       args?: Record<string, unknown>;
     },
-    _output: { title?: string; output?: string; metadata?: unknown }
+    output: { title?: string; output?: string; metadata?: unknown }
   ): Promise<void> {
     const sessionID = input?.sessionID;
     const toolName = input?.tool;
@@ -198,7 +263,56 @@ export class OpenCodeRulesRuntime {
       return;
     }
 
+    // Successful tool events produce File observations; failed executions
+    // never reach this hook. Output text supports fileContains matching.
+    const observations = this.fileObservationContext.recordToolEvent(
+      sessionID,
+      {
+        tool: toolName,
+        args,
+        ...(typeof output?.output === 'string' && output.output.length > 0
+          ? { output: output.output }
+          : {}),
+      }
+    );
+    this.sessionWorkingContext.workingContext.recordObservations(
+      sessionID,
+      observations
+    );
+
+    if (observations.length > 0) {
+      await this.admitObservationMatches(sessionID);
+    }
+
     await this.evaluateAndQueueHooks('PostToolUse', sessionID, toolName, args);
+  }
+
+  private async admitObservationMatches(sessionID: string): Promise<void> {
+    const state = this.sessionStore.get(sessionID);
+    const matches = (
+      await this.evaluateSessionRules({
+        sessionID,
+        userPrompt: state?.lastUserPrompt,
+        modelID: state?.lastModelID,
+        agentType: state?.lastAgentType,
+        // Only file-observation-family rules can be triggered by a fresh
+        // observation; other condition kinds are evaluated per dispatch.
+        selectSnapshot: rule => hasFileObservationFamily(rule.metadata),
+      })
+    ).filter(rule => rule.lifetime === 'durable');
+    if (matches.length === 0) return;
+    const result = await this.ruleDelivery.admitDurableMatches({
+      sessionID,
+      rules: this.toDeliveryRules(matches),
+    });
+    if (result === 'accepted') {
+      // Union with existing sidebar state; never clobber previously
+      // matched rules from durable turns.
+      await this.matchedRulesStateStore.merge(
+        sessionID,
+        matches.map(rule => rule.filePath)
+      );
+    }
   }
 
   private async onMessagesTransform(
@@ -235,12 +349,12 @@ export class OpenCodeRulesRuntime {
       const currentState = this.sessionStore.get(sessionID);
       if (currentState) {
         const prompt = extractLatestUserPrompt(output.messages);
-        const matches = await this.evaluateSessionRules(
+        const matches = await this.evaluateSessionRules({
           sessionID,
-          prompt,
-          currentState.lastModelID,
-          currentState.lastAgentType
-        );
+          userPrompt: prompt,
+          modelID: currentState.lastModelID,
+          agentType: currentState.lastAgentType,
+        });
         ephemeralRules = this.toDeliveryRules(
           matches.filter(rule => rule.lifetime === 'ephemeral')
         );
@@ -257,6 +371,7 @@ export class OpenCodeRulesRuntime {
       matchedRules: ephemeralRules,
       messages: output.messages,
     });
+    await this.ruleDelivery.retryPendingAdmissions(sessionID);
 
     return output;
   }
@@ -295,11 +410,11 @@ export class OpenCodeRulesRuntime {
     modelID: string | undefined,
     agentType: string | undefined
   ): Promise<RuleMatchContext> {
-    const contextFilePaths =
-      this.sessionWorkingContext.workingContext.getPathsForMatching(sessionID);
+    const fileObservations =
+      this.fileObservationContext.getForMatching(sessionID);
     const availableToolIDs = await this.queryAvailableToolIDs();
     return buildRuleMatchContext({
-      contextFilePaths,
+      fileObservations,
       userPrompt,
       availableToolIDs,
       modelID,
@@ -311,19 +426,19 @@ export class OpenCodeRulesRuntime {
 
   /** Evaluate the session snapshot against the current request context. */
   private async evaluateSessionRules(
-    sessionID: string,
-    userPrompt: string | undefined,
-    modelID: string | undefined,
-    agentType: string | undefined
+    input: SessionRuleEvaluationInput
   ): Promise<MatchedRuleEntry[]> {
-    const snapshots = await this.ensureSessionRuleSnapshot(sessionID);
+    const snapshots = await this.ensureSessionRuleSnapshot(input.sessionID);
+    const selected = input.selectSnapshot
+      ? snapshots.filter(input.selectSnapshot)
+      : snapshots;
     const context = await this.buildSessionRuleMatchContext(
-      sessionID,
-      userPrompt,
-      modelID,
-      agentType
+      input.sessionID,
+      input.userPrompt,
+      input.modelID,
+      input.agentType
     );
-    return matchRuleSnapshots(snapshots, context);
+    return matchRuleSnapshots(selected, context);
   }
 
   private toDeliveryRules(
@@ -342,6 +457,7 @@ export class OpenCodeRulesRuntime {
     output: ChatMessageOutput
   ): Promise<void> {
     try {
+      if (output.parts?.some(part => isRuleAdmissionPart(part))) return;
       const captured = updateSessionFromChatMessage(
         input,
         output,
@@ -368,12 +484,12 @@ export class OpenCodeRulesRuntime {
 
       let matched: MatchedRuleEntry[] = [];
       if (captured.userPrompt) {
-        matched = await this.evaluateSessionRules(
+        matched = await this.evaluateSessionRules({
           sessionID,
-          captured.userPrompt,
-          captured.modelID,
-          captured.agentType
-        );
+          userPrompt: captured.userPrompt,
+          modelID: captured.modelID,
+          agentType: captured.agentType,
+        });
       }
       const durableMatches = matched.filter(
         rule => rule.lifetime === 'durable'

@@ -2,10 +2,11 @@ import { extractSlashCommand } from './message-context.js';
 import { detectProjectTags } from './project-fingerprint.js';
 import { getGitBranch } from './git-branch.js';
 import type { RuleMatchContext } from './rule-filter.js';
+import type { FileObservation } from './file-observation.js';
 import type { DebugLog } from './debug.js';
 
 export interface BuildRuleMatchContextOptions {
-  contextFilePaths: string[];
+  fileObservations: FileObservation[];
   userPrompt: string | undefined;
   availableToolIDs: string[];
   modelID: string | undefined;
@@ -56,7 +57,7 @@ export async function buildRuleMatchContext(
   opts: BuildRuleMatchContextOptions
 ): Promise<RuleMatchContext> {
   const {
-    contextFilePaths,
+    fileObservations,
     userPrompt,
     availableToolIDs,
     modelID,
@@ -94,8 +95,8 @@ export async function buildRuleMatchContext(
     ci,
   };
 
-  if (contextFilePaths.length > 0) {
-    context.contextFilePaths = contextFilePaths;
+  if (fileObservations.length > 0) {
+    context.fileObservations = fileObservations;
   }
   if (userPrompt !== undefined) {
     context.userPrompt = userPrompt;

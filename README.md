@@ -26,11 +26,12 @@ approach.
 ## Features
 
 - **Dual-format support**: Load rules from both `.md` and `.mdc` files
-- **Conditional rules**: Apply rules based on file paths, prompt keywords, or available tools
+- **Conditional rules**: Apply rules based on file paths, file content, prompt keywords, or available tools
 - **Runtime filtering**: Filter rules by model, agent, command, project type, git branch, OS, and CI
 - **Branch glob patterns**: Match branches using glob patterns (e.g., `feature/*`, `release/**`)
 - **Matching modes**: Use `match: any` (default) for OR logic or `match: all` for AND logic
 - **Keyword matching**: Apply rules when the user's prompt contains specific keywords
+- **File-content matching**: Apply rules when observed file text contains literal substrings (`fileContains`)
 - **Tool-based rules**: Apply rules only when specific MCP tools are available
 - **Global and project-level rules**: Define rules at both system and project scopes
 - **Context-aware delivery**: Rules filtered by extracted file paths and user prompts
@@ -108,12 +109,12 @@ That's it! The rule will now be automatically delivered to all AI agent conversa
 
 1. **Discovery**: Scan global and project directories for `.md` and `.mdc` files (at plugin init)
 2. **Parsing**: Extract metadata from files with YAML front matter
-3. **Tool Execution**: `tool.execute.before` hook captures file paths before tools run
-4. **Message Flow**: `chat.message` hook updates user prompt as messages arrive
-5. **Initial Seeding**: `experimental.chat.messages.transform` extracts context from message history once and rebuilds identity-based dedup keys when resuming a session; queued hook content is delivered as a transient synthetic message on the next request
-6. **Rule Delivery**: Each injection event is one `<system-message>` block with one plugin preamble and a `<rule name="...">` block per rule. The name comes from frontmatter `name` or the filename stem. Session-durable rules (unconditional, `globs`, `keywords`, `command`, `project`, `os`, and `ci`) are appended once to the user message as one persisted synthetic text part via `chat.message`, hidden in the TUI but included in provider requests so the system prompt stays byte-stable for prompt caching. Agent, `model`, `branch`, and `tools` rules are appended only to the transformed model request as one transient synthetic message per matching turn, so changing agent or model does not leave stale rule text in new history. Path-based deduplication applies only to durable delivery.
+3. **File Observations**: Successful live Read, Write, Edit, Apply Patch, and path-associated LSP `tool.execute.after` events create File observations. Historical tool parts do not recreate File observations or select new file-scoped Rules.
+4. **History Seeding**: `experimental.chat.messages.transform` rebuilds the path-only Working context for compaction from message history once and lets RuleDelivery rebuild identity-ledger evidence from synthetic delivery metadata when resuming a session
+5. **Earliest Dispatch**: A newly Matched Durable Rule in the file-observation family (`globs`, `fileContains`, or both) is admitted immediately through an awaited `session.prompt({ noReply: true })`; pending guidance is included transiently in the next usable dispatch and persistence retries there. Initial Durable matches still append to `chat.message`.
+6. **Rule Delivery**: Each injection event is one `<system-message>` block with one plugin preamble and a `<rule name="...">` block per rule. The name comes from frontmatter `name` or the filename stem. Session-durable rules (unconditional, `globs`, `fileContains`, `keywords`, `command`, `project`, `os`, and `ci`) are appended once to the user message as one persisted synthetic text part via `chat.message`, hidden in the TUI but included in provider requests so the system prompt stays byte-stable for prompt caching. Agent, `model`, `branch`, and `tools` rules are appended only to the transformed model request as one transient synthetic message per matching turn, so changing agent or model does not leave stale rule text in new history. Path-based deduplication applies only to durable delivery.
 7. **State Persistence**: Matched rule paths are written to `~/.opencode/state/opencode-rules/{sessionId}.json` for TUI consumption
-8. **Compaction Persistence**: `experimental.session.compacting` preserves context paths and invalidates the durable delivery ledger; the next transformed request rebuilds it from surviving parts so missing durable rules are re-appended, while ephemeral rules continue to be recomputed per request
+8. **Compaction Persistence**: `experimental.session.compacting` preserves Working-context paths and invalidates the durable delivery ledger; the next transformed request rebuilds it from surviving parts so missing durable rules are re-appended, while ephemeral rules continue to be recomputed per request
 
 ## Performance
 
@@ -151,6 +152,8 @@ Both `.md` and `.mdc` files support optional YAML metadata for conditional rule 
 globs:
   - 'src/**/*.ts'
   - 'lib/**/*.js'
+fileContains:
+  - 'unsafe {'
 keywords:
   - 'refactoring'
   - 'cleanup'
@@ -184,6 +187,11 @@ match: any
 
 - `globs` (optional): Array of glob patterns for file-based matching
   - Rule applies when any file in context matches a pattern
+- `fileContains` (optional): String or array of literal substrings to find in observed file content
+  - Rule applies when one observed file's path matches `globs` (if declared) AND the same observation's text contains any literal (OR across literals)
+  - Case-sensitive literal matching; regex metacharacters have no special meaning and literals may span lines
+  - Usable without `globs` to match content alone; a declared field with no valid literal makes the rule never match (fail-closed, with a warning)
+  - Observed only from successful Read, Write, Edit, Apply Patch, and LSP tool events
 - `keywords` (optional): Array of keywords for prompt-based matching
   - Rule applies when the user's prompt contains any keyword
   - Case-insensitive, word-boundary matching (e.g., "test" matches "testing")
@@ -218,11 +226,16 @@ match: any
 ### Matching Behavior
 
 - **No metadata**: Rule applies unconditionally (always included)
-- **Only globs**: Rule applies when any context file matches
+- **Only globs**: Rule applies when any observed file's path matches
+- **Only fileContains**: Rule applies when any observed file's text contains a literal
+- **globs + fileContains**: One file-observation family — a single observed file must satisfy both (AND)
 - **Only keywords**: Rule applies when the user's prompt contains any keyword
 - **Only tools**: Rule applies when any listed tool is available
-- **Multiple conditions with `match: any` (default)**: Rule applies when ANY condition matches (OR logic across all fields)
+- **Multiple conditions with `match: any` (default)**: Rule applies when ANY condition matches (OR logic across all fields; the file-observation family counts as one check)
 - **Multiple conditions with `match: all`**: Rule applies only when ALL declared conditions match
+
+> [!NOTE]
+> Normalized File observations from successful live Read, Write, Edit, Apply Patch, and path-associated LSP events are the sole source for `globs` and `fileContains`. Prose path mentions in messages and excluded tools' arguments/results (grep, glob, bash, ...) do not contribute paths, and historical tool parts never recreate File observations.
 
 ## Glob Pattern Reference
 
@@ -240,7 +253,7 @@ The plugin uses `minimatch` for pattern matching:
 
 This repository includes a `crafting-rules/` skill that teaches AI agents how to create well-formatted rules. The skill provides:
 
-- **Rule format reference** - Frontmatter fields (`globs`, `keywords`, `tools`, `model`, `agent`, `command`, `project`, `branch`, `os`, `ci`, `match`) and markdown body structure
+- **Rule format reference** - Frontmatter fields (`globs`, `fileContains`, `keywords`, `tools`, `model`, `agent`, `command`, `project`, `branch`, `os`, `ci`, `match`) and markdown body structure
 - **Matching strategy guidance** - When to use globs vs keywords vs runtime filters vs combinations
 - **Pattern extraction workflow** - How to identify repeated conversation patterns that should become rules
 - **Keyword safety guidelines** - Denylist of overly broad keywords to avoid, allowlist of safe alternatives, and an audit checklist
@@ -285,6 +298,29 @@ globs:
 ```
 
 This rule only applies when processing TypeScript files.
+
+### File-Content Rule (fileContains)
+
+Create `~/.config/opencode/rules/rust-unsafe.mdc`:
+
+```markdown
+---
+globs:
+  - '**/*.rs'
+fileContains: 'unsafe {'
+---
+
+# Rust Unsafe Review
+
+- Call wrap() and other FFI helpers when touching unsafe code.
+- Document every unsafe block with a SAFETY comment.
+```
+
+This rule is delivered when a successfully observed `.rs` file contains `unsafe {` — for
+example after the agent reads or writes a matching file. The path and content checks
+compose over the **same** file observation: a non-Rust file containing the literal or a
+Rust file without it does not match. `fileContains` is durable: once delivered, later
+observations never retract it.
 
 ### Keyword-Based Rule
 
@@ -457,7 +493,9 @@ opencode-rules/
 ├── src/
 │   ├── index.ts              # Main plugin entry point and exports
 │   ├── runtime.ts            # OpenCodeRulesRuntime class (hook orchestration)
-│   ├── session-working-context.ts # Runtime-owned Working context (seeding, live observations, history prefetch, compaction projection)
+│   ├── file-observation-context.ts # Runtime-owned per-session File-observation store (bounded LRU; feeds globs/fileContains matching and earliest-dispatch admission; live events only)
+│   ├── session-working-context.ts # Runtime-owned Working context (path-only compaction projection, history prefetch, never a matching source)
+│   ├── file-observation.ts   # File-observation normalization for read/write/edit/apply_patch/lsp (live events; history parts feed path-only Working context)
 │   ├── rule-delivery.ts      # Durable/transient delivery, Hook queues, and identity ledger
 │   ├── rule-delivery-codec.ts # Delivery identifiers, formats, history decoding, and transient presence facts
 │   ├── rule-delivery-history.ts # Raw history port for delivery decoding
@@ -465,8 +503,8 @@ opencode-rules/
 │   ├── runtime-chat.ts       # Chat message handling and text extraction
 │   ├── rule-discovery.ts     # Rule file scanning, discovery, and per-session snapshots
 │   ├── rule-metadata.ts      # YAML frontmatter parsing
-│   ├── rule-filter.ts        # Rule matching against context, lifetime classification (globs, keywords, tools, runtime)
-│   ├── message-paths.ts      # Path extraction from messages
+│   ├── rule-filter.ts        # Rule matching against context, lifetime classification (globs, fileContains, keywords, tools, runtime)
+│   ├── message-paths.ts      # Legacy path-extraction compatibility facade
 │   ├── message-context.ts    # User prompt extraction from message parts
 │   ├── session-store.ts      # Per-session state management
 │   ├── project-fingerprint.ts # Project type detection (Node.js, Python, etc.)
@@ -504,8 +542,8 @@ The following highlights the primary runtime modules:
 - **runtime-chat.ts** - Extracts text from chat message parts for keyword matching
 - **rule-discovery.ts** - Recursively scans directories for `.md`/`.mdc` rule files
 - **rule-metadata.ts** - Parses YAML frontmatter into typed `RuleMetadata`
-- **rule-filter.ts** - Matches rules against context (globs, keywords, tools, runtime filters) and classifies each match as session-durable or ephemeral
-- **message-paths.ts** - Extracts file paths from tool invocation arguments and message text
+- **rule-filter.ts** - Matches rules against context (file-observation family: globs + fileContains, keywords, tools, runtime filters) and classifies each match as session-durable or ephemeral
+- **message-paths.ts** - Compatibility facade for the legacy path-extraction API; runtime matching uses normalized File observations
 - **message-context.ts** - Extracts user prompt text, slash commands, and session IDs from message parts
 - **session-store.ts** - Manages per-session state with LRU eviction
 - **project-fingerprint.ts** - Detects project type from marker files (e.g., `package.json`)
@@ -525,7 +563,7 @@ The plugin registers a `sidebar_content` slot in the OpenCode TUI, displaying al
 - Collapsible "Project" and "Global" sections grouping rules by scope
 - Active/inactive status indicators (green bullet for active, muted for inactive) based on persisted state from the current session
 - Condition summary for conditional rules ("always active" for unconditional ones)
-- Expandable detail panel with all metadata fields (globs, keywords, tools, model, agent, command, project, branch, os, ci, match)
+- Expandable detail panel with all metadata fields (globs, fileContains, keywords, tools, model, agent, command, project, branch, os, ci, match)
 - Loading, error, and empty states
 
 **Behavior:**
@@ -573,21 +611,28 @@ This plugin uses OpenCode's hook system for incremental, stateful rule delivery:
 
 ### Hook-Based Approach
 
-1. **`tool.execute.before`** - Authoritative path capture and reactive hook evaluation
-   - Fires before each tool runs (read, edit, write, glob, grep, etc.)
-   - Captures `filePath` or `path` arguments authoritative from the tool definition
+1. **`tool.execute.before`** - Reactive hook evaluation
+   - Fires before each tool runs
    - Evaluates `PreToolUse` hooks: rules with `block: true` can prevent execution
-   - Queues matched rule content for delivery on the next user message
-   - Updates session state with normalized, verified context paths
-   - Provides real-time context as tools are executed
+   - Queues matched PreToolUse hook content for delivery on the next user message (ordinary rule matching does not run here)
+   - Records no File observations: a failed or blocked execution must never activate file-family rules
 
-2. **`chat.message`** - User prompt capture and synthetic-part rule delivery
+2. **`tool.execute.after`** - File observation capture, admission, and post-execution guidance
+   - Fires after each successful tool completes (failed executions never reach this hook)
+   - Normalizes Read, Write, Edit, Apply Patch, and LSP events into File observations (path plus content) — the sole source for `globs` and `fileContains`
+   - Immediately evaluates file-observation-family rules (`globs`, `fileContains`, or both) against fresh observations; a durable match is admitted synchronously and persisted through a `noReply` `session.prompt` call (earliest dispatch), with retry on the next dispatch if persistence fails
+   - Evaluates `PostToolUse` hooks for reactive rule triggering
+   - Queues corrective rule content for delivery on the next turn; hook blocking
+     and `run` side effects are unchanged
+   - Hook text uses the same single-event framing as ordinary rules. Durable-owner hooks join the next durable `chat.message` delivery; ephemeral-owner hooks join the next transient `experimental.chat.messages.transform` delivery and are never persisted
+
+3. **`chat.message`** - User prompt capture and synthetic-part rule delivery
    - Fires as each user message arrives
    - Extracts and stores the latest user prompt text
    - Enables keyword-based rule matching across the conversation flow
    - Receives full runtime match context: model, agent, command, project type, git branch, OS, and CI environment
    - Evaluates the session rule snapshot and filters based on:
-     - Extracted file paths from session state (`globs`)
+     - Normalized file observations from session state (`globs`, `fileContains`)
      - Latest user prompt (`keywords`)
      - Available tool IDs (`tools`)
      - Runtime environment (model, agent, command, project, branch, OS, CI)
@@ -598,7 +643,7 @@ This plugin uses OpenCode's hook system for incremental, stateful rule delivery:
    - `message.removed` events invalidate the delivery ledger so rules attached to canceled or reverted messages are retried on the replacement message
    - Rule content and metadata are snapshotted per session at first evaluation; in-process file edits do not change an existing session's delivery
 
-3. **`experimental.chat.messages.transform`** - History seeding, ephemeral rule delivery, and transient hook delivery
+4. **`experimental.chat.messages.transform`** - History seeding, ephemeral rule delivery, and transient hook delivery
    - Fires before each model request; history seeding runs only on the first
      call (gated by seededFromHistory), while transient rule/hook delivery runs
      on every request
@@ -610,17 +655,10 @@ This plugin uses OpenCode's hook system for incremental, stateful rule delivery:
      never persisted, so switching agent or model swaps the applicable rules
    - Delivers all queued hook content together with matching ephemeral rules in the same framed transient synthetic user message (`prt_rule_ephemeral_`) appended to the very next model request - never persisted
 
-4. **`experimental.session.compacting`** - Compaction context preservation
+5. **`experimental.session.compacting`** - Compaction context preservation
    - Fires when a session is compacted (summarized)
-   - Injects current context paths into the compaction context
+   - Injects Working-context paths into the compaction context
    - Rebuilds the durable delivery ledger from post-compaction request history so rules removed by compaction are re-appended, while rules still present are not duplicated
-
-5. **`tool.execute.after`** - Post-execution corrective guidance
-   - Fires after each tool completes
-   - Evaluates `PostToolUse` hooks for reactive rule triggering
-   - Queues corrective rule content for delivery on the next turn; hook blocking
-     and `run` side effects are unchanged
-   - Hook text uses the same single-event framing as ordinary rules. Durable-owner hooks join the next durable `chat.message` delivery; ephemeral-owner hooks join the next transient `experimental.chat.messages.transform` delivery and are never persisted
 
 ### Experimental API Notice
 

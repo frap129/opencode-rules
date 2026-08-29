@@ -4,6 +4,7 @@ const RULE_PART_PREFIX = 'prt_rules_';
 const TRANSIENT_RULE_PART_PREFIX = 'prt_rule_ephemeral_';
 const TRANSIENT_RULE_MESSAGE_PREFIX = 'msg_rule_ephemeral_';
 const TRANSIENT_HOOK_MESSAGE_PREFIX = 'msg_rules_hook_';
+const RULE_ADMISSION_MESSAGE_PREFIX = 'msg_rule_admission_';
 const LEGACY_RULE_HEADER_PATTERN = /^## (.+)\n\n[\s\S]*$/;
 const DELIVERY_PREAMBLE =
   'The following rules were injected by a plugin. Follow them silently; do not acknowledge them to the user.';
@@ -135,6 +136,30 @@ export function buildDurableDeliveryPart(
     },
     ...owner,
   };
+}
+
+export function buildRuleAdmissionPart(
+  rules: readonly DeliveryRule[],
+  sessionID: string
+): SyntheticPart {
+  const ruleKeys = rules.map(ruleKey);
+  const identity = deliveryIdentity(ruleKeys, []);
+  const messageID = `${RULE_ADMISSION_MESSAGE_PREFIX}${identity}`;
+  return {
+    id: `${RULE_PART_PREFIX}${identity}_${messageID}`,
+    type: 'text',
+    text: renderSystemMessage(rules),
+    synthetic: true,
+    metadata: { ruleKeys, ruleAdmission: true },
+    sessionID,
+    messageID,
+  };
+}
+
+export function isRuleAdmissionPart(value: unknown): boolean {
+  const part = asRecord(value);
+  const metadata = asRecord(part?.metadata);
+  return part?.synthetic === true && metadata?.ruleAdmission === true;
 }
 
 function withModelObject<T extends Record<string, unknown>>(info: T): T {

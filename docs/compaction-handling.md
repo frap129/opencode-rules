@@ -17,7 +17,7 @@ When a session is compacted, the `experimental.session.compacting` hook injects 
 ```typescript
 'experimental.session.compacting': async (input, output) => {
   const sessionState = sessionStateMap.get(input.sessionID);
-  const paths = Array.from(sessionState.contextPaths).sort();
+  const paths = Array.from(sessionState.workingContextPaths).sort();
 
   // Build minimal context string with sanitized paths
   const contextString = [
@@ -37,11 +37,11 @@ When a session is compacted, the `experimental.session.compacting` hook injects 
 **How it works:**
 
 - During compaction, OpenCode calls the `experimental.session.compacting` hook
-- We extract the current working set (file paths the user was working with)
+- We extract the current Working context (file paths the user was working with)
 - We add a minimal context string that the compaction LLM includes in the summary
-- We invalidate the RuleDelivery ledger so it is rebuilt from post-compaction request history
+- We invalidate the RuleDelivery ledger so it is rebuilt from post-compaction request history's synthetic delivery metadata — not from summary prose and not from historical tool events
 - Durable rules removed by compaction are re-appended; rules still present are not duplicated
-- Preserved paths keep conditional-rule context available for subsequent matching
+- Preserved paths keep the Working-context projection available, but rule matching always comes from live File observations
 
 **Why this works:**
 
@@ -52,11 +52,12 @@ When a session is compacted, the `experimental.session.compacting` hook injects 
 
 ### Incremental Context Capture
 
-The plugin uses multiple hooks to incrementally build the working set:
+The plugin builds the Working context from successful live events and eligible
+history parts (paths only, never content):
 
-1. **`tool.execute.before`**: Captures file paths from tool calls (read, edit, write, glob, grep)
-2. **`experimental.chat.messages.transform`**: Seeds the working set from message history on first encounter
-3. **`chat.message`**: Updates working set with latest user prompts
+1. **`tool.execute.after`**: Successful Read, Write, Edit, Apply Patch, and path-associated LSP events contribute normalized paths (and File observations for matching)
+2. **`experimental.chat.messages.transform`**: Rebuilds path-only Working context from message history on first encounter
+3. **`chat.message`**: Updates Working context with tool parts of the current message
 
 This multi-hook approach ensures:
 
@@ -86,22 +87,25 @@ the runtime-owned `RuleDelivery` instance, not in SessionState.
 - Maximum of 100 concurrent sessions in memory (LRU eviction)
 - Each entry is tagged with `lastUpdated` for age tracking
 - Sessions are automatically pruned when limit is exceeded
-- Compaction invalidates durable delivery identities; the next transformed request rebuilds them from surviving parts, missing durable rules are re-appended on the next user message, and ephemeral rules are recomputed per request
+- Compaction invalidates durable delivery identities; the next transformed request rebuilds them from surviving synthetic delivery metadata, missing durable rules are re-appended, and ephemeral rules are recomputed per request
 
 ## Data Flow
 
 ### Normal Turn
 
 ```
-User sends message
+live tool.execute.after
     ↓
-chat.message hook captures file paths from message text
+FileObservationContext (matching, resident process only)
     ↓
-tool.execute.before hooks capture paths from tool calls
+SessionWorkingContext (path-only compaction projection)
     ↓
-chat.message appends session-durable matching rules to the user message
-as synthetic parts; ephemeral rules (agent, model, branch, tools) are
-delivered only in the transformed model request
+chat.message: initial session-durable matching rules append to the user
+message as one synthetic part; a Durable Rule first matched by a live File
+observation is admitted immediately through a no-reply session.prompt
+(earliest dispatch), with transient fallback and retry; ephemeral rules
+(agent, model, branch, tools) are delivered only in the transformed model
+request
     ↓
 AI processes request with full context
 ```
@@ -113,15 +117,15 @@ OpenCode triggers compaction (context window management)
     ↓
 experimental.session.compacting hook runs
     ↓
-Current working set (20 most recent file paths) injected into compaction context
+Working context projection (up to 20 sorted paths, no content) injected into compaction context
     ↓
 Compaction LLM generates summary including injected file paths
     ↓
 Session context preserved through compaction
     ↓
-Post-compaction transform rebuilds the delivery ledger from surviving parts
+Post-compaction transform rebuilds the delivery ledger from surviving synthetic delivery metadata
     ↓
-Missing durable rules are re-appended on the next user message;
+Missing durable rules are re-appended;
 ephemeral rules are recomputed per request
 ```
 
@@ -159,8 +163,8 @@ The implementation includes comprehensive tests:
 it('adds minimal working-set context during compaction', async () => {
   // Seed session with paths
   __testOnly.upsertSessionState('ses_c', s => {
-    s.contextPaths.add('src/components/Button.tsx');
-    s.contextPaths.add('src/utils/helpers.ts');
+    s.workingContextPaths.add('src/components/Button.tsx');
+    s.workingContextPaths.add('src/utils/helpers.ts');
   });
 
   // Call compacting hook
@@ -176,7 +180,7 @@ it('includes "... and X more" when paths exceed 20', async () => {
   // Seed with 25 paths
   __testOnly.upsertSessionState('ses_x', s => {
     for (let i = 1; i <= 25; i++) {
-      s.contextPaths.add(`path/to/file${i}.ts`);
+      s.workingContextPaths.add(`path/to/file${i}.ts`);
     }
   });
 
@@ -195,10 +199,10 @@ it('includes "... and X more" when paths exceed 20', async () => {
 When running with `OPENCODE_RULES_DEBUG=1`, you'll see:
 
 ```
-[opencode-rules] Recorded context path from tool read: src/components/Button.tsx
-[opencode-rules] Seeded 5 context path(s) for session ses_abc123
+[opencode-rules] Recorded Working-context path from live tool read: src/components/Button.tsx
+[opencode-rules] Seeded 5 Working-context path(s) for session ses_abc123
 [opencode-rules] Updated lastUserPrompt for session ses_abc123 (len=42, parts=1)
-[opencode-rules] Added 20 context path(s) to compaction for session ses_abc123
+[opencode-rules] Added 20 Working-context path(s) to compaction for session ses_abc123
 ```
 
 ## Alternative Approaches Considered
@@ -215,11 +219,11 @@ When running with `OPENCODE_RULES_DEBUG=1`, you'll see:
 
 **Advantages**:
 
-- Delivered via the standard `chat.message` hook - no experimental API required
+- Initial durable delivery via the standard `chat.message` hook; mid-session file-family matches are admitted earlier through a no-reply `session.prompt` call
 - Synthetic parts are hidden in the TUI but included in provider requests
 - System prompt stays byte-stable across requests, preserving provider prompt caching
 - Path-derived identity keys prevent re-appending durable rules already delivered in the session
-- Compaction rebuilds durable delivery identities from surviving parts and missing durable rules are re-appended; ephemeral rules (agent, model, branch, tools) are recomputed per request and never persisted
+- Compaction rebuilds durable delivery identities from surviving synthetic delivery metadata and missing durable rules are re-appended; ephemeral rules (agent, model, branch, tools) are recomputed per request and never persisted
 
 ### ❌ Naive Per-message Injection
 
@@ -236,7 +240,7 @@ Persisted synthetic parts handle rule _delivery_, while working-set context inje
 **Advantages**:
 
 - Injected directly into OpenCode's compaction hook - no workarounds needed
-- Efficient: Only current working set (max 20 paths), not full rules
+- Efficient: Only current Working context (max 20 paths), not full rules
 - Safe: Paths sanitized to prevent prompt injection
 - Clean: Works within official plugin API
 - Reliable: No timing dependencies or missing event handling

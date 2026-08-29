@@ -19,6 +19,7 @@ const metadataFieldDescriptors: Array<{
   label: string;
 }> = [
   { key: 'globs', label: 'Globs' },
+  { key: 'fileContains', label: 'File contains' },
   { key: 'keywords', label: 'Keywords' },
   { key: 'tools', label: 'Tools' },
   { key: 'model', label: 'Model' },

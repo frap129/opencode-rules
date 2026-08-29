@@ -37,8 +37,14 @@ type ChatMessageOutputLike = {
     type?: string;
     text?: string;
     synthetic?: boolean;
+    metadata?: Record<string, unknown>;
   }>;
 };
+
+type ChatMessageHook = (
+  input: { sessionID: string; messageID: string },
+  output: ChatMessageOutputLike
+) => Promise<void>;
 
 describe('Conditional rules integration', () => {
   let savedEnvXDG: string | undefined;
@@ -68,7 +74,7 @@ describe('Conditional rules integration', () => {
     }
   });
 
-  it('should include conditional rule when message context matches glob', async () => {
+  it('does not select glob rules from supplied tool history', async () => {
     const { testDir, globalRulesDir } = getTestDirs();
     writeFileSync(
       path.join(globalRulesDir, 'typescript.mdc'),
@@ -132,10 +138,10 @@ Use React best practices for components.`
       .filter(p => p.synthetic)
       .map(p => p.text)
       .join('\n');
-    expect(syntheticText).toContain('React best practices');
+    expect(syntheticText).not.toContain('React best practices');
   });
 
-  it('should restore glob context from current tool history after restart', async () => {
+  it('does not replay glob observations after restart', async () => {
     const { testDir, globalRulesDir } = getTestDirs();
     writeFileSync(
       path.join(globalRulesDir, 'typescript.mdc'),
@@ -188,7 +194,347 @@ Use React best practices for components.`
       .filter(p => p.synthetic)
       .map(p => p.text)
       .join('\n');
-    expect(syntheticText).toContain('React best practices');
+    expect(syntheticText).not.toContain('React best practices');
+  });
+
+  it('fileContains matches a successful observation of the same file (Rust scenario)', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    writeFileSync(
+      path.join(globalRulesDir, 'rust-unsafe.mdc'),
+      `---
+globs:
+  - "**/*.rs"
+fileContains: "unsafe {"
+---
+
+Rust unsafe guidance.`
+    );
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+
+    const after = hooks['tool.execute.after'] as (
+      input: {
+        tool: string;
+        sessionID: string;
+        callID: string;
+        args: Record<string, unknown>;
+      },
+      output: { title: string; output: string; metadata: unknown }
+    ) => Promise<void>;
+    await after(
+      {
+        tool: 'write',
+        sessionID: 'ses_rs_ok',
+        callID: 'call_rs_1',
+        args: { filePath: 'src/lib.rs', content: 'fn f() { unsafe { } }' },
+      },
+      { title: '', output: 'Wrote file successfully.', metadata: {} }
+    );
+
+    const chatMessage = hooks['chat.message'] as ChatMessageHook;
+    const output: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'review my change' }],
+    };
+    await chatMessage(
+      { sessionID: 'ses_rs_ok', messageID: 'msg_rs_ok' },
+      output
+    );
+    const syntheticText = output.parts
+      .filter(p => p.synthetic)
+      .map(p => p.text)
+      .join('\n');
+    expect(syntheticText).toContain('Rust unsafe guidance.');
+  });
+
+  it('fileContents path and content must belong to the same observation', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    writeFileSync(
+      path.join(globalRulesDir, 'rust-unsafe.mdc'),
+      `---
+globs:
+  - "**/*.rs"
+fileContains: "unsafe {"
+---
+
+Rust unsafe guidance.`
+    );
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+
+    const after = hooks['tool.execute.after'] as (
+      input: {
+        tool: string;
+        sessionID: string;
+        callID: string;
+        args: Record<string, unknown>;
+      },
+      output: { title: string; output: string; metadata: unknown }
+    ) => Promise<void>;
+    // One Rust file without the literal; one non-Rust file with it.
+    await after(
+      {
+        tool: 'write',
+        sessionID: 'ses_rs_split',
+        callID: 'call_rs_a',
+        args: { filePath: 'src/lib.rs', content: 'plain rust' },
+      },
+      { title: '', output: 'ok', metadata: {} }
+    );
+    await after(
+      {
+        tool: 'write',
+        sessionID: 'ses_rs_split',
+        callID: 'call_rs_b',
+        args: { filePath: 'src/other.ts', content: 'unsafe {' },
+      },
+      { title: '', output: 'ok', metadata: {} }
+    );
+
+    const chatMessage = hooks['chat.message'] as ChatMessageHook;
+    const output: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'review' }],
+    };
+    await chatMessage(
+      { sessionID: 'ses_rs_split', messageID: 'msg_rs_split' },
+      output
+    );
+    expect(output.parts.filter(p => p.synthetic)).toHaveLength(0);
+  });
+
+  it('fileContains without globs matches content alone and is durable', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    writeFileSync(
+      path.join(globalRulesDir, 'todo.md'),
+      `---
+fileContains: ["TODO: fix"]
+---
+
+Cleanup todos.`
+    );
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+
+    const after = hooks['tool.execute.after'] as (
+      input: {
+        tool: string;
+        sessionID: string;
+        callID: string;
+        args: Record<string, unknown>;
+      },
+      output: { title: string; output: string; metadata: unknown }
+    ) => Promise<void>;
+    await after(
+      {
+        tool: 'write',
+        sessionID: 'ses_todo',
+        callID: 'call_todo_1',
+        args: { filePath: 'notes.txt', content: 'TODO: fix later' },
+      },
+      { title: '', output: 'ok', metadata: {} }
+    );
+
+    const chatMessage = hooks['chat.message'] as ChatMessageHook;
+    const output: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'go on' }],
+    };
+    await chatMessage(
+      { sessionID: 'ses_todo', messageID: 'msg_todo_1' },
+      output
+    );
+    const syntheticText = output.parts
+      .filter(p => p.synthetic)
+      .map(p => p.text)
+      .join('\n');
+    expect(syntheticText).toContain('Cleanup todos.');
+  });
+
+  it('fileContents declared with no valid literal fails closed with a warning', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    writeFileSync(
+      path.join(globalRulesDir, 'broken.mdc'),
+      `---
+fileContains: ""
+---
+
+Never delivered.`
+    );
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const originalWarn = console.warn;
+    console.warn = (_msg: string) => undefined;
+    try {
+      const {
+        default: { server: plugin },
+      } = await import('./index.js');
+      const mockInput = createMockPluginInput({ testDir });
+      const hooks = await plugin(
+        mockInput as unknown as Parameters<typeof plugin>[0]
+      );
+
+      const after = hooks['tool.execute.after'] as (
+        input: {
+          tool: string;
+          sessionID: string;
+          callID: string;
+          args: Record<string, unknown>;
+        },
+        output: { title: string; output: string; metadata: unknown }
+      ) => Promise<void>;
+      await after(
+        {
+          tool: 'write',
+          sessionID: 'ses_broken',
+          callID: 'call_broken_1',
+          args: { filePath: 'a.ts', content: 'anything' },
+        },
+        { title: '', output: 'ok', metadata: {} }
+      );
+
+      const chatMessage = hooks['chat.message'] as ChatMessageHook;
+      const output: ChatMessageOutputLike = {
+        message: { role: 'user' },
+        parts: [{ type: 'text', text: 'go on' }],
+      };
+      await chatMessage(
+        { sessionID: 'ses_broken', messageID: 'msg_broken' },
+        output
+      );
+      expect(output.parts.filter(p => p.synthetic)).toHaveLength(0);
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
+
+  it('excluded user prose paths no longer trigger glob rules (compat change)', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    writeFileSync(
+      path.join(globalRulesDir, 'prose-gate.mdc'),
+      `---
+globs:
+  - "src/components/Button.tsx"
+---
+
+Prose-only guidance.`
+    );
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+
+    const transform = hooks['experimental.chat.messages.transform'] as (
+      input: unknown,
+      output: { messages: unknown[] }
+    ) => Promise<{ messages: unknown[] }>;
+    await transform(
+      {},
+      {
+        messages: [
+          {
+            info: { role: 'user', sessionID: 'ses_prose' },
+            parts: [
+              { type: 'text', text: 'look at src/components/Button.tsx' },
+            ],
+          },
+        ],
+      }
+    );
+
+    const chatMessage = hooks['chat.message'] as ChatMessageHook;
+    const output: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'continue' }],
+    };
+    await chatMessage(
+      { sessionID: 'ses_prose', messageID: 'msg_prose' },
+      output
+    );
+    expect(output.parts.filter(p => p.synthetic)).toHaveLength(0);
+  });
+
+  it('read observations carry reconstructed content with line prefixes stripped', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    writeFileSync(
+      path.join(globalRulesDir, 'marker.mdc'),
+      `---
+fileContains: "secret-token-123"
+---
+
+Read-content guidance.`
+    );
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+
+    const after = hooks['tool.execute.after'] as (
+      input: {
+        tool: string;
+        sessionID: string;
+        callID: string;
+        args: Record<string, unknown>;
+      },
+      output: { title: string; output: string; metadata: unknown }
+    ) => Promise<void>;
+    const prefixed = ['1: const a = 0;', '2: // secret-token-123'].join('\n');
+    const outputText = `<file path="src/key.ts">\n<content>\n${prefixed}\n</content>\n</file>`;
+    await after(
+      {
+        tool: 'read',
+        sessionID: 'ses_read',
+        callID: 'call_read_1',
+        args: { filePath: 'src/key.ts' },
+      },
+      { title: '', output: outputText, metadata: {} }
+    );
+
+    const chatMessage = hooks['chat.message'] as ChatMessageHook;
+    const output: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'next' }],
+    };
+    await chatMessage(
+      { sessionID: 'ses_read', messageID: 'msg_read_1' },
+      output
+    );
+    const syntheticText = output.parts
+      .filter(p => p.synthetic)
+      .map(p => p.text)
+      .join('\n');
+    expect(syntheticText).toContain('Read-content guidance.');
   });
 
   it('should exclude conditional rule when message context does not match glob', async () => {
@@ -404,7 +750,9 @@ describe('Session compacting behavior', () => {
 
     __testOnly.upsertSessionState('ses_truncate', s => {
       for (let i = 1; i <= 25; i++) {
-        s.workingContextPaths.add(`path/to/file${i.toString().padStart(2, '0')}.ts`);
+        s.workingContextPaths.add(
+          `path/to/file${i.toString().padStart(2, '0')}.ts`
+        );
       }
     });
 

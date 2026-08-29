@@ -5,6 +5,7 @@ import type { RawHistoryResult } from './rule-delivery-history.js';
 import type { MessageWithInfo } from './message-context.js';
 
 type Upstream = (sessionID: string) => Promise<RawHistoryResult>;
+const storesByContext = new WeakMap<object, SessionStore>();
 
 function setUpstream(
   result: RawHistoryResult | (() => Promise<RawHistoryResult>)
@@ -42,7 +43,14 @@ function setup(opts: SetupOptions = {}) {
     readHistory: upstream,
     debugLog,
   });
-  return { swc, sessionStore, debugLog, calls, wc: swc.workingContext };
+  storesByContext.set(swc.workingContext, sessionStore);
+  return {
+    swc,
+    sessionStore,
+    debugLog,
+    calls,
+    wc: swc.workingContext,
+  };
 }
 
 function supplied(
@@ -62,17 +70,24 @@ const readInvocation = (filePath: string): Record<string, unknown> => ({
   toolInvocation: { toolName: 'read', args: { filePath } },
 });
 
+const observedPaths = (
+  wc: ReturnType<typeof createSessionWorkingContext>['workingContext'],
+  sessionID: string
+): string[] =>
+  Array.from(
+    storesByContext.get(wc)?.snapshot(sessionID)?.workingContextPaths ?? []
+  ).sort((a, b) => a.localeCompare(b));
+
 describe('SessionWorkingContext facets', () => {
   it('returns separate working-context and raw-history facets', () => {
     const { swc } = setup();
     expect(Object.keys(swc).sort()).toEqual(['rawHistory', 'workingContext']);
     expect(Object.keys(swc.workingContext).sort()).toEqual([
-      'getPathsForMatching',
       'invalidateHistoryReads',
       'prepareDurableTurn',
       'prepareForCompaction',
       'recordMessageParts',
-      'recordToolCall',
+      'recordObservations',
       'seedFromSuppliedMessages',
     ]);
     expect(Object.keys(swc.rawHistory).sort()).toEqual(['readHistory']);
@@ -86,7 +101,7 @@ describe('supplied-message seeding', () => {
       'ses_1',
       supplied([readInvocation('src/a.ts')])
     );
-    expect(wc.getPathsForMatching('ses_1')).toEqual(['src/a.ts']);
+    expect(observedPaths(wc, 'ses_1')).toEqual(['src/a.ts']);
   });
 
   it('marks seeding complete on a successful empty message set', async () => {
@@ -99,7 +114,7 @@ describe('supplied-message seeding', () => {
     await wc.seedFromSuppliedMessages('ses_1', supplied([]));
     await wc.prepareDurableTurn('ses_1');
     expect(calls()).toBe(0);
-    expect(wc.getPathsForMatching('ses_1')).toEqual([]);
+    expect(observedPaths(wc, 'ses_1')).toEqual([]);
   });
 
   it('reports whether it performed the seeding', async () => {
@@ -122,22 +137,20 @@ describe('supplied-message seeding', () => {
       'ses_1',
       supplied([readInvocation('src/a.ts')])
     );
-    expect(wc.getPathsForMatching('ses_1')).toEqual(['src/a.ts']);
+    expect(observedPaths(wc, 'ses_1')).toEqual(['src/a.ts']);
   });
 
   it('exposes detached sorted paths; mutating the view does not alter storage', async () => {
     const { wc } = setup();
     await wc.seedFromSuppliedMessages(
       'ses_1',
-      supplied([
-        { type: 'text', text: 'look at src/zebra.ts and src/alpha.ts' },
-      ])
+      supplied([readInvocation('src/zebra.ts'), readInvocation('src/alpha.ts')])
     );
-    const paths = wc.getPathsForMatching('ses_1');
+    const paths = observedPaths(wc, 'ses_1');
     expect(paths).toEqual(['src/alpha.ts', 'src/zebra.ts']);
     paths.reverse();
     paths.push('src/injected.ts');
-    expect(wc.getPathsForMatching('ses_1')).toEqual([
+    expect(observedPaths(wc, 'ses_1')).toEqual([
       'src/alpha.ts',
       'src/zebra.ts',
     ]);
@@ -147,9 +160,18 @@ describe('supplied-message seeding', () => {
 describe('live accumulation', () => {
   it('accumulates tool-call observations monotonically', () => {
     const { wc } = setup();
-    wc.recordToolCall('ses_1', 'read', { filePath: 'src/a.ts' });
-    wc.recordToolCall('ses_1', 'bash', { workdir: 'src/tools' });
-    expect(wc.getPathsForMatching('ses_1')).toEqual(['src/a.ts', 'src/tools']);
+    wc.recordObservations('ses_1', [
+      { path: 'src/a.ts', tool: 'read', content: '' },
+    ]);
+    expect(observedPaths(wc, 'ses_1')).toEqual(['src/a.ts']);
+  });
+
+  it('stores only paths from live observations', () => {
+    const { wc } = setup();
+    wc.recordObservations('ses_1', [
+      { path: 'src/lib.rs', tool: 'write', content: 'unsafe { }' },
+    ]);
+    expect(observedPaths(wc, 'ses_1')).toEqual(['src/lib.rs']);
   });
 
   it('records paths from the current message parts', () => {
@@ -161,9 +183,20 @@ describe('live accumulation', () => {
       },
     ]);
     wc.recordMessageParts('ses_1', [
-      { type: 'text', text: 'also see src/attached.yml' },
+      {
+        type: 'tool',
+        tool: 'edit',
+        state: {
+          status: 'completed',
+          input: {
+            filePath: 'src/attached.yml',
+            oldString: 'a',
+            newString: 'b',
+          },
+        },
+      },
     ]);
-    expect(wc.getPathsForMatching('ses_1')).toEqual([
+    expect(observedPaths(wc, 'ses_1')).toEqual([
       'src/attached.yml',
       'src/x.ts',
     ]);
@@ -175,7 +208,7 @@ describe('live accumulation', () => {
       'ses_1',
       supplied([{ type: 'text', text: 'src/synthetic.ts', synthetic: true }])
     );
-    expect(wc.getPathsForMatching('ses_1')).toEqual([]);
+    expect(observedPaths(wc, 'ses_1')).toEqual([]);
   });
 
   it('tolerates malformed supplied messages', async () => {
@@ -186,10 +219,19 @@ describe('live accumulation', () => {
       null as unknown as MessageWithInfo,
       {
         info: { role: 'user', sessionID: 'ses_1' },
-        parts: [{}, { type: 'text', text: 'src/fine.ts' }] as never[],
+        parts: [
+          {},
+          {
+            type: 'tool-invocation',
+            toolInvocation: {
+              toolName: 'write',
+              args: { filePath: 'src/fine.ts', content: 'x' },
+            },
+          },
+        ] as never[],
       },
     ]);
-    expect(wc.getPathsForMatching('ses_1')).toEqual(['src/fine.ts']);
+    expect(observedPaths(wc, 'ses_1')).toEqual(['src/fine.ts']);
   });
 });
 
@@ -208,18 +250,20 @@ describe('durable-turn preparation', () => {
     await wc.prepareDurableTurn('ses_1');
     await wc.prepareDurableTurn('ses_1');
     expect(calls()).toBe(0);
-    expect(wc.getPathsForMatching('ses_1')).toEqual(['src/live.ts']);
+    expect(observedPaths(wc, 'ses_1')).toEqual(['src/live.ts']);
   });
 
   it('fails open on rejected history and allows a later retry', async () => {
     const { wc } = setup({
       history: () => Promise.reject(new Error('down')),
     });
-    wc.recordToolCall('ses_1', 'read', { filePath: 'src/live.ts' });
+    wc.recordObservations('ses_1', [
+      { path: 'src/live.ts', tool: 'read', content: '' },
+    ]);
     await wc.prepareDurableTurn('ses_1');
-    expect(wc.getPathsForMatching('ses_1')).toEqual(['src/live.ts']);
+    expect(observedPaths(wc, 'ses_1')).toEqual(['src/live.ts']);
     await wc.prepareDurableTurn('ses_1');
-    expect(wc.getPathsForMatching('ses_1')).toEqual(['src/live.ts']);
+    expect(observedPaths(wc, 'ses_1')).toEqual(['src/live.ts']);
   });
 });
 
@@ -232,7 +276,7 @@ describe('prefetch for RuleDelivery', () => {
       },
     });
     await wc.prepareDurableTurn('ses_1');
-    expect(wc.getPathsForMatching('ses_1')).toEqual(['src/h.ts']);
+    expect(observedPaths(wc, 'ses_1')).toEqual(['src/h.ts']);
     expect(await swc.rawHistory.readHistory('ses_1')).toEqual({
       ok: true,
       messages: [historyMessage('ses_1', [readInvocation('src/h.ts')])],
@@ -258,7 +302,7 @@ describe('prefetch for RuleDelivery', () => {
       debugLog: () => {},
     });
     await swc.workingContext.prepareDurableTurn('ses_1');
-    expect(swc.workingContext.getPathsForMatching('ses_1')).toEqual([]);
+    expect(observedPaths(swc.workingContext, 'ses_1')).toEqual([]);
     // First raw read consumes the one-use failed prefetch; second goes upstream.
     expect(await swc.rawHistory.readHistory('ses_1')).toEqual({ ok: false });
     expect(await swc.rawHistory.readHistory('ses_1')).toEqual({ ok: false });
@@ -277,9 +321,9 @@ describe('prefetch for RuleDelivery', () => {
       messages: [historyMessage('ses_1', [readInvocation('src/h.ts')])],
     });
     expect(calls()).toBe(1);
-    expect(wc.getPathsForMatching('ses_1')).toEqual([]);
+    expect(observedPaths(wc, 'ses_1')).toEqual([]);
     await wc.prepareDurableTurn('ses_1');
-    expect(wc.getPathsForMatching('ses_1')).toEqual(['src/h.ts']);
+    expect(observedPaths(wc, 'ses_1')).toEqual(['src/h.ts']);
     expect(calls()).toBe(2);
   });
 });
@@ -292,10 +336,12 @@ describe('history invalidation', () => {
         messages: [historyMessage('ses_1', [readInvocation('src/h.ts')])],
       },
     });
-    wc.recordToolCall('ses_1', 'read', { filePath: 'src/live.ts' });
+    wc.recordObservations('ses_1', [
+      { path: 'src/live.ts', tool: 'read', content: '' },
+    ]);
     await wc.prepareDurableTurn('ses_1');
     wc.invalidateHistoryReads('ses_1');
-    expect(wc.getPathsForMatching('ses_1')).toEqual(
+    expect(observedPaths(wc, 'ses_1')).toEqual(
       expect.arrayContaining(['src/h.ts', 'src/live.ts'])
     );
     expect(calls()).toBe(1);
@@ -323,7 +369,7 @@ describe('history invalidation', () => {
       messages: [historyMessage('ses_1', [readInvocation('src/h.ts')])],
     });
     await pending;
-    expect(swc.workingContext.getPathsForMatching('ses_1')).toEqual([]);
+    expect(observedPaths(swc.workingContext, 'ses_1')).toEqual([]);
     // No prefetch refilled: the RuleDelivery read goes upstream.
     expect(await swc.rawHistory.readHistory('ses_1')).toEqual({
       ok: true,
@@ -369,11 +415,11 @@ describe('prefetch retention bounds', () => {
     // ses_evicted was seeded before its prefetch got evicted... prepare
     // forces one read per unseeded session; other sessions push it out.
     // Its own Working context is untouched by the eviction.
-    const remembered = swc.workingContext.getPathsForMatching('ses_evicted');
+    const remembered = observedPaths(swc.workingContext, 'ses_evicted');
     for (let i = 8; i < 10; i++) {
       await swc.workingContext.prepareDurableTurn(`ses_other_${i}`);
     }
-    expect(swc.workingContext.getPathsForMatching('ses_evicted')).toEqual(
+    expect(observedPaths(swc.workingContext, 'ses_evicted')).toEqual(
       remembered
     );
   });
@@ -392,7 +438,7 @@ describe('concurrent preparation', () => {
       wc.prepareDurableTurn('ses_1'),
     ]);
     expect(calls()).toBe(1);
-    expect(wc.getPathsForMatching('ses_1')).toEqual(['src/h.ts']);
+    expect(observedPaths(wc, 'ses_1')).toEqual(['src/h.ts']);
   });
 
   it('keeps different sessions independent', async () => {
@@ -414,9 +460,8 @@ describe('compaction preparation', () => {
   it('returns the projection, limit, and omission count', () => {
     const { wc } = setup();
     for (let i = 1; i <= 25; i++) {
-      wc.recordToolCall('ses_c', 'read', {
-        filePath: `path/to/file${i.toString().padStart(2, '0')}.ts`,
-      });
+      const path = `path/to/file${i.toString().padStart(2, '0')}.ts`;
+      wc.recordObservations('ses_c', [{ path, tool: 'read', content: '' }]);
     }
     const projection = wc.prepareForCompaction('ses_c');
     expect(projection).toContain('OpenCode Rules: Working context');

@@ -250,6 +250,38 @@ describe('matched-rules-state', () => {
       expect(stateB!.matchedRulePaths).toEqual(['ruleB']);
     });
   });
+
+  describe('merge', () => {
+    it('atomically merges admitted paths with existing state', async () => {
+      await store.write('ses_merge', ['/rules/always.md']);
+      await store.merge('ses_merge', ['/rules/file.md', '/rules/always.md']);
+      const state = await readMatchedRulesState('ses_merge', {
+        stateDir: testStateDir,
+      });
+      expect(state?.matchedRulePaths).toEqual([
+        '/rules/always.md',
+        '/rules/file.md',
+      ]);
+    });
+
+    it('serializes concurrent merges without losing paths', async () => {
+      await Promise.all([
+        store.merge('ses_merge_concurrent', ['a']),
+        store.merge('ses_merge_concurrent', ['b']),
+        store.merge('ses_merge_concurrent', ['c']),
+      ]);
+      const state = await readMatchedRulesState('ses_merge_concurrent', {
+        stateDir: testStateDir,
+      });
+      expect(state?.matchedRulePaths).toEqual(['a', 'b', 'c']);
+    });
+
+    it('rejects an invalid session ID before queueing', async () => {
+      await expect(() => store.merge('../escape', ['x'])).toThrow(
+        /Invalid sessionID/
+      );
+    });
+  });
 });
 
 function getWriteQueues(

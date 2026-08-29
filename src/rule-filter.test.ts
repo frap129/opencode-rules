@@ -3,6 +3,7 @@ import path from 'node:path';
 import { writeFileSync } from 'node:fs';
 import {
   classifyRuleLifetime,
+  hasFileObservationFamily,
   matchRuleSnapshots,
   type RuleConditionKind,
 } from './rule-filter.js';
@@ -58,7 +59,10 @@ describe('rule lifetime classification', () => {
           match: 'any',
         }),
       ],
-      { contextFilePaths: ['src/index.ts'], agentType: 'plan' }
+      {
+        fileObservations: [{ path: 'src/index.ts', tool: 'read', content: '' }],
+        agentType: 'plan',
+      }
     );
 
     expect(entry?.lifetime).toBe('durable');
@@ -71,7 +75,10 @@ describe('rule lifetime classification', () => {
   it('classifies a mixed any rule as ephemeral when only the agent matches', () => {
     const [entry] = matchRuleSnapshots(
       [snapshot({ globs: ['src/**/*.ts'], agent: ['plan'] })],
-      { contextFilePaths: ['README.md'], agentType: 'plan' }
+      {
+        fileObservations: [{ path: 'README.md', tool: 'read', content: '' }],
+        agentType: 'plan',
+      }
     );
 
     expect(entry?.lifetime).toBe('ephemeral');
@@ -130,19 +137,25 @@ describe('matchRuleSnapshots condition semantics (live delivery)', () => {
     ];
 
     const [matched] = matchRuleSnapshots(scoped, {
-      contextFilePaths: ['src/components/Button.tsx'],
+      fileObservations: [
+        { path: 'src/components/Button.tsx', tool: 'read', content: '' },
+      ],
     });
     expect(matched?.relativePath).toBe('tsx.mdc');
     expect(matched?.lifetime).toBe('durable');
 
     expect(
-      matchRuleSnapshots(scoped, { contextFilePaths: ['src/utils.ts'] })
+      matchRuleSnapshots(scoped, {
+        fileObservations: [{ path: 'src/utils.ts', tool: 'read', content: '' }],
+      })
     ).toEqual([]);
 
     const baseOnly = [snapshot({ globs: ['Button.tsx'] }, 'base.mdc')];
     expect(
       matchRuleSnapshots(baseOnly, {
-        contextFilePaths: ['src/components/Button.tsx'],
+        fileObservations: [
+          { path: 'src/components/Button.tsx', tool: 'read', content: '' },
+        ],
       }).map(entry => entry.relativePath)
     ).toEqual(['base.mdc']);
   });
@@ -182,7 +195,10 @@ describe('matchRuleSnapshots condition semantics (live delivery)', () => {
           'mixed-any.mdc'
         ),
       ],
-      { contextFilePaths: ['src/index.ts'], modelID: 'gpt-5' }
+      {
+        fileObservations: [{ path: 'src/index.ts', tool: 'read', content: '' }],
+        modelID: 'gpt-5',
+      }
     );
 
     expect(entries.map(entry => entry.lifetime)).toEqual(['durable']);
@@ -284,7 +300,7 @@ Keywords fail rule.`
     ]);
 
     const entries = matchRuleSnapshots(snapshots, {
-      contextFilePaths: ['src/utils.ts'],
+      fileObservations: [{ path: 'src/utils.ts', tool: 'read', content: '' }],
       userPrompt: 'help me refactor this code',
       availableToolIDs: ['mcp_bash', 'mcp_read'],
       modelID: 'claude-opus',
@@ -295,5 +311,111 @@ Keywords fail rule.`
     expect(entries.map(entry => entry.relativePath)).toEqual(['cross-dim.mdc']);
     expect(entries[0]?.filePath).toBe(matchingPath);
     expect(entries[0]?.lifetime).toBe('ephemeral');
+  });
+});
+
+describe('file-observation family matching', () => {
+  it.each([
+    ['undefined metadata', null, false],
+    ['globs only', { globs: ['**/*.ts'] }, true],
+    ['fileContains only', { fileContains: ['x'] }, true],
+    ['both', { globs: ['**/*.ts'], fileContains: ['x'] }, true],
+    ['keyword only', { keywords: ['rust'] }, false],
+  ])('hasFileObservationFamily: %s', (_name, metadata, expected) => {
+    expect(hasFileObservationFamily(metadata as never)).toBe(expected);
+  });
+
+  it('matches fileContains alone against observation content', () => {
+    const [entry] = matchRuleSnapshots(
+      [snapshot({ fileContains: ['unsafe {'] })],
+      {
+        fileObservations: [
+          {
+            path: 'src/lib.rs',
+            tool: 'read',
+            content: 'fn f() { unsafe { } }',
+          },
+        ],
+      }
+    );
+    expect(entry?.conditionResults).toEqual([
+      { kind: 'fileContains', matched: true, lifetime: 'durable' },
+    ]);
+  });
+
+  it('requires path and content from the same observation', () => {
+    const [entry] = matchRuleSnapshots(
+      [snapshot({ globs: ['**/*.rs'], fileContains: ['unsafe {'] })],
+      {
+        fileObservations: [
+          { path: 'src/lib.rs', tool: 'read', content: 'no marker' },
+          { path: 'src/other.ts', tool: 'read', content: 'unsafe {' },
+        ],
+      }
+    );
+    expect(entry).toBeUndefined();
+  });
+
+  it('matches when one observation satisfies both path and content', () => {
+    const [entry] = matchRuleSnapshots(
+      [snapshot({ globs: ['**/*.rs'], fileContains: ['unsafe {'] })],
+      {
+        fileObservations: [
+          { path: 'src/lib.rs', tool: 'read', content: 'unsafe { }' },
+        ],
+      }
+    );
+    expect(entry?.lifetime).toBe('durable');
+  });
+
+  it('treats the family as one check in the match: any algebra', () => {
+    const [entry] = matchRuleSnapshots(
+      [
+        snapshot({
+          globs: ['**/*.rs'],
+          fileContains: ['unsafe {'],
+          keywords: ['rust'],
+        }),
+      ],
+      {
+        userPrompt: 'talk about rust',
+        fileObservations: [{ path: 'x.ts', tool: 'read', content: 'plain' }],
+      }
+    );
+    expect(entry?.conditionResults.map(c => c.kind)).toEqual([
+      'fileContains',
+      'keywords',
+    ]);
+    expect(entry?.lifetime).toBe('durable');
+  });
+
+  it('never matches a fail-closed declared-but-invalid fileContains', () => {
+    const [entry] = matchRuleSnapshots([snapshot({ fileContains: [] })], {
+      fileObservations: [{ path: 'a.ts', tool: 'read', content: 'unsafe {' }],
+    });
+    expect(entry).toBeUndefined();
+  });
+
+  it('matches across multiple literals with OR semantics', () => {
+    const [entry] = matchRuleSnapshots(
+      [snapshot({ fileContains: ['alpha', 'beta'] })],
+      {
+        fileObservations: [
+          { path: 'a.ts', tool: 'write', content: 'beta here' },
+        ],
+      }
+    );
+    expect(entry).toBeDefined();
+  });
+
+  it('keeps fileContains durable under match: all', () => {
+    const [entry] = matchRuleSnapshots(
+      [snapshot({ fileContains: ['x'], project: ['node'], match: 'all' })],
+      {
+        fileObservations: [{ path: 'a.ts', tool: 'read', content: 'x' }],
+        projectTags: ['node'],
+      }
+    );
+    expect(entry?.lifetime).toBe('durable');
   });
 });

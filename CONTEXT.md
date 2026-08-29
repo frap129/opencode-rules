@@ -16,8 +16,17 @@ The path and file text one successful file-handling tool event exposes for match
 _Avoid_: Tool output blob
 
 **Working context**:
-The per-session set of observed file paths used when determining Matched rules and retained across compaction. Owned by the runtime's SessionWorkingContext module; SessionStore is only its physical storage.
+The per-session monotonic set of observed file paths retained for compaction
+projection. It is rebuilt from eligible history parts but is not a
+Rule-matching source; live File observations are the sole source for `globs`
+and `fileContains`. Owned by the runtime's SessionWorkingContext module;
+SessionStore is only its physical storage.
 _Avoid_: Context paths
+
+**Earliest dispatch**:
+The first provider dispatch after a Rule becomes Matched at which its guidance
+can affect model work, using Durable or Transient delivery according to the
+Rule's lifetime.
 
 **Rule delivery**:
 Making matched rule content, including content activated by a hook, available to the conversation with the appropriate lifetime.

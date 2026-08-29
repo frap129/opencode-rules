@@ -5,6 +5,8 @@
 import path from 'node:path';
 import os from 'node:os';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { __testOnly } from './index.js';
+import type { MatchedRulesStateStore } from './matched-rules-state.js';
 
 // ============================================================================
 // Test Directory Management
@@ -94,6 +96,15 @@ interface MockPluginInput {
   toolIds?: string[];
   mcpStatus?: Record<string, { status: string }>;
   history?: Array<{ info?: unknown; parts?: unknown[] }>;
+  sessionPrompt?: (args: {
+    path: { id: string };
+    query?: { directory?: string };
+    body: {
+      messageID?: string;
+      noReply?: boolean;
+      parts: Array<Record<string, unknown>>;
+    };
+  }) => Promise<unknown>;
 }
 
 /**
@@ -129,7 +140,10 @@ export function createMockPluginInput(opts: MockPluginInput): {
     };
   } = {
     tool: { ids: async () => ({ data: opts.toolIds ?? [] }) },
-    session: { messages: async () => ({ data: opts.history ?? [] }) },
+    session: {
+      messages: async () => ({ data: opts.history ?? [] }),
+      ...(opts.sessionPrompt ? { prompt: opts.sessionPrompt } : {}),
+    },
   };
 
   if (opts.mcpStatus) {
@@ -147,6 +161,49 @@ export function createMockPluginInput(opts: MockPluginInput): {
     serverUrl: new URL('http://localhost:3000'),
   };
 }
+
+// ============================================================================
+// Shared Plugin-Runtime Test Seam
+// ============================================================================
+
+/**
+ * Creates plugin hooks with an injected matched-rules state store so tests
+ * never touch the real ~/.opencode state directory. Accepts a pre-built mock
+ * input so tests can pass a custom `sessionPrompt` spy.
+ */
+export function createHooksWithStore(
+  mockInput: ReturnType<typeof createMockPluginInput>,
+  store: MatchedRulesStateStore
+): ReturnType<typeof __testOnly.createHooksWithMatchedRulesStateStore> {
+  return __testOnly.createHooksWithMatchedRulesStateStore(
+    mockInput as unknown as Parameters<
+      typeof __testOnly.createHooksWithMatchedRulesStateStore
+    >[0],
+    store
+  );
+}
+
+export type HookChatMessage = (
+  input: { sessionID: string; messageID?: string },
+  output: HookChatOutput
+) => Promise<void>;
+
+export type HookChatOutput = {
+  message: {
+    role: string;
+    id?: string;
+    agent?: string;
+    model?: { modelID?: string };
+  };
+  parts: Array<{
+    id?: string;
+    type?: string;
+    text?: string;
+    synthetic?: boolean;
+    sessionID?: string;
+    messageID?: string;
+  }>;
+};
 
 // ============================================================================
 // Generic Environment Snapshot Helpers

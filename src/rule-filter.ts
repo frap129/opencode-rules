@@ -7,6 +7,7 @@ import { createDebugLog } from './debug.js';
 import type { RuleSnapshot } from './rule-discovery.js';
 import { hasConditions } from './rule-metadata.js';
 import type { RuleMetadata } from './rule-metadata.js';
+import type { FileObservation } from './file-observation.js';
 
 const debugLog = createDebugLog();
 
@@ -20,6 +21,7 @@ export type RuleLifetime = 'durable' | 'ephemeral';
 /** The condition dimensions a rule can declare. */
 export type RuleConditionKind =
   | 'globs'
+  | 'fileContains'
   | 'keywords'
   | 'tools'
   | 'model'
@@ -40,6 +42,7 @@ export interface ConditionEvaluation {
 /** Session-durable condition kinds (everything except agent/model/branch/tools). */
 const DURABLE_KINDS: ReadonlySet<RuleConditionKind> = new Set([
   'globs',
+  'fileContains',
   'keywords',
   'command',
   'project',
@@ -80,6 +83,14 @@ function fileMatchesGlobs(filePath: string, globs: string[]): boolean {
 }
 
 /**
+ * Check if observation content contains any of the case-sensitive literal
+ * substrings.
+ */
+function contentMatchesLiterals(content: string, literals: string[]): boolean {
+  return literals.some(literal => content.includes(literal));
+}
+
+/**
  * Check if a user prompt matches any of the given keywords.
  * Uses case-insensitive word-boundary matching.
  *
@@ -112,6 +123,57 @@ export function toolsMatchAvailable(
   return requiredTools.some(tool => availableSet.has(tool));
 }
 
+/** True when the rule declares any file-observation-family condition
+ * (`globs`, `fileContains`, or both). Shared by live matching and the
+ * runtime's observation-time admission filter. */
+export function hasFileObservationFamily(
+  metadata: RuleMetadata | null | undefined
+): boolean {
+  return metadata?.globs !== undefined || metadata?.fileContains !== undefined;
+}
+
+/**
+ * Evaluate the file-observation family: `globs` and `fileContains` over one
+ * observation. With both declared, one observation must satisfy its path
+ * pattern AND contain a literal. `globs` alone keeps legacy behavior across
+ * the observation set. `fileContains` without `globs` matches content alone.
+ * A declared but empty `fileContains` fails closed: the rule never matches
+ * and one warning is logged.
+ */
+function evaluateFileObservationFamily(
+  metadata: RuleMetadata,
+  context: RuleMatchContext
+): ConditionEvaluation | undefined {
+  if (!hasFileObservationFamily(metadata)) return undefined;
+  const { globs, fileContains } = metadata;
+
+  const failClosed = fileContains !== undefined && fileContains.length === 0;
+  // The parse-time warning in rule-metadata covers the failure; here it only
+  // fails closed, silently.
+
+  const matchable = failClosed
+    ? undefined
+    : (context.fileObservations ?? []).find(
+        observation =>
+          (!globs || fileMatchesGlobs(observation.path, globs)) &&
+          (fileContains === undefined ||
+            contentMatchesLiterals(observation.content, fileContains))
+      );
+
+  if (fileContains !== undefined) {
+    return {
+      kind: 'fileContains',
+      matched: Boolean(matchable),
+      lifetime: lifetimeForKind('fileContains'),
+    };
+  }
+  return {
+    kind: 'globs',
+    matched: Boolean(matchable),
+    lifetime: lifetimeForKind('globs'),
+  };
+}
+
 /**
  * Evaluate all declared condition checks for a rule against runtime context.
  * Returns one evaluation per declared condition with its kind and lifetime.
@@ -123,18 +185,9 @@ function evaluateConditionChecks(
 ): ConditionEvaluation[] {
   const checks: ConditionEvaluation[] = [];
 
-  if (metadata.globs) {
-    checks.push({
-      kind: 'globs',
-      matched: Boolean(
-        context.contextFilePaths &&
-        context.contextFilePaths.length > 0 &&
-        context.contextFilePaths.some(contextPath =>
-          fileMatchesGlobs(contextPath, metadata.globs!)
-        )
-      ),
-      lifetime: lifetimeForKind('globs'),
-    });
+  const familyCheck = evaluateFileObservationFamily(metadata, context);
+  if (familyCheck) {
+    checks.push(familyCheck);
   }
 
   if (metadata.keywords) {
@@ -244,8 +297,8 @@ function evaluateConditionChecks(
  * Runtime match context for conditional rule matching
  */
 export interface RuleMatchContext {
-  /** File paths from conversation context (for glob matching) */
-  contextFilePaths?: string[];
+  /** Normalized file observations (for glob and fileContains matching) */
+  fileObservations?: FileObservation[];
   /** User's prompt text (for keyword matching) */
   userPrompt?: string;
   /** Available tool IDs (for tool-based matching) */
