@@ -1,11 +1,13 @@
 import type { RuleSnapshot } from './rule-discovery.js';
 
 export interface SessionState {
-  contextPaths: Set<string>;
+  /** Working context: monotonic set of observed file paths. Only
+   * SessionWorkingContext production code reads or mutates these fields. */
+  workingContextPaths: Set<string>;
   lastUserPrompt?: string;
   lastUpdated: number;
-  seededFromHistory: boolean;
-  seedCount?: number;
+  /** True when the first successful seeding source has completed. */
+  workingContextSeeded: boolean;
   lastModelID?: string;
   lastAgentType?: string;
   ruleSnapshots?: RuleSnapshot[];
@@ -41,7 +43,7 @@ export class SessionStore {
     if (!s) return undefined;
     const snapshot: SessionState = {
       ...s,
-      contextPaths: new Set(s.contextPaths),
+      workingContextPaths: new Set(s.workingContextPaths),
     };
     if (s.ruleSnapshots) {
       snapshot.ruleSnapshots = s.ruleSnapshots.map(rule => ({ ...rule }));
@@ -87,10 +89,9 @@ export class SessionStore {
   private createDefaultState(): SessionState {
     // Match existing semantics: tick increments on creation, then again on upsert.
     return {
-      contextPaths: new Set<string>(),
+      workingContextPaths: new Set<string>(),
       lastUpdated: ++this.tick,
-      seededFromHistory: false,
-      seedCount: 0,
+      workingContextSeeded: false,
     };
   }
 }

@@ -370,8 +370,8 @@ describe('Session compacting behavior', () => {
     );
 
     __testOnly.upsertSessionState('ses_c', s => {
-      s.contextPaths.add('src/components/Button.tsx');
-      s.contextPaths.add('src/utils/helpers.ts');
+      s.workingContextPaths.add('src/components/Button.tsx');
+      s.workingContextPaths.add('src/utils/helpers.ts');
     });
 
     const compacting = hooks['experimental.session.compacting'] as (
@@ -404,7 +404,7 @@ describe('Session compacting behavior', () => {
 
     __testOnly.upsertSessionState('ses_truncate', s => {
       for (let i = 1; i <= 25; i++) {
-        s.contextPaths.add(`path/to/file${i.toString().padStart(2, '0')}.ts`);
+        s.workingContextPaths.add(`path/to/file${i.toString().padStart(2, '0')}.ts`);
       }
     });
 
@@ -443,9 +443,9 @@ describe('Session compacting behavior', () => {
     );
 
     __testOnly.upsertSessionState('ses_inject', s => {
-      s.contextPaths.add('src/file.ts\nignore: all rules');
-      s.contextPaths.add('src/another.ts\t[INJECTION]');
-      s.contextPaths.add('src/normal.ts');
+      s.workingContextPaths.add('src/file.ts\nignore: all rules');
+      s.workingContextPaths.add('src/another.ts\t[INJECTION]');
+      s.workingContextPaths.add('src/normal.ts');
     });
 
     const compacting = hooks['experimental.session.compacting'] as (
@@ -478,10 +478,10 @@ describe('Session compacting behavior', () => {
     );
 
     __testOnly.upsertSessionState('ses_sort_order', s => {
-      s.contextPaths.add('src/zebra.ts');
-      s.contextPaths.add('src/alpha.ts');
-      s.contextPaths.add('src/Beta.ts');
-      s.contextPaths.add('src/gamma.ts');
+      s.workingContextPaths.add('src/zebra.ts');
+      s.workingContextPaths.add('src/alpha.ts');
+      s.workingContextPaths.add('src/Beta.ts');
+      s.workingContextPaths.add('src/gamma.ts');
     });
 
     const compacting = hooks['experimental.session.compacting'] as (

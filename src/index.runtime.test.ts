@@ -318,6 +318,11 @@ describe('OpenCodeRulesPlugin', () => {
       default: { server: plugin },
     } = await import('./index.js');
     const mockInput = createMockPluginInput({ testDir });
+    let historyReads = 0;
+    mockInput.client.session.messages = async () => {
+      historyReads++;
+      return { data: [] };
+    };
 
     const hooks = await plugin(
       mockInput as unknown as Parameters<typeof plugin>[0]
@@ -348,7 +353,7 @@ describe('OpenCodeRulesPlugin', () => {
     await transform({}, messages);
     await transform({}, messages);
 
-    expect(__testOnly.getSeedCount('ses_seed')).toBe(1);
+    expect(historyReads).toBe(0);
   });
 
   it('seeds context paths from current OpenCode tool parts', async () => {
@@ -389,8 +394,8 @@ describe('OpenCodeRulesPlugin', () => {
     );
 
     const snapshot = __testOnly.getSessionStateSnapshot('ses_current_seed');
-    expect(snapshot?.contextPaths).toContain('src/current.ts');
-    expect(snapshot?.seededFromHistory).toBe(true);
+    expect(snapshot?.workingContextPaths).toContain('src/current.ts');
+    expect(snapshot?.workingContextSeeded).toBe(true);
   });
 
   it('throws when PreToolUse hook has block: true', async () => {
@@ -823,7 +828,7 @@ describe('SessionState', () => {
     );
 
     const snapshot = __testOnly.getSessionStateSnapshot('ses_glob_live');
-    expect(snapshot?.contextPaths).toContain('src/legacy');
+    expect(snapshot?.workingContextPaths).toContain('src/legacy');
 
     const chatMessage = hooks['chat.message'] as ChatMessageHook;
     const output: ChatMessageOutputLike = {
@@ -976,6 +981,214 @@ describe('history scan and rescan', () => {
       .map(part => part.text ?? '')
       .join('\n');
     expect(transformedText).toContain('Plan guidance.');
+  });
+
+  it('seeds Working context from history once and shares the read with delivery', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+    writeFileSync(
+      path.join(globalRulesDir, 'always.md'),
+      '# Always Apply\nSeeded rule.'
+    );
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({
+      testDir,
+      history: [
+        {
+          info: {
+            role: 'assistant',
+            sessionID: 'ses_shared_read',
+          },
+          parts: [
+            {
+              type: 'tool',
+              tool: 'read',
+              state: { input: { filePath: 'src/shared.ts' } },
+            },
+          ],
+        },
+      ],
+    });
+    let historyReads = 0;
+    mockInput.client.session.messages = (async () => {
+      historyReads++;
+      return {
+        data: [
+          {
+            info: { role: 'assistant', sessionID: 'ses_shared_read' },
+            parts: [
+              {
+                type: 'tool',
+                tool: 'read',
+                state: { input: { filePath: 'src/shared.ts' } },
+              },
+            ],
+          },
+        ],
+      };
+    }) as unknown as typeof mockInput.client.session.messages;
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+
+    const chatMessage = hooks['chat.message'] as (
+      input: { sessionID: string; messageID?: string },
+      output: ChatMessageOutputLike
+    ) => Promise<void>;
+
+    const first: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'continue work' }],
+    };
+    await chatMessage(
+      { sessionID: 'ses_shared_read', messageID: 'msg_shared_1' },
+      first
+    );
+
+    // One history read seeded Working context and fed delivery's ledger.
+    expect(historyReads).toBe(1);
+    expect(first.parts.filter(p => p.synthetic)[0]?.text).toContain(
+      'Seeded rule.'
+    );
+  });
+
+  it('message removal does not subtract paths and still re-delivers durable rules', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+    writeFileSync(
+      path.join(globalRulesDir, 'gated.mdc'),
+      `---\nglobs:\n  - "src/kept/**"\n---\n\nKept-directory guidance.`
+    );
+
+    const {
+      default: { server: plugin },
+    } = await import('./index.js');
+    const mockInput = createMockPluginInput({ testDir });
+    const hooks = await plugin(
+      mockInput as unknown as Parameters<typeof plugin>[0]
+    );
+
+    const before = hooks['tool.execute.before'] as (
+      input: {
+        tool: string;
+        sessionID: string;
+        callID: string;
+      },
+      output: { args: Record<string, unknown> }
+    ) => Promise<void>;
+    const event = hooks.event as (input: {
+      event: {
+        type: 'message.removed';
+        properties: { sessionID: string; messageID: string };
+      };
+    }) => Promise<void>;
+    const chatMessage = hooks['chat.message'] as ChatMessageHook;
+
+    await before(
+      {
+        tool: 'read',
+        sessionID: 'ses_removal_paths',
+        callID: 'call_before_removal',
+      },
+      { args: { filePath: 'src/kept/a.ts' } }
+    );
+    await event({
+      event: {
+        type: 'message.removed',
+        properties: {
+          sessionID: 'ses_removal_paths',
+          messageID: 'msg_removed_elsewhere',
+        },
+      },
+    });
+
+    // Path observed before removal still drives matching after it.
+    const output: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'check kept files' }],
+    };
+    await chatMessage(
+      { sessionID: 'ses_removal_paths', messageID: 'msg_after_removal' },
+      output
+    );
+    expect(output.parts.filter(p => p.synthetic)[0]?.text).toContain(
+      'Kept-directory guidance.'
+    );
+  });
+
+  it('compaction preserves Working context for later matching without re-delivering durable rules', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+    writeFileSync(
+      path.join(globalRulesDir, 'postcompact.mdc'),
+      `---\nglobs:\n  - "src/keep/**"\n---\n\nPost-compaction guidance.`
+    );
+
+    const hooks = await createHooksWithMatchedRulesStateStore(
+      testDir,
+      matchedRulesStateStore
+    );
+    const compacting = hooks['experimental.session.compacting'] as (
+      input: { sessionID: string },
+      output: { context?: string[] }
+    ) => Promise<void>;
+    const before = hooks['tool.execute.before'] as (
+      input: { tool: string; sessionID: string; callID: string },
+      output: { args: Record<string, unknown> }
+    ) => Promise<void>;
+    const chatMessage = hooks['chat.message'] as ChatMessageHook;
+
+    await before(
+      {
+        tool: 'read',
+        sessionID: 'ses_compact_paths',
+        callID: 'call_compact',
+      },
+      { args: { filePath: 'src/keep/zed.ts' } }
+    );
+
+    const output: { context?: string[] } = { context: [] };
+    await compacting({ sessionID: 'ses_compact_paths' }, output);
+    expect(output.context?.join('\n')).toContain('src/keep/zed.ts');
+
+    // The post-compaction dispatch refreshes the delivery ledger, then the
+    // durable turn delivers the rule matched by the retained path.
+    const transform = hooks['experimental.chat.messages.transform'] as (
+      input: unknown,
+      output: { messages: Array<Record<string, unknown>> }
+    ) => Promise<void>;
+    const after: ChatMessageOutputLike = {
+      message: { role: 'user' },
+      parts: [{ type: 'text', text: 'continue' }],
+    };
+    await transform(
+      {},
+      {
+        messages: [
+          {
+            info: {
+              id: 'msg_after_compact',
+              role: 'user',
+              sessionID: 'ses_compact_paths',
+            },
+            parts: after.parts,
+          },
+        ],
+      }
+    );
+    await chatMessage(
+      { sessionID: 'ses_compact_paths', messageID: 'msg_after_compact' },
+      after
+    );
+    expect(
+      after.parts.some(
+        part =>
+          part.synthetic && part.text?.includes('Post-compaction guidance.')
+      )
+    ).toBe(true);
   });
 });
 
@@ -1624,8 +1837,8 @@ describe('chat.message rule persistence', () => {
     );
 
     const snapshot = __testOnly.getSessionStateSnapshot('ses_current_restart');
-    expect(snapshot?.seededFromHistory).toBe(true);
-    expect(snapshot?.contextPaths).toContain('src/restarted.ts');
+    expect(snapshot?.workingContextSeeded).toBe(true);
+    expect(snapshot?.workingContextPaths).toContain('src/restarted.ts');
   });
 
   it('rehydrates bash workdirs from history and delivers directory-gated rules', async () => {
@@ -1675,7 +1888,7 @@ describe('chat.message rule persistence', () => {
     );
 
     const snapshot = __testOnly.getSessionStateSnapshot('ses_bash_restart');
-    expect(snapshot?.contextPaths).toContain('src/tools');
+    expect(snapshot?.workingContextPaths).toContain('src/tools');
     expect(output.parts.filter(p => p.synthetic)[0]?.text).toContain(
       'Tools directory guidance'
     );
@@ -2205,7 +2418,7 @@ describe('chat.message rule persistence', () => {
     ) => Promise<void>;
 
     __testOnly.upsertSessionState('ses_hook_mixed', s => {
-      s.contextPaths.add('src/index.ts');
+      s.workingContextPaths.add('src/index.ts');
       s.lastAgentType = 'plan';
     });
 

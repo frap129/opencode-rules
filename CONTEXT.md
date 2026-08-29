@@ -16,7 +16,7 @@ The path and file text one successful file-handling tool event exposes for match
 _Avoid_: Tool output blob
 
 **Working context**:
-The per-session set of observed file paths used when determining Matched rules and retained across compaction.
+The per-session set of observed file paths used when determining Matched rules and retained across compaction. Owned by the runtime's SessionWorkingContext module; SessionStore is only its physical storage.
 _Avoid_: Context paths
 
 **Rule delivery**:

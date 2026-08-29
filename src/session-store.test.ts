@@ -15,14 +15,16 @@ describe('SessionStore', () => {
     expect(ids).toContain('ses_3');
   });
 
-  it('snapshots context paths without aliasing the live set', () => {
+  it('snapshots working-context paths without aliasing the live set', () => {
     const store = new SessionStore();
     store.upsert('ses_snap', s => {
-      s.contextPaths.add('src/example.ts');
+      s.workingContextPaths.add('src/example.ts');
     });
     const snapshot = store.snapshot('ses_snap');
-    snapshot?.contextPaths.add('src/other.ts');
-    expect(store.get('ses_snap')?.contextPaths.has('src/other.ts')).toBe(false);
+    snapshot?.workingContextPaths.add('src/other.ts');
+    expect(store.get('ses_snap')?.workingContextPaths.has('src/other.ts')).toBe(
+      false
+    );
   });
 });
 

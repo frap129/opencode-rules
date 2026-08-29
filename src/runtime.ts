@@ -4,10 +4,6 @@ import {
   type MatchedRuleEntry,
 } from './rule-filter.js';
 import {
-  extractFilePathsFromMessages,
-  extractToolCallPaths,
-} from './message-paths.js';
-import {
   loadRuleSnapshots,
   type DiscoveredRule,
   type RuleSnapshot,
@@ -15,9 +11,6 @@ import {
 import {
   extractLatestUserPrompt,
   extractSessionID,
-  normalizeContextPath,
-  sanitizePathForContext,
-  filterValidMessages,
   type MessageWithInfo,
 } from './message-context.js';
 import { extractConnectedMcpCapabilityIDs } from './mcp-tools.js';
@@ -42,19 +35,15 @@ import {
   type MatchedRuleContent,
   type RuleDelivery,
 } from './rule-delivery.js';
-import type {
-  RawHistoryAdapter,
-  RawHistoryResult,
-} from './rule-delivery-history.js';
+import type { RawHistoryResult } from './rule-delivery-history.js';
+import {
+  createSessionWorkingContext,
+  type SessionWorkingContext,
+} from './session-working-context.js';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execAsync = promisify(exec);
-
-// Prefetched history entries are consumed by the first durable turn; a
-// transform-first seed can leave them unconsumed. A small bound keeps the
-// worst case (full histories per session) negligible.
-const MAX_PENDING_HISTORY_PREFETCH = 8;
 
 interface MessagesTransformOutput {
   messages: MessageWithInfo[];
@@ -98,7 +87,7 @@ export class OpenCodeRulesRuntime {
   private matchedRulesStateStore: MatchedRulesStateStore;
   private debugLog: DebugLog;
   private ruleDelivery: RuleDelivery;
-  private pendingHistoryPrefetch = new Map<string, RawHistoryResult>();
+  private sessionWorkingContext: SessionWorkingContext;
   private snapshotPromises = new Map<string, Promise<RuleSnapshot[]>>();
 
   constructor(opts: OpenCodeRulesRuntimeOptions) {
@@ -109,23 +98,16 @@ export class OpenCodeRulesRuntime {
     this.sessionStore = opts.sessionStore;
     this.matchedRulesStateStore = opts.matchedRulesStateStore;
     this.debugLog = opts.debugLog ?? createDebugLog();
-    this.ruleDelivery = createRuleDelivery({
-      rawHistory: this.createRawHistoryAdapter(),
+    this.sessionWorkingContext = createSessionWorkingContext({
+      sessionStore: opts.sessionStore,
+      projectDirectory: opts.projectDirectory,
+      readHistory: sessionID => this.readClientHistory(sessionID),
       debugLog: this.debugLog,
     });
-  }
-
-  private createRawHistoryAdapter(): RawHistoryAdapter {
-    return {
-      readHistory: async sessionID => {
-        const cached = this.pendingHistoryPrefetch.get(sessionID);
-        if (cached) {
-          this.pendingHistoryPrefetch.delete(sessionID);
-          return cached;
-        }
-        return this.readClientHistory(sessionID);
-      },
-    };
+    this.ruleDelivery = createRuleDelivery({
+      rawHistory: this.sessionWorkingContext.rawHistory,
+      debugLog: this.debugLog,
+    });
   }
 
   private async readClientHistory(
@@ -143,34 +125,6 @@ export class OpenCodeRulesRuntime {
       logWarning('Failed to fetch session history', error);
       return { ok: false };
     }
-  }
-
-  private async seedContextFromHistory(sessionID: string): Promise<void> {
-    if (this.sessionStore.get(sessionID)?.seededFromHistory) return;
-    const history = await this.readClientHistory(sessionID);
-    this.pendingHistoryPrefetch.delete(sessionID);
-    this.pendingHistoryPrefetch.set(sessionID, history);
-    while (this.pendingHistoryPrefetch.size > MAX_PENDING_HISTORY_PREFETCH) {
-      const oldest = this.pendingHistoryPrefetch.keys().next().value;
-      if (oldest === undefined) break;
-      this.pendingHistoryPrefetch.delete(oldest);
-    }
-    if (!history.ok) return;
-    const messages = history.messages.filter(
-      (message): message is MessageWithInfo =>
-        typeof message === 'object' && message !== null
-    );
-    const contextPaths = extractFilePathsFromMessages(
-      filterValidMessages(messages)
-    );
-    this.sessionStore.upsert(sessionID, state => {
-      for (const contextPath of contextPaths) {
-        state.contextPaths.add(
-          normalizeContextPath(contextPath, this.projectDirectory)
-        );
-      }
-      state.seededFromHistory = true;
-    });
   }
 
   createHooks(): Record<string, unknown> {
@@ -201,7 +155,9 @@ export class OpenCodeRulesRuntime {
     }
 
     this.ruleDelivery.markHistoryChanged(properties.sessionID);
-    this.pendingHistoryPrefetch.delete(properties.sessionID);
+    this.sessionWorkingContext.workingContext.invalidateHistoryReads(
+      properties.sessionID
+    );
   }
 
   private async onToolExecuteBefore(
@@ -216,18 +172,11 @@ export class OpenCodeRulesRuntime {
       return;
     }
 
-    const contextPaths = extractToolCallPaths(toolName, args);
-
-    for (const filePath of contextPaths) {
-      const normalized = normalizeContextPath(filePath, this.projectDirectory);
-      this.sessionStore.upsert(sessionID, state => {
-        state.contextPaths.add(normalized);
-      });
-
-      this.debugLog(
-        `Recorded context path from tool ${toolName}: ${normalized}`
-      );
-    }
+    this.sessionWorkingContext.workingContext.recordToolCall(
+      sessionID,
+      toolName,
+      args
+    );
 
     await this.evaluateAndQueueHooks('PreToolUse', sessionID, toolName, args);
   }
@@ -262,35 +211,19 @@ export class OpenCodeRulesRuntime {
       return output;
     }
 
-    const existingState = this.sessionStore.get(sessionID);
-    if (!existingState?.seededFromHistory) {
-      const contextPaths = extractFilePathsFromMessages(
-        filterValidMessages(output.messages)
+    const seededByTransform =
+      this.sessionWorkingContext.workingContext.seedFromSuppliedMessages(
+        sessionID,
+        output.messages
       );
+    if (seededByTransform) {
       const userPrompt = extractLatestUserPrompt(output.messages);
-
-      this.sessionStore.upsert(sessionID, state => {
-        for (const p of contextPaths) {
-          state.contextPaths.add(
-            normalizeContextPath(p, this.projectDirectory)
-          );
-        }
-        if (userPrompt && !state.lastUserPrompt) {
-          state.lastUserPrompt = userPrompt;
-        }
-        state.seededFromHistory = true;
-        state.seedCount = (state.seedCount ?? 0) + 1;
-      });
-
-      if (contextPaths.length > 0) {
-        this.debugLog(
-          `Seeded ${contextPaths.length} context path(s) for session ${sessionID}: ${contextPaths
-            .slice(0, 5)
-            .join(', ')}${contextPaths.length > 5 ? '...' : ''}`
-        );
-      }
-
       if (userPrompt) {
+        this.sessionStore.upsert(sessionID, state => {
+          if (!state.lastUserPrompt) {
+            state.lastUserPrompt = userPrompt;
+          }
+        });
         this.debugLog(
           `Seeded user prompt for session ${sessionID} (len=${userPrompt.length})`
         );
@@ -362,10 +295,8 @@ export class OpenCodeRulesRuntime {
     modelID: string | undefined,
     agentType: string | undefined
   ): Promise<RuleMatchContext> {
-    const state = this.sessionStore.get(sessionID);
-    const contextFilePaths = Array.from(state?.contextPaths ?? []).sort(
-      (a, b) => a.localeCompare(b)
-    );
+    const contextFilePaths =
+      this.sessionWorkingContext.workingContext.getPathsForMatching(sessionID);
     const availableToolIDs = await this.queryAvailableToolIDs();
     return buildRuleMatchContext({
       contextFilePaths,
@@ -422,23 +353,18 @@ export class OpenCodeRulesRuntime {
         return;
       }
 
-      // 1. Merge file paths mentioned in this message into session context
+      // 1. Accumulate file paths mentioned in this message before durable-turn
+      // preparation so matching sees current and restored paths.
       if (output.parts && output.parts.length > 0) {
-        const paths = extractFilePathsFromMessages([
-          { role: 'user', parts: output.parts as never[] },
-        ]);
-        if (paths.length > 0) {
-          this.sessionStore.upsert(sessionID, state => {
-            for (const p of paths) {
-              state.contextPaths.add(
-                normalizeContextPath(p, this.projectDirectory)
-              );
-            }
-          });
-        }
+        this.sessionWorkingContext.workingContext.recordMessageParts(
+          sessionID,
+          output.parts
+        );
       }
 
-      await this.seedContextFromHistory(sessionID);
+      await this.sessionWorkingContext.workingContext.prepareDurableTurn(
+        sessionID
+      );
 
       let matched: MatchedRuleEntry[] = [];
       if (captured.userPrompt) {
@@ -541,39 +467,24 @@ export class OpenCodeRulesRuntime {
     }
 
     this.ruleDelivery.markCompacted(sessionID);
-    this.pendingHistoryPrefetch.delete(sessionID);
 
-    const sessionState = this.sessionStore.get(sessionID);
-    if (!sessionState || sessionState.contextPaths.size === 0) {
+    const projection =
+      this.sessionWorkingContext.workingContext.prepareForCompaction(sessionID);
+    if (!projection) {
       this.debugLog(
         `No context paths for session ${sessionID} during compaction`
       );
       return;
     }
 
-    const sortedPaths = Array.from(sessionState.contextPaths).sort((a, b) =>
-      a.localeCompare(b)
-    );
-    const maxPaths = 20;
-    const pathsToInclude = sortedPaths.slice(0, maxPaths);
-
-    const contextString = [
-      'OpenCode Rules: Working context',
-      'Current file paths in context:',
-      ...pathsToInclude.map(p => `  - ${sanitizePathForContext(p)}`),
-      ...(sortedPaths.length > maxPaths
-        ? [`  ... and ${sortedPaths.length - maxPaths} more paths`]
-        : []),
-    ].join('\n');
-
     if (!output.context) {
       output.context = [];
     }
 
-    output.context.push(contextString);
+    output.context.push(projection);
 
     this.debugLog(
-      `Added ${pathsToInclude.length} context path(s) to compaction for session ${sessionID}`
+      `Added Working-context projection to compaction for session ${sessionID}`
     );
   }
 

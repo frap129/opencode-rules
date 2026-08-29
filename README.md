@@ -457,6 +457,7 @@ opencode-rules/
 ├── src/
 │   ├── index.ts              # Main plugin entry point and exports
 │   ├── runtime.ts            # OpenCodeRulesRuntime class (hook orchestration)
+│   ├── session-working-context.ts # Runtime-owned Working context (seeding, live observations, history prefetch, compaction projection)
 │   ├── rule-delivery.ts      # Durable/transient delivery, Hook queues, and identity ledger
 │   ├── rule-delivery-codec.ts # Delivery identifiers, formats, history decoding, and transient presence facts
 │   ├── rule-delivery-history.ts # Raw history port for delivery decoding

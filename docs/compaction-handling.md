@@ -70,11 +70,10 @@ Per-session state is stored in `sessionStateMap` with the following structure:
 
 ```typescript
 interface SessionState {
-  contextPaths: Set<string>; // Current working set of file paths
+  workingContextPaths: Set<string>; // Current working set of file paths
   lastUserPrompt?: string; // Latest user message text
   lastUpdated: number; // Timestamp for LRU cache pruning
-  seededFromHistory: boolean; // Flag: history has been scanned
-  seedCount?: number; // Count of history scans
+  workingContextSeeded: boolean; // Flag: first successful seeding source completed
   lastModelID?: string; // Latest model ID
   lastAgentType?: string; // Latest agent type
   ruleSnapshots?: RuleSnapshot[]; // Per-session rule snapshot (process lifetime)

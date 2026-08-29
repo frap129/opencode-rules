@@ -68,9 +68,6 @@ const __testOnly = Object.freeze(
     resetSessionState: (): void => {
       sessionStore.reset();
     },
-    getSeedCount: (sessionID: string): number => {
-      return sessionStore.get(sessionID)?.seedCount ?? 0;
-    },
     createHooksWithMatchedRulesStateStore: (
       pluginInput: PluginInput,
       store: MatchedRulesStateStore
