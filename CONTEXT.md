@@ -15,6 +15,10 @@ _Avoid_: Active rule
 The path and file text one successful file-handling tool event exposes for matching.
 _Avoid_: Tool output blob
 
+**Working context**:
+The per-session set of observed file paths used when determining Matched rules and retained across compaction.
+_Avoid_: Context paths
+
 **Rule delivery**:
 Making matched rule content, including content activated by a hook, available to the conversation with the appropriate lifetime.
 _Avoid_: Rule injection
