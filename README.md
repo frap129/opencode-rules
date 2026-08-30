@@ -507,6 +507,7 @@ opencode-rules/
 │   ├── message-paths.ts      # Legacy path-extraction compatibility facade
 │   ├── message-context.ts    # User prompt extraction from message parts
 │   ├── session-store.ts      # Per-session state management
+│   ├── bounded-session-map.ts # Shared internal LRU-bounded per-session map (tick-stamped, optional eviction protection)
 │   ├── project-fingerprint.ts # Project type detection (Node.js, Python, etc.)
 │   ├── mcp-tools.ts          # MCP tool ID extraction
 │   ├── git-branch.ts         # Git branch detection
