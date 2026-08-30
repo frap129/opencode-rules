@@ -1,11 +1,3 @@
-/**
- * Internal bounded session map: the single owner of per-session values for
- * runtime call sites that keep recency-stamped entries. The tick counter
- * stays private; recency changes only through ensure/touch, which
- * auto-evict. get() is an unstamped read; touch() stamps, evicts, and
- * returns the value.
- */
-
 interface BoundedSessionMapOptions {
   /** Maximum retained sessions. Defaults to 100; clamps to at least minBound. */
   max?: number;
