@@ -38,28 +38,14 @@ const pathComparator = (a: FileObservation, b: FileObservation): number =>
 export function createFileObservationContext(
   options: FileObservationContextOptions
 ): FileObservationContext {
-  const sessions = new Map<string, ObservationSession>();
-  /** Recency + eviction oracle; sessions holds the values. */
-  const recency = new BoundedSessionMap<void>({
-    max: options.maxSessions ?? 100,
+  /** Sole per-session store; eviction follows recency stamps. */
+  const sessions = new BoundedSessionMap<ObservationSession>({
+    // Clamp >= 1: the bound never drains this store to empty.
+    max: Math.max(1, options.maxSessions ?? 100),
   });
 
-  const purgeEvicted = (): void => {
-    const live = new Set(recency.ids());
-    for (const sessionID of sessions.keys()) {
-      if (!live.has(sessionID)) sessions.delete(sessionID);
-    }
-  };
-
   const getSession = (sessionID: string): ObservationSession => {
-    let session = sessions.get(sessionID);
-    if (!session) {
-      session = { observations: [] };
-      sessions.set(sessionID, session);
-    }
-    recency.ensure(sessionID, () => undefined);
-    purgeEvicted();
-    return session;
+    return sessions.ensure(sessionID, () => ({ observations: [] }));
   };
 
   const normalizeForContext = (
@@ -89,9 +75,7 @@ export function createFileObservationContext(
       recordNormalized(sessionID, observations.map(normalizeForContext));
     },
     getForMatching: sessionID => {
-      recency.touch(sessionID);
-      purgeEvicted();
-      const session = sessions.get(sessionID);
+      const session = sessions.touch(sessionID);
       if (!session) return [];
       return session.observations
         .map(observation => ({ ...observation }))
