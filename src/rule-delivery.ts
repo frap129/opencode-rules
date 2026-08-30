@@ -120,18 +120,17 @@ class DefaultRuleDelivery implements RuleDelivery {
   private readonly debugLog: DebugLog;
   private readonly persistAdmission:
     ((sessionID: string, part: DeliveryPart) => Promise<void>) | undefined;
-  private readonly states = new Map<string, DeliveryState>();
+  private readonly states: BoundedSessionMap<DeliveryState>;
   private readonly operationTails = new Map<string, Promise<void>>();
-  /** Recency + eviction oracle; states holds the values. Sessions with an
-   * in-flight operation are protected from eviction. */
-  private readonly recency: BoundedSessionMap<void>;
 
   constructor(options: RuleDeliveryOptions) {
     this.rawHistory = options.rawHistory;
     this.debugLog = options.debugLog ?? createDebugLog();
     this.persistAdmission = options.persistAdmission;
-    this.recency = new BoundedSessionMap<void>({
-      max: options.maxSessions ?? 100,
+    this.states = new BoundedSessionMap<DeliveryState>({
+      // Clamp >= 1: the bound never drains this store to empty.
+      max: Math.max(1, options.maxSessions ?? 100),
+      // Sessions with an in-flight operation are protected from eviction.
       isEvictable: sessionID => !this.operationTails.has(sessionID),
     });
   }
@@ -500,32 +499,18 @@ class DefaultRuleDelivery implements RuleDelivery {
   }
 
   private getState(sessionID: string): DeliveryState {
-    let state = this.states.get(sessionID);
-    if (!state) {
-      state = {
-        ruleKeys: new Set(),
-        hookKeys: new Set(),
-        ledgerRevision: 0,
-        seededFromHistory: false,
-        needsRescan: false,
-        pendingHookQueue: [],
-        pendingRuleQueue: [],
-        durableHookQueue: [],
-        transientHookQueue: [],
-        transientTurn: undefined,
-      };
-      this.states.set(sessionID, state);
-    }
-    this.recency.ensure(sessionID, () => undefined);
-    this.purgeEvicted();
-    return state;
-  }
-
-  private purgeEvicted(): void {
-    const live = new Set(this.recency.ids());
-    for (const sessionID of this.states.keys()) {
-      if (!live.has(sessionID)) this.states.delete(sessionID);
-    }
+    return this.states.ensure(sessionID, () => ({
+      ruleKeys: new Set(),
+      hookKeys: new Set(),
+      ledgerRevision: 0,
+      seededFromHistory: false,
+      needsRescan: false,
+      pendingHookQueue: [],
+      pendingRuleQueue: [],
+      durableHookQueue: [],
+      transientHookQueue: [],
+      transientTurn: undefined,
+    }));
   }
 
   private async serialize<T>(
@@ -548,8 +533,7 @@ class DefaultRuleDelivery implements RuleDelivery {
       if (this.operationTails.get(sessionID) === tail) {
         this.operationTails.delete(sessionID);
       }
-      this.recency.evict();
-      this.purgeEvicted();
+      this.states.evict();
     }
   }
 }
