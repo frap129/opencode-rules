@@ -40,8 +40,9 @@ export function createFileObservationContext(
 ): FileObservationContext {
   /** Sole per-session store; eviction follows recency stamps. */
   const sessions = new BoundedSessionMap<ObservationSession>({
-    // Clamp >= 1: the bound never drains this store to empty.
-    max: Math.max(1, options.maxSessions ?? 100),
+    // The bound never drains this store to empty.
+    minBound: 1,
+    max: options.maxSessions ?? 100,
   });
 
   const getSession = (sessionID: string): ObservationSession => {
