@@ -1,4 +1,3 @@
-// tui/data/rules.test.ts
 import {
   describe,
   it,
@@ -41,10 +40,6 @@ afterAll(() => {
   }
 });
 
-// ──────────────────────────────────────────────
-// classifyRuleScope
-// ──────────────────────────────────────────────
-
 describe('classifyRuleScope', () => {
   it('returns "global" when projectDir is null', () => {
     expect(
@@ -71,16 +66,11 @@ describe('classifyRuleScope', () => {
   });
 
   it('does not match partial path prefixes', () => {
-    // /project/.opencode/rules-extra/ should NOT match /project/.opencode/rules/
     expect(
       classifyRuleScope('/project/.opencode/rules-extra/foo.md', '/project')
     ).toBe('global');
   });
 });
-
-// ──────────────────────────────────────────────
-// hasConditions
-// ──────────────────────────────────────────────
 
 describe('hasConditions', () => {
   it('returns false for undefined metadata', () => {
@@ -97,7 +87,6 @@ describe('hasConditions', () => {
 
   it('returns true when fileContains is declared', () => {
     expect(hasConditions({ fileContains: ['TODO'] })).toBe(true);
-    // Declared but invalid still counts as a declared condition.
     expect(hasConditions({ fileContains: [] })).toBe(true);
   });
 
@@ -116,10 +105,6 @@ describe('hasConditions', () => {
     expect(hasConditions({ os: ['linux'] })).toBe(true);
   });
 });
-
-// ──────────────────────────────────────────────
-// formatConditionSummary
-// ──────────────────────────────────────────────
 
 describe('formatConditionSummary', () => {
   it('formats single array field', () => {
@@ -172,10 +157,6 @@ describe('formatConditionSummary', () => {
   });
 });
 
-// ──────────────────────────────────────────────
-// disambiguateNames
-// ──────────────────────────────────────────────
-
 describe('disambiguateNames', () => {
   it('assigns filename stem for unique names', () => {
     const entries: SidebarRuleEntry[] = [
@@ -204,10 +185,8 @@ describe('disambiguateNames', () => {
       makeEntry({ path: 'other/security.md' }),
     ];
     disambiguateNames(entries);
-    // web/security appears twice, falls back to full path (with extension) for those
     expect(entries[0]!.name).toBe('apps/web/security.mdc');
     expect(entries[1]!.name).toBe('packages/web/security.mdc');
-    // other/security is unique after parent prefix
     expect(entries[2]!.name).toBe('other/security');
   });
 
@@ -217,8 +196,6 @@ describe('disambiguateNames', () => {
       makeEntry({ path: 'dup.mdc' }),
     ];
     disambiguateNames(entries);
-    // Both stem to "dup", no parent dir to prefix (dirname is ".").
-    // Falls back to full path with extension.
     expect(entries[0]!.name).toBe('dup.md');
     expect(entries[1]!.name).toBe('dup.mdc');
   });
@@ -229,8 +206,6 @@ describe('disambiguateNames', () => {
       makeEntry({ path: 'rules/dup.mdc' }),
     ];
     disambiguateNames(entries);
-    // Both stem to "dup", same parent "rules" -> "rules/dup" for both.
-    // Still ambiguous, falls back to full path with extension.
     expect(entries[0]!.name).toBe('rules/dup.md');
     expect(entries[1]!.name).toBe('rules/dup.mdc');
   });
@@ -241,15 +216,10 @@ describe('disambiguateNames', () => {
       makeEntry({ path: 'other.md' }),
     ];
     disambiguateNames(entries);
-    // lastIndexOf('.') gives "my.config", not "my"
     expect(entries[0]!.name).toBe('my.config');
     expect(entries[1]!.name).toBe('other');
   });
 });
-
-// ──────────────────────────────────────────────
-// loadSidebarRules (integration)
-// ──────────────────────────────────────────────
 
 describe('loadSidebarRules', () => {
   let testDir: string;
@@ -307,7 +277,6 @@ describe('loadSidebarRules', () => {
     const { rules } = await loadSidebarRules(projDir);
 
     expect(rules).toHaveLength(2);
-    // Project rules sort first
     expect(rules[0]!.source).toBe('project');
     expect(rules[1]!.source).toBe('global');
   });
@@ -364,7 +333,6 @@ describe('loadSidebarRules', () => {
 
     const { rules, skippedCount } = await loadSidebarRules(null);
 
-    // One readable, one unreadable
     expect(rules).toHaveLength(1);
     expect(rules[0]!.name).toBe('readable');
     expect(skippedCount).toBe(1);
@@ -372,15 +340,10 @@ describe('loadSidebarRules', () => {
     // getCachedRule() keeps the warning silent unless debug logging is enabled.
     expect(warnSpy).not.toHaveBeenCalled();
 
-    // Restore permissions for cleanup
     chmodSync(unreadable, 0o644);
     warnSpy.mockRestore();
   });
 });
-
-// ──────────────────────────────────────────────
-// loadSidebarRules isActive behavior
-// ──────────────────────────────────────────────
 
 describe('loadSidebarRules isActive behavior', () => {
   let testDir: string;

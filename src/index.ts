@@ -1,10 +1,3 @@
-/**
- * OpenCode Rules Plugin
- *
- * Discovers markdown rule files and delivers them into sessions as
- * synthetic rule parts.
- */
-
 import type { Plugin, PluginInput } from '@opencode-ai/plugin';
 import { discoverRuleFiles } from './utils.js';
 import { OpenCodeRulesRuntime } from './runtime.js';
@@ -42,12 +35,8 @@ const openCodeRulesPlugin = async (pluginInput: PluginInput) => {
   return createRuntimeHooks(pluginInput, sessionStore, matchedRulesStateStore);
 };
 
-/**
- * Test-only exports for accessing internal state and functions.
- * @internal - Test utilities only. Not part of public API.
- */
-// NOTE: OpenCode's plugin loader calls every named export as a plugin initializer.
-// To avoid runtime crashes, __testOnly must be callable.
+// NOTE: OpenCode's plugin loader calls every named export as a plugin
+// initializer, so __testOnly must be callable.
 const __testOnly = Object.freeze(
   Object.assign(async () => ({}), {
     setSessionStateLimit: (limit: number): void => {

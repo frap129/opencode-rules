@@ -1,16 +1,8 @@
-/**
- * Shared test fixtures, builders, and helpers for opencode-rules tests.
- * Extracted to reduce duplication and tighten typing across test files.
- */
 import path from 'node:path';
 import os from 'node:os';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { __testOnly } from './index.js';
 import type { MatchedRulesStateStore } from './matched-rules-state.js';
-
-// ============================================================================
-// Test Directory Management
-// ============================================================================
 
 interface TestDirs {
   testDir: string;
@@ -43,10 +35,6 @@ export function getTestDirs(): TestDirs {
   }
   return currentTestDirs;
 }
-
-// ============================================================================
-// CI Environment Helpers
-// ============================================================================
 
 const CI_ENV_VARS = [
   'CI',
@@ -87,10 +75,6 @@ export function restoreCiEnvVars(saved: CiEnvSnapshot): void {
   }
 }
 
-// ============================================================================
-// Mock Plugin Input Helpers
-// ============================================================================
-
 interface MockPluginInput {
   testDir: string;
   toolIds?: string[];
@@ -107,9 +91,6 @@ interface MockPluginInput {
   }) => Promise<unknown>;
 }
 
-/**
- * Creates a typed mock input object for the plugin function.
- */
 export function createMockPluginInput(opts: MockPluginInput): {
   client: {
     tool: { ids: () => Promise<{ data: string[] }> };
@@ -162,15 +143,7 @@ export function createMockPluginInput(opts: MockPluginInput): {
   };
 }
 
-// ============================================================================
-// Shared Plugin-Runtime Test Seam
-// ============================================================================
-
-/**
- * Creates plugin hooks with an injected matched-rules state store so tests
- * never touch the real ~/.opencode state directory. Accepts a pre-built mock
- * input so tests can pass a custom `sessionPrompt` spy.
- */
+// Injecting the store keeps tests off the real ~/.opencode state directory.
 export function createHooksWithStore(
   mockInput: ReturnType<typeof createMockPluginInput>,
   store: MatchedRulesStateStore
@@ -205,33 +178,17 @@ export type HookChatOutput = {
   }>;
 };
 
-// ============================================================================
-// Generic Environment Snapshot Helpers
-// ============================================================================
-
-/**
- * Snapshot of environment variables. Uses a symbol marker to distinguish
- * between "key was undefined" vs "key not tracked".
- */
 export type EnvSnapshot = Map<string, string | undefined>;
 
-/**
- * Saves the current value of specified environment keys (including undefined).
- * Returns a snapshot that can be passed to restoreEnv() to restore original state.
- */
 export function saveEnv(...keys: string[]): EnvSnapshot {
   const saved: EnvSnapshot = new Map();
   for (const key of keys) {
-    // Store the value even if undefined - this is crucial for proper restore
+    // Map.set preserves the undefined value, distinguishing it from absent.
     saved.set(key, process.env[key]);
   }
   return saved;
 }
 
-/**
- * Restores environment variables to their snapshotted state.
- * Keys that were undefined in the snapshot are deleted from process.env.
- */
 export function restoreEnv(saved: EnvSnapshot): void {
   for (const [key, value] of saved) {
     if (value === undefined) {

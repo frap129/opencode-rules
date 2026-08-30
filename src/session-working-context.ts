@@ -12,48 +12,32 @@ import type { RawHistoryResult } from './rule-delivery-history.js';
 import type { SessionStore } from './session-store.js';
 import type { DebugLog } from './debug.js';
 
-/** Prefetched history entries are consumed by the first durable turn; a
- * transform-first seed can leave them unconsumed. A small bound keeps the
- * worst case (full histories per session) negligible. */
+// A transform-first seed can leave prefetched histories unconsumed; this
+// bound keeps the worst case (a full history per session) negligible.
 const MAX_PENDING_HISTORY_PREFETCH = 8;
 
 const COMPACT_PROJECTION_MAX_PATHS = 20;
 
-/**
- * Runtime-owned per-session Working context: the monotonic set of observed
- * file paths retained for compaction projection. It is rebuilt from eligible
- * history parts but is never a Rule-matching source; live File observations
- * in the separate FileObservationContext are the only matching input.
- */
+// Rebuilt from eligible history parts, but never a rule-matching source:
+// live File observations in the FileObservationContext are the only
+// matching input. Exists for compaction projection.
 export interface WorkingContext {
-  /** Seed from the supplied transform messages. First successful source
-   * wins, including a successful empty message set. Returns true when this
-   * call performed the seeding. */
   seedFromSuppliedMessages(
     sessionID: string,
     messages: readonly MessageWithInfo[]
   ): boolean;
-  /** Prepare a durable turn: seed from fetched history when unseeded.
-   * Concurrent preparation for one session shares one in-flight read, and
-   * a settled read seeds at most once for its generation. */
   prepareDurableTurn(sessionID: string): Promise<void>;
-  /** Accumulate paths from the current user message's tool parts. */
   recordMessageParts(sessionID: string, parts: readonly unknown[]): void;
-  /** Accumulate paths from already normalized observations. */
   recordObservations(
     sessionID: string,
     observations: readonly FileObservation[]
   ): void;
-  /** Invalidate in-flight and prefetched history reads for the session.
-   * Observed paths are never subtracted. */
   invalidateHistoryReads(sessionID: string): void;
-  /** Invalidate history reads and return the optional compaction projection. */
   prepareForCompaction(sessionID: string): string | undefined;
 }
 
-/** Construction returns two narrow facets backed by one implementation:
- * the runtime learns Working-context operations, RuleDelivery only learns
- * raw-history reads. */
+// Two narrow facets over one implementation: the runtime learns
+// Working-context operations, RuleDelivery only learns raw-history reads.
 export interface SessionWorkingContext {
   workingContext: WorkingContext;
   rawHistory: { readHistory(sessionID: string): Promise<RawHistoryResult> };
@@ -78,12 +62,11 @@ export function createSessionWorkingContext(
 ): SessionWorkingContext {
   const { sessionStore, projectDirectory, readHistory, debugLog } = opts;
 
-  /** Completed, unconsumed history reads retained once for RuleDelivery. */
+  // Completed, unconsumed history reads retained once for RuleDelivery.
   const pendingHistoryPrefetch = new Map<string, RawHistoryResult>();
-  /** Bumped on message removal and compaction so settled reads from before
-   * the invalidation can no longer apply. */
+  // Bumped on message removal and compaction so settled reads from before
+  // the invalidation can no longer apply.
   const historyRevisions = new Map<string, number>();
-  /** Shared in-flight reads, keyed by session. */
   const inFlightReads = new Map<string, Promise<SettledRead>>();
 
   const addObservations = (
@@ -211,12 +194,11 @@ export function createSessionWorkingContext(
 
     const currentRevision = historyRevisions.get(sessionID) ?? 0;
     if (currentRevision !== settled.revision) {
-      // The read was invalidated by message removal or compaction after it
-      // started: it may not seed Working context or refill the prefetch.
+      // Invalidated mid-read (message removal or compaction): seeding from
+      // or refilling the prefetch would resurrect stale state.
       return;
     }
     if (seeded(sessionID)) {
-      // A concurrent caller already applied this generation's result.
       return;
     }
 

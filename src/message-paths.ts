@@ -1,10 +1,3 @@
-/**
- * Message path extraction utilities
- */
-
-/**
- * Message part types from OpenCode plugin API
- */
 interface ToolInvocationPart {
   type: 'tool-invocation';
   toolInvocation: {
@@ -35,13 +28,6 @@ export interface Message {
   parts: MessagePart[];
 }
 
-/**
- * Extract file paths from conversation messages for conditional rule filtering.
- * Parses tool call arguments and scans message content for path-like strings.
- *
- * @param messages - Array of conversation messages
- * @returns Deduplicated array of file paths found in messages
- */
 export function extractFilePathsFromMessages(messages: Message[]): string[] {
   const paths = new Set<string>();
 
@@ -49,7 +35,6 @@ export function extractFilePathsFromMessages(messages: Message[]): string[] {
     for (const part of message.parts) {
       if ((part as { synthetic?: boolean }).synthetic) continue;
 
-      // Extract from tool invocations
       if (part.type === 'tool-invocation') {
         const toolPart = part as ToolInvocationPart;
         for (const path of extractToolCallPaths(
@@ -60,7 +45,6 @@ export function extractFilePathsFromMessages(messages: Message[]): string[] {
         }
       }
 
-      // Extract from persisted OpenCode tool parts
       if (part.type === 'tool') {
         const toolPart = part as OpenCodeToolPart;
         for (const path of extractToolCallPaths(
@@ -71,7 +55,6 @@ export function extractFilePathsFromMessages(messages: Message[]): string[] {
         }
       }
 
-      // Extract from text content
       if (part.type === 'text') {
         const textPart = part as TextPart;
         extractPathsFromText(textPart.text, paths);
@@ -82,17 +65,9 @@ export function extractFilePathsFromMessages(messages: Message[]): string[] {
   return Array.from(paths);
 }
 
-/**
- * Tool-name to context-path argument mapping, shared by live tool execution
- * and history extraction so identical calls contribute identical paths either
- * way:
- *
- * - read / edit / write -> filePath
- * - grep -> path only (pattern/include are search terms, not paths)
- * - glob -> directory derived from pattern, plus explicit path
- * - bash -> workdir
- * - unknown tools -> nothing
- */
+// Tool-name to context-path argument mapping, shared by live tool execution
+// and history extraction so identical calls contribute identical paths
+// either way.
 const PATH_ARG_TOOLS: ReadonlyMap<string, readonly string[]> = new Map([
   ['read', ['filePath']],
   ['edit', ['filePath']],
@@ -102,9 +77,6 @@ const PATH_ARG_TOOLS: ReadonlyMap<string, readonly string[]> = new Map([
   ['bash', ['workdir']],
 ]);
 
-/**
- * Extract the context paths a single tool call contributes.
- */
 export function extractToolCallPaths(
   toolName: string,
   args: unknown
@@ -118,7 +90,7 @@ export function extractToolCallPaths(
   for (const argName of argNames) {
     const value = (args as Record<string, unknown>)[argName];
     if (typeof value === 'string' && value.length > 0) {
-      // For glob patterns, extract the directory part
+      // The pattern's non-glob prefix is a directory.
       if (argName === 'pattern') {
         const dirPart = extractDirFromGlob(value);
         if (dirPart) paths.push(dirPart);
@@ -131,11 +103,8 @@ export function extractToolCallPaths(
   return paths;
 }
 
-/**
- * Extract directory path from a glob pattern
- */
+// A no-slash prefix like `src*.ts` is a file prefix, not a directory.
 function extractDirFromGlob(pattern: string): string | null {
-  // Find the first glob character
   const globChars = ['*', '?', '[', '{'];
   let firstGlobIndex = pattern.length;
 
@@ -148,26 +117,17 @@ function extractDirFromGlob(pattern: string): string | null {
 
   if (firstGlobIndex === 0) return null;
 
-  // Get the directory part before the glob
   const beforeGlob = pattern.substring(0, firstGlobIndex);
   const lastSlash = beforeGlob.lastIndexOf('/');
 
   if (lastSlash === -1) {
-    // If no slash and pattern has glob characters, it's just a file prefix, not a directory
     if (firstGlobIndex < pattern.length) return null;
     return beforeGlob;
   }
   return beforeGlob.substring(0, lastSlash);
 }
 
-/**
- * Extract file paths from text content using regex
- */
 function extractPathsFromText(text: string, paths: Set<string>): void {
-  // Match paths that look like file paths:
-  // - Start with ./, ../, /, or a word character
-  // - Contain at least one /
-  // - End with a file extension or directory
   const pathRegex =
     /(?:^|[\s"'`(])((\.{0,2}\/)?[\w./-]+\/[\w./-]+(?:\.\w+)?)/gm;
 
@@ -175,10 +135,8 @@ function extractPathsFromText(text: string, paths: Set<string>): void {
   while ((match = pathRegex.exec(text)) !== null) {
     let potentialPath = match[1];
 
-    // Trim trailing punctuation that likely belongs to prose, not the path
     potentialPath = potentialPath.replace(/[.,!?:;]+$/, '');
 
-    // Filter out URLs and other non-paths
     if (
       potentialPath.includes('://') ||
       potentialPath.startsWith('http') ||
@@ -187,7 +145,6 @@ function extractPathsFromText(text: string, paths: Set<string>): void {
       continue;
     }
 
-    // Must have a reasonable structure (not just slashes)
     if (potentialPath.replace(/[/.]/g, '').length > 0) {
       paths.add(potentialPath);
     }

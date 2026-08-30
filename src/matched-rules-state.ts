@@ -16,7 +16,7 @@ interface MatchedRulesStateStoreOptions {
   stateDir?: string;
 }
 
-// Strict pattern for safe sessionID: alphanumeric, underscore, hyphen only
+// Session IDs become filename components; this pattern gates what is accepted.
 const SAFE_SESSION_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 function isValidSessionID(sessionID: string): boolean {
@@ -42,8 +42,6 @@ export class MatchedRulesStateStore {
     this.stateDir = opts.stateDir ?? resolveStateDir();
   }
 
-  /** Replace semantics for full durable turns.
-   * @throws {Error} If sessionID fails validation. */
   write(sessionID: string, matchedPaths: readonly string[]): Promise<void> {
     this.assertValidSessionID(sessionID);
     return this.enqueue(sessionID, async () => ({
@@ -53,9 +51,6 @@ export class MatchedRulesStateStore {
     }));
   }
 
-  /** Union semantics for mid-session admissions: atomically merges the new
-   * paths with the persisted state so existing matched rules survive.
-   * @throws {Error} If sessionID fails validation. */
   merge(sessionID: string, matchedPaths: readonly string[]): Promise<void> {
     this.assertValidSessionID(sessionID);
     return this.enqueue(sessionID, async () => {
@@ -78,8 +73,8 @@ export class MatchedRulesStateStore {
     }
   }
 
-  /** Serialize per-session writes; each operation computes its state inside
-   * the queue so concurrent merges cannot interleave read-modify-write. */
+  // Each operation computes its state inside the queue so concurrent
+  // merges cannot interleave read-modify-write.
   private enqueue(
     sessionID: string,
     operation: () => Promise<MatchedRulesState>
@@ -119,14 +114,11 @@ export class MatchedRulesStateStore {
 
       try {
         await fs.unlink(tempPath);
-      } catch {
-        // Ignore cleanup errors
-      }
+      } catch {}
     }
   }
 }
 
-/** Read matched rules state. @throws {Error} If sessionID fails validation. */
 export async function readMatchedRulesState(
   sessionID: string,
   options: { stateDir?: string } = {}

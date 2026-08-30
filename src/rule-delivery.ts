@@ -128,10 +128,8 @@ class DefaultRuleDelivery implements RuleDelivery {
     this.debugLog = options.debugLog ?? createDebugLog();
     this.persistAdmission = options.persistAdmission;
     this.states = new BoundedSessionMap<DeliveryState>({
-      // The bound never drains this store to empty.
       minBound: 1,
       max: options.maxSessions ?? 100,
-      // Sessions with an in-flight operation are protected from eviction.
       isEvictable: sessionID => !this.operationTails.has(sessionID),
     });
   }
@@ -529,8 +527,8 @@ class DefaultRuleDelivery implements RuleDelivery {
     try {
       return await result;
     } finally {
-      // Remove the tail entry before the eviction scan so this session is
-      // no longer protected while it settles.
+      // Deleting the tail before evicting unprotects this session in the
+      // same settle path.
       if (this.operationTails.get(sessionID) === tail) {
         this.operationTails.delete(sessionID);
       }

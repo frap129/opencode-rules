@@ -1,11 +1,7 @@
-/**
- * File observation normalization.
- *
- * One successful file-handling tool event yields one File observation per
- * file: a flat `{ path, tool, content }` record where `content` is that
- * file's contribution text. Both `globs` and `fileContains` evaluate the
- * same record. Paths are consumed verbatim as the after-hook receives them.
- */
+// One successful file-handling tool event yields one File observation per
+// file: a flat { path, tool, content } record where content is that file's
+// contribution text. Both globs and fileContains evaluate the same record.
+// Paths are consumed verbatim as the after-hook receives them.
 
 export interface FileObservation {
   path: string;
@@ -13,14 +9,12 @@ export interface FileObservation {
   content: string;
 }
 
-/** What the runtime's tool hooks and history tool parts share. */
 export interface RawToolEvent {
   tool: string;
   args: unknown;
   output?: string;
 }
 
-/** A persisted OpenCode tool part with a completed state. */
 export interface HistoryToolPart {
   type?: unknown;
   tool?: unknown;
@@ -44,7 +38,6 @@ const OBSERVATION_TOOLS = new Set([
   'lsp',
 ]);
 
-/** Only completed history parts are successful events. */
 function completedInput(part: HistoryToolPart): unknown {
   if (typeof part.tool !== 'string') return undefined;
   if (part.state?.status !== 'completed') return undefined;
@@ -55,12 +48,9 @@ function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
-/**
- * Reconstruct read content: strip wrapper tags and `{lineNumber}: `
- * prefixes, join returned lines with newlines. Directory output yields no
- * observation; binary, image, PDF, and unrecognized formats fail closed
- * with empty content (path still matches globs).
- */
+// Directory listings yield no observation; binary, image, PDF, and other
+// unrecognized formats fail closed with empty content (path still matches
+// globs).
 function readContent(output: string | undefined): string | null | undefined {
   if (output === undefined) return undefined;
   if (/<type>directory<\/type>/i.test(output)) return null;
@@ -68,8 +58,6 @@ function readContent(output: string | undefined): string | null | undefined {
   if (!contentMatch) {
     return '';
   }
-  // Strip wrapper blank lines left by <content> tags, then the
-  // `{lineNumber}: ` prefixes on returned lines.
   return contentMatch[1]
     .replace(/^\n+/, '')
     .replace(/\n+$/, '')
@@ -78,11 +66,7 @@ function readContent(output: string | undefined): string | null | undefined {
     .join('\n');
 }
 
-/**
- * Parse codex-style patch text into per-file content contributions.
- * Delete File sections are path-only: their lines never become content.
- * Returns undefined when the patch does not parse.
- */
+// Delete File sections are path-only: their lines never become content.
 function parsePatch(patchText: string): FileObservation[] | undefined {
   const isPatch =
     patchText.includes('*** Begin Patch') ||
@@ -123,8 +107,6 @@ function parsePatch(patchText: string): FileObservation[] | undefined {
       continue;
     }
     if (moveTo) {
-      // A following Move header retargets the buffered file before its
-      // hunks arrive.
       currentPath = moveTo[1].trim();
       continue;
     }
@@ -154,7 +136,6 @@ function summaryPaths(output: string | undefined): FileObservation[] {
   return result;
 }
 
-/** Normalize one live tool event into zero or more File observations. */
 export function normalizeObservations(event: RawToolEvent): FileObservation[] {
   if (!OBSERVATION_TOOLS.has(event.tool)) return [];
   if (!event.args || typeof event.args !== 'object') return [];
@@ -169,9 +150,8 @@ export function normalizeObservations(event: RawToolEvent): FileObservation[] {
         : [];
     case 'edit': {
       if (!path) return [];
-      // Content requires both fields to be submitted strings — empty ones
-      // included, so pure deletions keep their removed text. Malformed args
-      // degrade to a path-only observation (globs still match).
+      // Empty submitted strings count, so pure deletions keep their removed
+      // text; malformed args degrade to a path-only observation.
       const oldString =
         typeof args.oldString === 'string' ? args.oldString : undefined;
       const newString =
@@ -188,14 +168,13 @@ export function normalizeObservations(event: RawToolEvent): FileObservation[] {
         const parsed = parsePatch(patchText);
         if (parsed) return parsed;
       }
-      // A successfully applied but unparseable patch falls back to
-      // path-only observations from the model-visible summary.
+      // An applied but unparseable patch still yielded file writes; the
+      // model-visible summary is the only record of which paths.
       return summaryPaths(event.output);
     }
     case 'read':
     case 'lsp': {
       if (!path) return [];
-      // Read reconstructs the returned slice; LSP output is raw text.
       const content =
         event.tool === 'lsp'
           ? (asString(event.output) ?? '')
@@ -214,10 +193,6 @@ export function normalizeObservations(event: RawToolEvent): FileObservation[] {
   }
 }
 
-/**
- * Extract File observations from persisted history tool parts. Only
- * successfully completed parts with string tool names contribute.
- */
 export function extractObservationsFromMessageParts(
   parts: readonly unknown[]
 ): FileObservation[] {
@@ -248,7 +223,7 @@ export function extractObservationsFromMessageParts(
       }
     }
 
-    // Legacy shape: AI SDK tool-invocation parts (no observable output).
+    // Legacy AI SDK part shape, carrying no observable output.
     if (part.type === 'tool-invocation') {
       const invocation = part.toolInvocation;
       const toolName =

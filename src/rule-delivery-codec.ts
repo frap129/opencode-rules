@@ -227,7 +227,7 @@ export function decodeRawHistory(
       const metadata = asRecord(part.metadata);
       recordKeys(facts.ruleKeys, metadata?.ruleKeys);
       recordKeys(facts.hookKeys, metadata?.hookKeys);
-      // Read pre-release top-level keys for histories produced by development builds.
+      // Top-level keys are a pre-release persisted form; read them too.
       recordKeys(facts.ruleKeys, part.ruleKeys);
       recordKeys(facts.hookKeys, part.hookKeys);
 
@@ -245,16 +245,9 @@ export function decodeRawHistory(
   return facts;
 }
 
-/**
- * Reads Transient delivery presence facts: identifiers and canonical metadata
- * keys already present in a dispatch's message array. Deliberately separate
- * from decodeRawHistory: presence counts Transient delivery parts, which the
- * durable ledger must exclude, and ignores the legacy persisted forms the
- * ledger must accept. Neither function calls the other.
- *
- * Malformed messages abort with the offending property-access TypeError,
- * matching the inline scan this replaced; hardening is deferred.
- */
+// Presence counts transient delivery parts, which the durable ledger must
+// exclude, and ignores the legacy persisted forms the ledger must accept —
+// deliberately not shared with decodeRawHistory.
 export function decodeTransientPresence(
   messages: readonly TransientPresenceMessage[]
 ): TransientPresenceFacts {
@@ -277,9 +270,8 @@ export function decodeTransientPresence(
       const metadata = asRecord(part.metadata);
       recordKeys(facts.ruleKeys, metadata?.ruleKeys);
       recordKeys(facts.hookKeys, metadata?.hookKeys);
-      // Legacy top-level key arrays and legacy `## path` header text are
-      // persisted durable forms only; Transient presence is canonical-shape
-      // only, so they are deliberately not read here.
+      // Legacy top-level key arrays and `## path` header text are persisted
+      // durable forms only; transient presence reads canonical shape only.
     }
   }
 

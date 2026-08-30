@@ -17,7 +17,6 @@ import {
   type CiEnvSnapshot,
 } from './test-fixtures.js';
 
-// Import modules for boundary tests
 import * as ruleDiscoveryModule from './rule-discovery.js';
 import * as ruleMetadataModule from './rule-metadata.js';
 import * as ruleFilterModule from './rule-filter.js';
@@ -107,7 +106,6 @@ describe('module boundary tests', () => {
     expect(msg.role).toBe('user');
   });
 
-  // Runtime decomposition module boundary tests
   it('should export buildRuleMatchContext from runtime-context module', () => {
     expect(runtimeContextModule.buildRuleMatchContext).toBeDefined();
     expect(typeof runtimeContextModule.buildRuleMatchContext).toBe('function');
@@ -296,7 +294,6 @@ describe('OpenCodeRulesPlugin', () => {
     ) => Promise<{ messages: unknown[] }>;
     const result = await messagesTransform({}, { messages: originalMessages });
 
-    // No pending hook injections: nothing appended, nothing mutated.
     expect(result.messages).toEqual(originalMessages);
   });
 
@@ -456,7 +453,6 @@ describe('OpenCodeRulesPlugin', () => {
       { title: '', output: '', metadata: {} }
     );
 
-    // Allow async side-effect to complete
     await new Promise(resolve => setTimeout(resolve, 100));
 
     const { readFileSync } = await import('fs');
@@ -834,7 +830,6 @@ describe('SessionState', () => {
       { args: { pattern: 'src/legacy/**/*.ts' } }
     );
     const snapshot = __testOnly.getSessionStateSnapshot('ses_glob_live');
-    // Glob is an excluded tool: no observation, no path.
     expect(snapshot?.workingContextPaths.size ?? 0).toBe(0);
 
     const afterOutput: { title: string; output: string; metadata: unknown } = {
@@ -1078,7 +1073,6 @@ describe('history scan and rescan', () => {
       first
     );
 
-    // One history read seeded Working context and fed delivery's ledger.
     expect(historyReads).toBe(1);
     expect(first.parts.filter(p => p.synthetic)[0]?.text).toContain(
       'Seeded rule.'
@@ -1137,7 +1131,6 @@ describe('history scan and rescan', () => {
       },
     });
 
-    // Path observed before removal still drives matching after it.
     const output: HookChatOutput = {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'check kept files' }],
@@ -1331,7 +1324,6 @@ Conditional rule for gpt-5 only.`
     };
     await chatMessage({ sessionID, messageID: 'msg_state_nomatch_1' }, output);
 
-    // No rules should match (model is not gpt-5)
     expect(output.parts.filter(p => p.synthetic)).toHaveLength(0);
 
     // Wait for fire-and-forget write to complete
@@ -1358,17 +1350,14 @@ Conditional rule for gpt-5 only.`
       output: HookChatOutput
     ) => Promise<void>;
 
-    // Call without sessionID
     const output: HookChatOutput = {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'hello' }],
     };
     await chatMessage({}, output);
 
-    // Wait briefly
     await new Promise(resolve => setTimeout(resolve, 50));
 
-    // Verify no state files were created in the state directory
     const files = readdirSync(stateDir);
     const jsonFiles = files.filter(f => f.endsWith('.json'));
     expect(jsonFiles).toHaveLength(0);

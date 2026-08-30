@@ -1,4 +1,3 @@
-// tui/data/rules.ts
 import {
   discoverRuleFiles,
   getCachedRule,
@@ -9,44 +8,23 @@ import {
 export { hasConditions };
 import path from 'node:path';
 
-/** Represents a rule as displayed in the sidebar */
 export interface SidebarRuleEntry {
-  /** Display name (filename stem, disambiguated if needed) */
   name: string;
-  /** Relative file path from the rules directory root */
   path: string;
-  /** Whether this rule came from global or project-local rules dir */
   source: 'global' | 'project';
-  /** Whether the rule has any conditional metadata */
   isConditional: boolean;
-  /** Human-readable condition summary */
   conditionSummary: string;
-  /** Full metadata for expanded view */
   metadata: RuleMetadata;
-  /**
-   * Active state of the rule.
-   * - true: rule is active (matched by evaluation or unconditional without state file)
-   * - false: rule is not active (not matched by evaluation)
-   * - null: state not yet determined (conditional rule without state file)
-   */
+  // null means "not yet determined": a conditional rule with no state file.
   isActive: boolean | null;
 }
 
 export interface LoadSidebarRulesResult {
   rules: SidebarRuleEntry[];
   skippedCount: number;
-  /** Whether matched rules state was successfully read from disk */
   hasEvaluationState: boolean;
 }
 
-/**
- * Load all discovered rules formatted for sidebar display.
- * Reuses discoverRuleFiles/getCachedRule from the server plugin.
- *
- * @param projectDir - Project directory or null (global rules only)
- * @param sessionId - Optional session ID to read matched rules state
- * @param options - Optional state read configuration
- */
 export async function loadSidebarRules(
   projectDir: string | null,
   sessionId?: string,
@@ -55,7 +33,6 @@ export async function loadSidebarRules(
   // discoverRuleFiles accepts string | undefined, not null
   const discovered = await discoverRuleFiles(projectDir ?? undefined);
 
-  // Read matched rules state if sessionId provided
   const matchedState = sessionId
     ? await readMatchedRulesState(sessionId, options)
     : null;
@@ -70,8 +47,6 @@ export async function loadSidebarRules(
   for (const rule of discovered) {
     const cached = await getCachedRule(rule.filePath);
     if (!cached) {
-      // getCachedRule() already logs a warning for read failures,
-      // so we only increment the counter here — no duplicate log.
       skippedCount++;
       continue;
     }
@@ -83,18 +58,15 @@ export async function loadSidebarRules(
       ? formatConditionSummary(meta!)
       : 'always active';
 
-    // Determine isActive based on state file or fallback logic
     let isActive: boolean | null;
     if (matchedPathsSet !== null) {
-      // With state file: check if this rule's absolute path is in matchedPaths
       isActive = matchedPathsSet.has(rule.filePath);
     } else {
-      // Without state file: unconditional = true, conditional = null
       isActive = isConditional ? null : true;
     }
 
     entries.push({
-      name: '', // placeholder — set in disambiguation pass
+      name: '',
       path: rule.relativePath,
       source,
       isConditional,
@@ -106,7 +78,6 @@ export async function loadSidebarRules(
 
   disambiguateNames(entries);
 
-  // Sort: project first, then global. Active rules to top, then alpha by name.
   const sortPriority = (v: boolean | null): number =>
     v === true ? 0 : v === null ? 1 : 2;
   entries.sort((a, b) => {
@@ -121,11 +92,7 @@ export async function loadSidebarRules(
   return { rules: entries, skippedCount, hasEvaluationState };
 }
 
-/**
- * Determine if a rule file is project-local or global.
- * Uses path.sep boundary check to avoid matching partial prefixes
- * (e.g., /project/.opencode/rules-extra/ should not match).
- */
+// Prefix boundary matters: /project/.opencode/rules-extra/ must not match.
 export function classifyRuleScope(
   filePath: string,
   projectDir: string | null
@@ -136,11 +103,6 @@ export function classifyRuleScope(
   return filePath.startsWith(projectRulesPrefix) ? 'project' : 'global';
 }
 
-/**
- * Format a concise summary of which conditions a rule has.
- * Build a human-readable, comma-separated summary of active conditions.
- * E.g., "globs: src/*.ts, keywords: auth, security"
- */
 export function formatConditionSummary(meta: RuleMetadata): string {
   const parts: string[] = [];
 
@@ -175,24 +137,16 @@ export function formatConditionSummary(meta: RuleMetadata): string {
   return parts.join(', ');
 }
 
-/**
- * Three-pass name disambiguation.
- * Pass 1: Extract filename stem from each entry's path.
- * Pass 2: For duplicate stems, prefix with parent directory.
- * Pass 3: If still ambiguous (same parent or root-level), use full relative
- *         path (including extension) as the display name.
- *
- * Mutates entries[].name in place.
- */
+// Three-pass disambiguation: filename stem, then parent-dir prefix for
+// duplicates, then full relative path if still ambiguous. Mutates
+// entries[].name in place.
 export function disambiguateNames(entries: SidebarRuleEntry[]): void {
-  // Pass 1: assign stem names (filename without extension, using last dot)
   for (const entry of entries) {
     const basename = path.basename(entry.path);
     const dotIndex = basename.lastIndexOf('.');
     entry.name = dotIndex > 0 ? basename.substring(0, dotIndex) : basename;
   }
 
-  // Pass 2: detect and resolve collisions with parent directory prefix
   const stemCounts = new Map<string, number>();
   for (const entry of entries) {
     stemCounts.set(entry.name, (stemCounts.get(entry.name) ?? 0) + 1);
@@ -208,7 +162,7 @@ export function disambiguateNames(entries: SidebarRuleEntry[]): void {
     }
   }
 
-  // Pass 3: if still ambiguous, use full relative path WITH extension
+  // Pass 3: still-ambiguous names fall back to the full path with extension.
   const nameCounts = new Map<string, number>();
   for (const entry of entries) {
     nameCounts.set(entry.name, (nameCounts.get(entry.name) ?? 0) + 1);

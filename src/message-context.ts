@@ -23,11 +23,6 @@ export interface MessageWithInfo {
   parts?: MessagePartWithSession[];
 }
 
-/**
- * Extract and join text content from message parts.
- * Skips synthetic parts and parts without text content.
- * Returns an empty string if no text is extracted.
- */
 export function extractTextFromParts(
   parts: Array<{ type?: string; text?: string; synthetic?: boolean }>
 ): string {
@@ -49,11 +44,6 @@ export function extractTextFromParts(
     .trim();
 }
 
-/**
- * Normalize paths to repo-relative POSIX format.
- * If path is absolute and under baseDir, convert to relative POSIX path.
- * Otherwise return path as-is.
- */
 export function normalizeContextPath(
   filePath: string,
   baseDir: string
@@ -63,16 +53,10 @@ export function normalizeContextPath(
   return rel.split(path.sep).join('/');
 }
 
-/**
- * Strip control characters and limit length for safe inclusion in context strings.
- */
 export function sanitizePathForContext(filePath: string): string {
   return filePath.replace(/[\r\n\t]/g, ' ').slice(0, 300);
 }
 
-/**
- * Extract sessionID from messages array.
- */
 export function extractSessionID(
   messages: MessageWithInfo[]
 ): string | undefined {
@@ -91,9 +75,6 @@ export function extractSessionID(
   return undefined;
 }
 
-/**
- * Extract the latest user message text from messages array.
- */
 export function extractLatestUserPrompt(
   messages: MessageWithInfo[]
 ): string | undefined {
@@ -111,10 +92,6 @@ export function extractLatestUserPrompt(
   return undefined;
 }
 
-/**
- * Convert MessageWithInfo[] to Message[] by filtering out messages
- * that lack required fields (role, non-empty parts array).
- */
 export function filterValidMessages(messages: MessageWithInfo[]): Message[] {
   const result: Message[] = [];
   for (const msg of messages) {
@@ -133,15 +110,9 @@ export function filterValidMessages(messages: MessageWithInfo[]): Message[] {
   return result;
 }
 
-/**
- * Extract the leading slash command from a user prompt.
- * Returns the first whitespace-delimited token if it starts with '/'
- * and contains at least one non-slash character after the leading slash.
- */
 export function extractSlashCommand(prompt?: string): string | undefined {
   if (!prompt) return undefined;
   const first = prompt.trim().split(/\s+/, 1)[0];
-  // Must start with '/' and have at least one additional character
   if (first.length > 1 && first.startsWith('/')) {
     return first;
   }

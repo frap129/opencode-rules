@@ -32,10 +32,6 @@ export interface CapturedChatContext {
   agentType?: string;
 }
 
-/**
- * Update session state from incoming chat message data.
- * Captures user prompts, model IDs, and agent types.
- */
 export function updateSessionFromChatMessage(
   input: ChatMessageInput,
   output: ChatMessageOutput,

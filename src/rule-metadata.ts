@@ -1,13 +1,6 @@
-/**
- * Rule metadata parsing and frontmatter extraction
- */
-
 const { parse: parseYaml } = await import('yaml');
 import { logWarning } from './debug.js';
 
-/**
- * Metadata extracted from .mdc file frontmatter
- */
 export interface RuleMetadata {
   name?: string;
   globs?: string[];
@@ -34,9 +27,6 @@ export interface RuleHook {
   run?: string;
 }
 
-/**
- * Raw parsed YAML frontmatter structure
- */
 interface ParsedFrontmatter {
   name?: unknown;
   globs?: unknown;
@@ -54,7 +44,6 @@ interface ParsedFrontmatter {
   hooks?: unknown;
 }
 
-/** Field names in ParsedFrontmatter that are string arrays */
 type StringArrayField =
   | 'globs'
   | 'keywords'
@@ -66,13 +55,9 @@ type StringArrayField =
   | 'branch'
   | 'os';
 
-/**
- * Normalize a declared `fileContains` field. Accepts a scalar string
- * (shorthand for a one-element array) or an array; trims entries, drops
- * non-strings and empties, and deduplicates exact case-sensitive strings.
- * A declared field that yields no valid literal returns an empty array so
- * the rule fails closed instead of degrading to unconditional.
- */
+// Unlike the other condition fields, a declared fileContains that yields no
+// valid literal resolves to [] (not undefined) so the rule fails closed
+// instead of degrading to unconditional.
 function extractFileContains(value: unknown): string[] {
   const entries =
     typeof value === 'string' ? [value] : Array.isArray(value) ? value : [];
@@ -86,13 +71,6 @@ function extractFileContains(value: unknown): string[] {
   return result;
 }
 
-/**
- * Extract and normalize a string array from parsed frontmatter.
- * Filters non-strings, trims whitespace, and removes empty values.
- *
- * @param value - Raw value from parsed YAML (may be array or undefined)
- * @returns Normalized string array, or undefined if empty after filtering
- */
 function extractStringArray(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) {
     return undefined;
@@ -104,10 +82,6 @@ function extractStringArray(value: unknown): string[] | undefined {
   return result.length > 0 ? result : undefined;
 }
 
-/**
- * Parse YAML metadata from rule file content using the yaml package.
- * Extracts frontmatter (---) and returns metadata object.
- */
 export function parseRuleMetadata(content: string): RuleMetadata | null {
   if (!content.startsWith('---')) {
     return null;
@@ -173,7 +147,6 @@ export function parseRuleMetadata(content: string): RuleMetadata | null {
       metadata.match = parsed.match;
     }
 
-    // Extract hooks
     if (Array.isArray(parsed.hooks)) {
       const hooks: RuleHook[] = [];
       for (const h of parsed.hooks) {
@@ -208,9 +181,6 @@ export function parseRuleMetadata(content: string): RuleMetadata | null {
   }
 }
 
-/**
- * Strip YAML frontmatter from rule content
- */
 export function stripFrontmatter(content: string): string {
   if (!content.startsWith('---')) {
     return content;
@@ -224,9 +194,6 @@ export function stripFrontmatter(content: string): string {
   return content.substring(endIndex + 3).trimStart();
 }
 
-/**
- * Check if metadata has any conditional fields set.
- */
 export function hasConditions(meta: RuleMetadata | null | undefined): boolean {
   if (!meta) return false;
   return !!(

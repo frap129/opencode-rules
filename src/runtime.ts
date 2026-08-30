@@ -102,7 +102,6 @@ interface OpenCodeRulesRuntimeOptions {
   debugLog?: DebugLog;
 }
 
-/** One object-shaped input for the single session-rule evaluation path. */
 interface SessionRuleEvaluationInput {
   sessionID: string;
   userPrompt: string | undefined;
@@ -240,9 +239,8 @@ export class OpenCodeRulesRuntime {
       return;
     }
 
-    // Pre-success: no File observation is recorded here. A failed or blocked
-    // execution must never activate globs/fileContains rules; only the
-    // after-hook (successful events) feeds the observation store.
+    // A failed or blocked execution must never activate globs/fileContains
+    // rules; only successful after-hook events feed the observation store.
     await this.evaluateAndQueueHooks('PreToolUse', sessionID, toolName, args);
   }
 
@@ -263,8 +261,8 @@ export class OpenCodeRulesRuntime {
       return;
     }
 
-    // Successful tool events produce File observations; failed executions
-    // never reach this hook. Output text supports fileContains matching.
+    // Output text supports fileContains matching; failed executions never
+    // reach this hook.
     const observations = this.fileObservationContext.recordToolEvent(
       sessionID,
       {
@@ -306,8 +304,8 @@ export class OpenCodeRulesRuntime {
       rules: this.toDeliveryRules(matches),
     });
     if (result === 'accepted') {
-      // Union with existing sidebar state; never clobber previously
-      // matched rules from durable turns.
+      // Union, never replace: an admission must not clobber sidebar state
+      // written by durable turns.
       await this.matchedRulesStateStore.merge(
         sessionID,
         matches.map(rule => rule.filePath)
@@ -376,8 +374,6 @@ export class OpenCodeRulesRuntime {
     return output;
   }
 
-  /** Load the per-session rule snapshot exactly once per process/session,
-   * deduplicating concurrent loads via a promise map. */
   private async ensureSessionRuleSnapshot(
     sessionID: string
   ): Promise<RuleSnapshot[]> {
@@ -403,7 +399,6 @@ export class OpenCodeRulesRuntime {
     }
   }
 
-  /** Assemble the shared match context from session state and live queries. */
   private async buildSessionRuleMatchContext(
     sessionID: string,
     userPrompt: string | undefined,
@@ -424,7 +419,6 @@ export class OpenCodeRulesRuntime {
     });
   }
 
-  /** Evaluate the session snapshot against the current request context. */
   private async evaluateSessionRules(
     input: SessionRuleEvaluationInput
   ): Promise<MatchedRuleEntry[]> {
@@ -469,8 +463,8 @@ export class OpenCodeRulesRuntime {
         return;
       }
 
-      // 1. Accumulate file paths mentioned in this message before durable-turn
-      // preparation so matching sees current and restored paths.
+      // Accumulate paths from this message before durable-turn preparation
+      // so matching sees current and restored paths together.
       if (output.parts && output.parts.length > 0) {
         this.sessionWorkingContext.workingContext.recordMessageParts(
           sessionID,
@@ -621,8 +615,7 @@ export class OpenCodeRulesRuntime {
     }
   }
 
-  /** Evaluate hooks for a tool invocation and queue matches.
-   * @throws {Error} When a PreToolUse hook with block:true matches the tool and arguments. */
+  /** @throws when a blocking PreToolUse hook matches. */
   private async evaluateAndQueueHooks(
     hookType: 'PreToolUse' | 'PostToolUse',
     sessionID: string,
@@ -633,7 +626,6 @@ export class OpenCodeRulesRuntime {
 
     const snapshots = await this.ensureSessionRuleSnapshot(sessionID);
 
-    // First pass: collect all matched hooks across all rules
     const allMatches: Array<{
       hook: { type: string; run?: string };
       rule: RuleSnapshot;
@@ -658,9 +650,8 @@ export class OpenCodeRulesRuntime {
 
     if (allMatches.length === 0) return;
 
-    // Build the shared classification context only when hooks actually
-    // matched: the context query (tool RPCs, project tags, git branch) is
-    // the expensive part of the tool-event path.
+    // The context queries (tool RPCs, project tags, git branch) are the
+    // expensive part of this path; skip them when nothing matched.
     const state = this.sessionStore.get(sessionID);
     const matchContext = await this.buildSessionRuleMatchContext(
       sessionID,
@@ -669,7 +660,7 @@ export class OpenCodeRulesRuntime {
       state?.lastAgentType
     );
 
-    // Check for blockers globally before any queuing or side-effects
+    // A blocker must fire before any side-effect runs.
     if (hookType === 'PreToolUse') {
       const blocker = allMatches.find(
         m =>
@@ -686,8 +677,7 @@ export class OpenCodeRulesRuntime {
       }
     }
 
-    // No blockers: queue content and run side-effects
-    // Queue each matched rule once, regardless of how many hooks matched.
+    // Queue each rule once no matter how many of its hooks matched.
     const seenRules = new Set<string>();
     const matchedHooks: MatchedHookContent[] = [];
     for (const { hook, rule } of allMatches) {

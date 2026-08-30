@@ -130,8 +130,6 @@ describe('normalizeToolObservation: lsp', () => {
   });
 
   it('has no path arg mapped for lsp', () => {
-    // lsp only produces observations with a filePath arg but no output text
-    // mapping beyond the raw output keyed to filePath.
     expect(normalizeObservations(readEvent({ tool: 'lsp', args: {} }))).toEqual(
       []
     );
