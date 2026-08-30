@@ -1,11 +1,9 @@
 import type { RuleSnapshot } from './rule-discovery.js';
 import { BoundedSessionMap } from './bounded-session-map.js';
 export interface SessionState {
-  /** Working context: monotonic set of observed file paths. Only
-   * SessionWorkingContext production code reads or mutates these fields. */
+  /** Only SessionWorkingContext production code reads or mutates these. */
   workingContextPaths: Set<string>;
   lastUserPrompt?: string;
-  /** True when the first successful seeding source has completed. */
   workingContextSeeded: boolean;
   lastModelID?: string;
   lastAgentType?: string;
@@ -17,9 +15,6 @@ interface SessionStoreOptions {
 }
 
 export class SessionStore {
-  // BoundedSessionMap owns the values; these read-only and bound methods
-  // stay as thin delegates to preserve the facade used by src/index.ts
-  // (setSessionStateLimit and the runtime test hooks).
   private readonly states: BoundedSessionMap<SessionState>;
 
   constructor(opts: SessionStoreOptions = {}) {

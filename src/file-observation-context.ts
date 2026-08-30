@@ -15,20 +15,15 @@ interface FileObservationContextOptions {
   maxSessions?: number;
 }
 
-/**
- * Runtime-owned per-session store of File observations. Populated only by
- * live successful `tool.execute.after` events and retained monotonically —
- * including repeated paths — for the resident session.
- */
+// Live `tool.execute.after` observations are the sole matching source, so
+// this store is retained monotonically — including repeated paths — for
+// the resident session.
 export interface FileObservationContext {
-  /** Normalize one live event, record it, and return the stored copies. */
   recordToolEvent(sessionID: string, event: RawToolEvent): FileObservation[];
-  /** Record already normalized observations. */
   recordObservations(
     sessionID: string,
     observations: readonly FileObservation[]
   ): void;
-  /** Sorted, detached copies for rule matching. */
   getForMatching(sessionID: string): FileObservation[];
 }
 
@@ -38,9 +33,7 @@ const pathComparator = (a: FileObservation, b: FileObservation): number =>
 export function createFileObservationContext(
   options: FileObservationContextOptions
 ): FileObservationContext {
-  /** Sole per-session store; eviction follows recency stamps. */
   const sessions = new BoundedSessionMap<ObservationSession>({
-    // The bound never drains this store to empty.
     minBound: 1,
     max: options.maxSessions ?? 100,
   });

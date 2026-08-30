@@ -58,7 +58,6 @@ describe('OpenCodeRulesRuntime.queryAvailableToolIDs', () => {
     const runtime = new OpenCodeRulesRuntime({
       client: {
         tool: { ids: async () => ({ data: ['bash'] }) },
-        // no mcp property
       } as any,
       directory: '/tmp',
       projectDirectory: '/tmp',
@@ -69,6 +68,5 @@ describe('OpenCodeRulesRuntime.queryAvailableToolIDs', () => {
 
     const ids: string[] = await (runtime as any).queryAvailableToolIDs();
     expect(ids).toContain('bash');
-    // Should not throw, just not include mcp_ ids
   });
 });

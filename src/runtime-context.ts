@@ -15,10 +15,7 @@ export interface BuildRuleMatchContextOptions {
   debugLog: DebugLog;
 }
 
-/**
- * Parse an env variable value semantically: 'false', '0', '' => false; other non-empty => true.
- * Returns undefined if the variable is not set.
- */
+// 'false', '0', and '' count as false; any other non-empty value is true.
 function parseEnvBoolean(value: string | undefined): boolean | undefined {
   if (value === undefined) return undefined;
   if (value === '') return false;
@@ -27,7 +24,6 @@ function parseEnvBoolean(value: string | undefined): boolean | undefined {
   return true;
 }
 
-/** Detect if running in a CI environment by checking common CI environment variables. */
 export function detectCiEnvironment(): boolean {
   const env = process.env;
 
@@ -49,10 +45,6 @@ export function detectCiEnvironment(): boolean {
   );
 }
 
-/**
- * Build the match context object used for rule matching.
- * Assembles runtime information from various sources.
- */
 export async function buildRuleMatchContext(
   opts: BuildRuleMatchContextOptions
 ): Promise<RuleMatchContext> {

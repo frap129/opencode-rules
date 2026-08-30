@@ -163,11 +163,8 @@ describe('extractSlashCommand', () => {
   });
 
   it('handles punctuation and format edge cases', () => {
-    // Trailing punctuation is part of token (not stripped)
     expect(extractSlashCommand('/plan,')).toBe('/plan,');
-    // Double slash is a valid token (starts with /, length > 1)
     expect(extractSlashCommand('//plan')).toBe('//plan');
-    // Slash with only punctuation is still valid (length > 1)
     expect(extractSlashCommand('/!')).toBe('/!');
   });
 });

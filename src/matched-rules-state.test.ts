@@ -12,7 +12,6 @@ describe('matched-rules-state', () => {
   let store: MatchedRulesStateStore;
 
   beforeEach(async () => {
-    // Create a temp directory for tests
     const testDir = await fs.mkdtemp(
       path.join(os.tmpdir(), 'matched-rules-test-')
     );
@@ -21,15 +20,11 @@ describe('matched-rules-state', () => {
   });
 
   afterEach(async () => {
-    // Clean up test directory
     if (testStateDir) {
       try {
-        // Go up one level to remove the whole temp dir
         const parentDir = path.dirname(testStateDir);
         await fs.rm(parentDir, { recursive: true });
-      } catch {
-        // Ignore cleanup errors
-      }
+      } catch {}
     }
   });
 
@@ -178,7 +173,6 @@ describe('matched-rules-state', () => {
 
       await store.write(sessionID, matchedPaths);
 
-      // Check that no temp files remain
       const files = await fs.readdir(testStateDir);
       const tempFiles = files.filter(f => f.endsWith('.tmp'));
 
@@ -188,7 +182,6 @@ describe('matched-rules-state', () => {
     it('serializes concurrent writes for same session', async () => {
       const sessionID = 'ses_concurrent';
 
-      // Fire multiple writes concurrently
       const first = store.write(sessionID, ['path1']);
       const second = store.write(sessionID, ['path2']);
       const third = store.write(sessionID, ['path3']);
@@ -197,7 +190,6 @@ describe('matched-rules-state', () => {
 
       await Promise.all([first, second, third]);
 
-      // The final state should reflect the last write
       const state = await readMatchedRulesState(sessionID, {
         stateDir: testStateDir,
       });
@@ -220,7 +212,6 @@ describe('matched-rules-state', () => {
       const sessionID = 'ses_newdir';
       const matchedPaths = ['/rule.md'];
 
-      // Verify directory doesn't exist yet
       await expect(fs.access(testStateDir)).rejects.toThrow();
 
       await store.write(sessionID, matchedPaths);

@@ -975,7 +975,6 @@ describe('Synthetic-part delivery lifecycle', () => {
       output: { messages: unknown[] }
     ) => Promise<{ messages: unknown[] }>;
 
-    // Turn 1: user message — rule part persisted
     const turn1: ChatMessageOutputLike = {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'run the linter' }],
@@ -993,13 +992,11 @@ describe('Synthetic-part delivery lifecycle', () => {
       '<rule name="lint-hook">\nMind the linter.\n</rule>'
     );
 
-    // Mid-turn: hook fires on a tool call
     await before(
       { tool: 'bash', sessionID: 'ses_life', callID: 'call_1' },
       { args: { command: 'npx eslint src/' } }
     );
 
-    // Next dispatch within the turn: transient delivery at the tail
     const dispatch: Array<Record<string, unknown>> = [
       {
         info: { id: 'msg_u1', role: 'user', sessionID: 'ses_life' },
@@ -1019,7 +1016,6 @@ describe('Synthetic-part delivery lifecycle', () => {
       '<rule name="lint-hook">\nMind the linter.\n</rule>'
     );
 
-    // Turn 2: user message — hook text lands durably, rule not duplicated
     const turn2: ChatMessageOutputLike = {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'thanks' }],
@@ -1061,7 +1057,6 @@ describe('Synthetic-part delivery lifecycle', () => {
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    // Simulated persisted history from before the restart
     const history = [
       {
         info: { id: 'msg_u0', role: 'user', sessionID: 'ses_restart' },
@@ -1133,7 +1128,6 @@ describe('Synthetic-part delivery lifecycle', () => {
       output: { messages: unknown[] }
     ) => Promise<{ messages: unknown[] }>;
 
-    // Turn 1: rule part injected
     const turn1: ChatMessageOutputLike = {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'first' }],
@@ -1162,7 +1156,6 @@ describe('Synthetic-part delivery lifecycle', () => {
       }
     );
 
-    // Turn 2: missing durable rule is re-appended.
     const turn2: ChatMessageOutputLike = {
       message: { role: 'user' },
       parts: [{ type: 'text', text: 'second' }],

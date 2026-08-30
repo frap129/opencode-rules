@@ -1,7 +1,3 @@
-/**
- * Rule matching and lifetime classification utilities
- */
-
 import { minimatch } from 'minimatch';
 import { createDebugLog } from './debug.js';
 import type { RuleSnapshot } from './rule-discovery.js';
@@ -11,14 +7,10 @@ import type { FileObservation } from './file-observation.js';
 
 const debugLog = createDebugLog();
 
-/**
- * Delivery lifetime of a matched rule. Durable rules are persisted as
- * synthetic parts in session history; ephemeral rules are delivered only
- * as request-scoped transient messages.
- */
+// Durable rules persist as synthetic parts in session history; ephemeral
+// rules ride only request-scoped transient messages.
 export type RuleLifetime = 'durable' | 'ephemeral';
 
-/** The condition dimensions a rule can declare. */
 export type RuleConditionKind =
   | 'globs'
   | 'fileContains'
@@ -32,14 +24,12 @@ export type RuleConditionKind =
   | 'os'
   | 'ci';
 
-/** Result of evaluating a single declared condition. */
 export interface ConditionEvaluation {
   kind: RuleConditionKind;
   matched: boolean;
   lifetime: RuleLifetime;
 }
 
-/** Session-durable condition kinds (everything except agent/model/branch/tools). */
 const DURABLE_KINDS: ReadonlySet<RuleConditionKind> = new Set([
   'globs',
   'fileContains',
@@ -54,12 +44,8 @@ function lifetimeForKind(kind: RuleConditionKind): RuleLifetime {
   return DURABLE_KINDS.has(kind) ? 'durable' : 'ephemeral';
 }
 
-/**
- * Classify the delivery lifetime of a matched rule from its condition
- * results. Unconditional rules are durable. `match: all` is ephemeral when
- * any required condition is ephemeral; `match: any` is durable when at
- * least one satisfied condition is durable.
- */
+// `match: all` is ephemeral when any required condition is ephemeral;
+// `match: any` is durable when at least one satisfied condition is durable.
 export function classifyRuleLifetime(
   mode: 'any' | 'all',
   results: readonly ConditionEvaluation[]
@@ -75,29 +61,14 @@ export function classifyRuleLifetime(
     : 'ephemeral';
 }
 
-/**
- * Check if a file path matches any of the given glob patterns
- */
 function fileMatchesGlobs(filePath: string, globs: string[]): boolean {
   return globs.some(glob => minimatch(filePath, glob, { matchBase: true }));
 }
 
-/**
- * Check if observation content contains any of the case-sensitive literal
- * substrings.
- */
 function contentMatchesLiterals(content: string, literals: string[]): boolean {
   return literals.some(literal => content.includes(literal));
 }
 
-/**
- * Check if a user prompt matches any of the given keywords.
- * Uses case-insensitive word-boundary matching.
- *
- * @param prompt - The user's prompt text
- * @param keywords - Array of keywords to match
- * @returns true if any keyword matches the prompt
- */
 export function promptMatchesKeywords(
   prompt: string,
   keywords: string[]
@@ -106,15 +77,13 @@ export function promptMatchesKeywords(
 
   return keywords.some(keyword => {
     const lowerKeyword = keyword.toLowerCase();
-    // Escape special regex characters in the keyword
     const escaped = lowerKeyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    // Word boundary at start, but allow continuation at end (e.g., "test" matches "testing")
+    // Leading word boundary only: "test" matches "testing".
     const regex = new RegExp(`\\b${escaped}`, 'i');
     return regex.test(lowerPrompt);
   });
 }
 
-/** Check if any required tool is in the available set. */
 export function toolsMatchAvailable(
   availableToolIDs: string[],
   requiredTools: string[]
@@ -123,23 +92,15 @@ export function toolsMatchAvailable(
   return requiredTools.some(tool => availableSet.has(tool));
 }
 
-/** True when the rule declares any file-observation-family condition
- * (`globs`, `fileContains`, or both). Shared by live matching and the
- * runtime's observation-time admission filter. */
 export function hasFileObservationFamily(
   metadata: RuleMetadata | null | undefined
 ): boolean {
   return metadata?.globs !== undefined || metadata?.fileContains !== undefined;
 }
 
-/**
- * Evaluate the file-observation family: `globs` and `fileContains` over one
- * observation. With both declared, one observation must satisfy its path
- * pattern AND contain a literal. `globs` alone keeps legacy behavior across
- * the observation set. `fileContains` without `globs` matches content alone.
- * A declared but empty `fileContains` fails closed: the rule never matches
- * and one warning is logged.
- */
+// With both globs and fileContains declared, one observation must satisfy
+// its path pattern AND contain a literal; globs alone keeps legacy
+// behavior across the observation set.
 function evaluateFileObservationFamily(
   metadata: RuleMetadata,
   context: RuleMatchContext
@@ -148,8 +109,8 @@ function evaluateFileObservationFamily(
   const { globs, fileContains } = metadata;
 
   const failClosed = fileContains !== undefined && fileContains.length === 0;
-  // The parse-time warning in rule-metadata covers the failure; here it only
-  // fails closed, silently.
+  // The parse-time warning in rule-metadata covers the failure; here it
+  // only fails closed, silently.
 
   const matchable = failClosed
     ? undefined
@@ -174,10 +135,6 @@ function evaluateFileObservationFamily(
   };
 }
 
-/**
- * Evaluate all declared condition checks for a rule against runtime context.
- * Returns one evaluation per declared condition with its kind and lifetime.
- */
 function evaluateConditionChecks(
   metadata: RuleMetadata,
   context: RuleMatchContext,
@@ -293,60 +250,28 @@ function evaluateConditionChecks(
   return checks;
 }
 
-/**
- * Runtime match context for conditional rule matching
- */
 export interface RuleMatchContext {
-  /** Normalized file observations (for glob and fileContains matching) */
   fileObservations?: FileObservation[];
-  /** User's prompt text (for keyword matching) */
   userPrompt?: string;
-  /** Available tool IDs (for tool-based matching) */
   availableToolIDs?: string[];
-  /** Current model ID */
   modelID?: string;
-  /** Current agent type */
   agentType?: string;
-  /** Current slash command (e.g., /plan, /review) */
   command?: string;
-  /** Detected project tags (e.g., node, python, monorepo) */
   projectTags?: string[];
-  /** Current git branch name */
   gitBranch?: string;
-  /** Current operating system (e.g., linux, darwin, win32) */
   os?: string;
-  /** Whether running in CI environment */
   ci?: boolean;
 }
 
-/**
- * A single rule file that matched the runtime context
- */
 export interface MatchedRuleEntry {
-  /** Absolute path to the rule file */
   filePath: string;
-  /** Relative path from the rules directory root */
   relativePath: string;
-  /** Short display name from frontmatter or the file name without extension */
   name: string;
-  /** Rule content with frontmatter stripped */
   strippedContent: string;
-  /** Per-condition evaluation results with delivery-lifetime provenance */
   conditionResults: ConditionEvaluation[];
-  /** Delivery lifetime classification for this evaluation */
   lifetime: RuleLifetime;
 }
 
-/**
- * Match already-loaded rule snapshots against the runtime context.
- * Performs no filesystem I/O: callers load snapshots first (live delivery
- * uses loadRuleSnapshots, which is mtime-cached per session). Unconditional
- * rules are always included; conditional rules are included when their
- * declared checks pass (match: any|all). Entry order follows snapshot order.
- *
- * @param snapshots - Rule snapshots loaded by the caller
- * @param context - Optional RuleMatchContext for conditional rule matching
- */
 export function matchRuleSnapshots(
   snapshots: readonly RuleSnapshot[],
   context: RuleMatchContext = {}

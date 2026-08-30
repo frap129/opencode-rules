@@ -59,7 +59,6 @@ type ChatMessageOutputLike = {
   }>;
 };
 
-// Retained plugin-level tests with complex runtime match context
 describe('Runtime match context integration (plugin-level)', () => {
   let savedEnvXDG: string | undefined;
   let savedEnvConfigDir: string | undefined;

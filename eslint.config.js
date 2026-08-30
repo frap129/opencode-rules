@@ -45,7 +45,6 @@ export default [
       '@typescript-eslint/no-explicit-any': 'off',
     },
   },
-  // TUI production files
   {
     files: ['tui/**/*.ts', 'tui/**/*.tsx'],
     ignores: [
@@ -73,7 +72,6 @@ export default [
       ],
     },
   },
-  // TUI test files
   {
     files: [
       'tui/**/*.test.ts',

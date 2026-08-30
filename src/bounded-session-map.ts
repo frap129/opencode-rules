@@ -3,14 +3,13 @@ interface BoundedSessionMapOptions {
   max?: number;
   /** Lower clamp for the bound. Defaults to 0; 1 means the map never drains to empty. */
   minBound?: number;
-  /** Optional protection predicate; entries returning false are never evicted. */
   isEvictable?: (sessionID: string) => boolean;
 }
 
 const DEFAULT_MAX = 100;
 
 interface Entry<T> {
-  /** Monotonic recency stamp; maintained only by ensure/touch. */
+  /** Stamped only by ensure/touch; the eviction scan never re-stamps. */
   tick: number;
   value: T;
 }
@@ -32,7 +31,6 @@ export class BoundedSessionMap<T> {
     this.isEvictable = options.isEvictable ?? (() => true);
   }
 
-  /** Return the existing entry or create it via `create`, then evict. */
   ensure(sessionID: string, create: () => T): T {
     let entry = this.entries.get(sessionID);
     if (!entry) {
@@ -44,13 +42,10 @@ export class BoundedSessionMap<T> {
     return entry.value;
   }
 
-  /** Unstamped value read. Returns undefined for missing entries. */
   get(sessionID: string): T | undefined {
     return this.entries.get(sessionID)?.value;
   }
 
-  /** Stamp the entry if present, then evict. Never creates entries.
-   * Returns the stamped value, or undefined when the entry is missing. */
   touch(sessionID: string): T | undefined {
     const entry = this.entries.get(sessionID);
     if (!entry) return undefined;
@@ -59,7 +54,6 @@ export class BoundedSessionMap<T> {
     return entry.value;
   }
 
-  /** Run the eviction scan alone without stamping anything. */
   evict(): void {
     while (this.entries.size > this.max) {
       let evictableID: string | undefined;

@@ -1,4 +1,3 @@
-// tui/index.tsx
 /** @jsxImportSource @opentui/solid */
 import type { TuiPlugin } from '@opencode-ai/plugin/tui';
 import { SidebarContent } from './slots/sidebar-content.js';

@@ -1,7 +1,3 @@
-/**
- * Rule file discovery utilities
- */
-
 import { stat, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -14,39 +10,19 @@ import {
 
 const debugLog = createDebugLog();
 
-/**
- * Cached rule data for performance optimization
- */
 interface CachedRule {
-  /** Raw file content */
   content: string;
-  /** Parsed metadata from frontmatter */
   metadata: RuleMetadata | null;
-  /** Content with frontmatter stripped */
   strippedContent: string;
-  /** File modification time for cache invalidation */
   mtime: number;
 }
 
-/**
- * Rule cache keyed by absolute file path
- */
 const ruleCache = new Map<string, CachedRule>();
 
-/**
- * Clear the rule cache (useful for testing or manual invalidation)
- */
 export function clearRuleCache(): void {
   ruleCache.clear();
 }
 
-/**
- * Get cached rule data, refreshing from disk if file has changed.
- * Uses mtime-based invalidation to detect file changes.
- *
- * @param filePath - Absolute path to the rule file
- * @returns Cached rule data or null if file cannot be read
- */
 export async function getCachedRule(
   filePath: string
 ): Promise<CachedRule | null> {
@@ -75,16 +51,12 @@ export async function getCachedRule(
     ruleCache.set(filePath, entry);
     return entry;
   } catch (error) {
-    // Remove stale cache entry if file no longer exists
     ruleCache.delete(filePath);
     logWarning(`Failed to read rule file ${filePath}`, error);
     return null;
   }
 }
 
-/**
- * Get the global rules directory path
- */
 function getGlobalRulesDir(): string | null {
   const opencodeConfigDir = process.env.OPENCODE_CONFIG_DIR;
   if (opencodeConfigDir) {
@@ -100,13 +72,6 @@ function getGlobalRulesDir(): string | null {
   return path.join(homeDir, '.config', 'opencode', 'rules');
 }
 
-/**
- * Recursively scan a directory for markdown rule files
- * Skips hidden files and directories (starting with .)
- * @param dir - Directory to scan
- * @param baseDir - Base directory for relative path calculation
- * @returns Array of discovered file paths with their relative paths from baseDir
- */
 async function scanDirectoryRecursively(
   dir: string,
   baseDir: string
@@ -130,45 +95,28 @@ async function scanDirectoryRecursively(
       }
     }
   } catch (error) {
-    // Treat ENOENT as benign (directory doesn't exist or was deleted)
     if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
       return results;
     }
-    // Log non-ENOENT directory read errors
     logWarning(`Failed to read directory ${dir}`, error);
   }
 
   return results;
 }
 
-/**
- * Discovered rule file with both absolute and relative paths
- */
 export interface DiscoveredRule {
-  /** Absolute path to the rule file */
   filePath: string;
-  /** Relative path from the rules directory root */
   relativePath: string;
 }
 
-/**
- * Immutable per-session snapshot of a discovered rule's parsed data.
- * Captured once per process/session; file edits do not affect an
- * existing session's snapshot.
- */
+// One snapshot per process/session; file edits never affect an existing
+// session's snapshot.
 export interface RuleSnapshot extends DiscoveredRule {
-  /** Short display name from frontmatter or the file name without extension */
   name: string;
-  /** Parsed frontmatter metadata (null when the file has none) */
   metadata: RuleMetadata | null;
-  /** Content with frontmatter stripped */
   strippedContent: string;
 }
 
-/**
- * Load rule snapshots for the given discovered files, preserving discovery
- * order and skipping unreadable rules (warnings are logged by getCachedRule).
- */
 export async function loadRuleSnapshots(
   files: readonly DiscoveredRule[]
 ): Promise<RuleSnapshot[]> {
@@ -192,20 +140,12 @@ export async function loadRuleSnapshots(
   return snapshots;
 }
 
-/**
- * Discover markdown rule files from standard directories
- * Searches recursively in:
- * - $OPENCODE_CONFIG_DIR/rules/ (highest priority)
- * - $XDG_CONFIG_HOME/opencode/rules/ (or ~/.config/opencode/rules as fallback)
- * - .opencode/rules/ (in project directory if provided)
- * Finds all .md and .mdc files including nested subdirectories.
- */
+// Priority: OPENCODE_CONFIG_DIR > XDG_CONFIG_HOME/opencode > ~/.config/opencode
 export async function discoverRuleFiles(
   projectDir?: string
 ): Promise<DiscoveredRule[]> {
   const files: DiscoveredRule[] = [];
 
-  // Discover global rules (recursively)
   const globalRulesDir = getGlobalRulesDir();
   if (globalRulesDir) {
     const globalRules = await scanDirectoryRecursively(
@@ -218,7 +158,6 @@ export async function discoverRuleFiles(
     }
   }
 
-  // Discover project-local rules (recursively) if project directory is provided
   if (projectDir) {
     const projectRulesDir = path.join(projectDir, '.opencode', 'rules');
     const projectRules = await scanDirectoryRecursively(

@@ -1,4 +1,3 @@
-// tui/slots/sidebar-content.tsx
 /** @jsxImportSource @opentui/solid */
 import {
   createSignal,
@@ -165,7 +164,6 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
     return props.api.state.path.directory ?? null;
   };
 
-  // Debounce timer for event-driven refresh
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   const rulesLoadCoordinator = createRulesLoadCoordinator({
@@ -189,19 +187,15 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
     },
   });
 
-  // Effect 1: Initial load on session/directory change
   createEffect(() => {
     const currentSessionId = props.sessionId;
     const currentDir = resolveProjectDir();
 
-    // Check if session or directory changed
     if (currentSessionId !== lastSessionId() || currentDir !== lastDir()) {
-      // Clear pending debounce from previous session
       if (debounceTimer !== null) {
         clearTimeout(debounceTimer);
         debounceTimer = null;
       }
-      // Reset UI state on session/directory change
       setExpandedIndex(null);
       setProjectOpen(false);
       setGlobalOpen(false);
@@ -212,7 +206,6 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
     }
   });
 
-  // Effect 2: Refresh on event-driven updates (refreshCounter changes)
   createEffect(() => {
     const counter = refreshCounter();
     if (counter > 0) {
@@ -220,13 +213,11 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
     }
   });
 
-  // Subscribe to OpenCode events with debounce
   const triggerRefresh = (event: {
     type: string;
     properties: Record<string, unknown>;
   }): void => {
-    // Filter events to current sessionId before debouncing
-    // OpenCode SDK events nest sessionID inside properties: { type, properties: { sessionID, ... } }
+    // SDK events nest sessionID inside properties.
     const eventSessionID = event.properties.sessionID;
     if (
       typeof eventSessionID === 'string' &&

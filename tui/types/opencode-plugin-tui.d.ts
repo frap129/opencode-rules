@@ -1,11 +1,6 @@
-// tui/types/opencode-plugin-tui.d.ts
-//
-// Vendored type declarations for @opencode-ai/plugin/tui.
-// Allows tsc to compile TUI code without requiring the optional
-// peer dependency to be installed at compile time.
-//
-// Source: @opencode-ai/plugin v1.3.7 (packages/plugin/src/tui.ts)
-// If bumping @opencode-ai/plugin, re-verify these types match.
+// Vendored from @opencode-ai/plugin v1.3.7 (packages/plugin/src/tui.ts) so
+// tsc can compile TUI code without the optional peer dependency installed.
+// Re-verify against upstream when bumping @opencode-ai/plugin.
 
 declare module '@opencode-ai/plugin/tui' {
   export interface TuiTheme {
