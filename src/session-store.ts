@@ -17,6 +17,9 @@ interface SessionStoreOptions {
 }
 
 export class SessionStore {
+  // BoundedSessionMap owns the values; these read-only and bound methods
+  // stay as thin delegates to preserve the facade used by src/index.ts
+  // (setSessionStateLimit and the runtime test hooks).
   private readonly states: BoundedSessionMap<SessionState>;
 
   constructor(opts: SessionStoreOptions = {}) {
