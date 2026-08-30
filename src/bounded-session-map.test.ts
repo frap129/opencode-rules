@@ -71,6 +71,38 @@ describe('BoundedSessionMap recency', () => {
   });
 });
 
+describe('BoundedSessionMap reads', () => {
+  it('get returns the stored value without stamping it', () => {
+    const map = new BoundedSessionMap<{ n: number }>({ max: 2 });
+    map.ensure('ses_1', () => ({ n: 1 }));
+    map.ensure('ses_2', () => ({ n: 2 }));
+    // An unstamped get leaves ses_1 least-recent, so ses_3 evicts it.
+    expect(map.get('ses_1')?.n).toBe(1);
+    map.ensure('ses_3', () => ({ n: 3 }));
+    expect(map.ids()).toEqual(['ses_2', 'ses_3']);
+  });
+
+  it('get returns undefined for a missing entry', () => {
+    const map = new BoundedSessionMap<{ n: number }>();
+    expect(map.get('ses_missing')).toBeUndefined();
+  });
+
+  it('touch returns the stamped value', () => {
+    const map = new BoundedSessionMap<{ n: number }>({ max: 2 });
+    map.ensure('ses_1', () => ({ n: 1 }));
+    map.ensure('ses_2', () => ({ n: 2 }));
+    expect(map.touch('ses_1')?.n).toBe(1);
+    map.ensure('ses_3', () => ({ n: 3 }));
+    expect(map.ids()).toEqual(['ses_1', 'ses_3']);
+  });
+
+  it('touch returns undefined for a missing entry', () => {
+    const map = new BoundedSessionMap<{ n: number }>();
+    expect(map.touch('ses_missing')).toBeUndefined();
+    expect(map.ids()).toEqual([]);
+  });
+});
+
 describe('BoundedSessionMap protection', () => {
   it('never evicts an entry the isEvictable predicate protects', () => {
     const map = new BoundedSessionMap<{ n: number }>({
@@ -109,19 +141,22 @@ describe('BoundedSessionMap protection', () => {
 });
 
 describe('BoundedSessionMap bound configuration', () => {
-  it('clamps the bound to at least one entry', () => {
+  it('drains to empty when the bound is 0', () => {
+    // SessionStore needs an unclamped bound so setMax(0) can drain the
+    // store; callers wanting the old at-least-one behavior clamp >= 1
+    // at their construction and setMax call sites.
     const map = new BoundedSessionMap<{ n: number }>({ max: 0 });
     map.ensure('ses_1', () => ({ n: 1 }));
     map.ensure('ses_2', () => ({ n: 2 }));
-    expect(map.ids()).toEqual(['ses_2']);
+    expect(map.ids()).toEqual([]);
   });
 
-  it('setMax clamps the bound to at least one entry', () => {
+  it('setMax drains to empty when set to 0', () => {
     const map = new BoundedSessionMap<{ n: number }>({ max: 2 });
     map.ensure('ses_1', () => ({ n: 1 }));
     map.setMax(0);
     map.ensure('ses_2', () => ({ n: 2 }));
-    expect(map.ids()).toEqual(['ses_2']);
+    expect(map.ids()).toEqual([]);
   });
 
   it('setMax raises the bound without evicting present entries', () => {
@@ -176,6 +211,7 @@ describe('BoundedSessionMap surface', () => {
     expect([...methods].sort()).toEqual([
       'ensure',
       'evict',
+      'get',
       'ids',
       'reset',
       'setMax',

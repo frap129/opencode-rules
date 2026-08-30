@@ -1,11 +1,12 @@
 /**
- * Internal bounded session map shared by runtime call sites that keep
- * tick-stamped per-session entries. The tick counter stays private;
- * callers stamp recency only through ensure/touch, which auto-evict.
+ * Internal bounded session map: the single owner of per-session values for
+ * runtime call sites that keep recency-stamped entries. The tick counter
+ * stays private; recency changes only through ensure/touch, which
+ * auto-evict. Reads via get()/touch()-without-eviction are unstamped.
  */
 
 interface BoundedSessionMapOptions {
-  /** Maximum retained sessions. Defaults to 100; clamps to at least 1. */
+  /** Maximum retained sessions. Defaults to 100; clamps to at least 0. */
   max?: number;
   /** Optional protection predicate; entries returning false are never evicted. */
   isEvictable?: (sessionID: string) => boolean;
@@ -26,7 +27,7 @@ export class BoundedSessionMap<T> {
   private tick = 0;
 
   constructor(options: BoundedSessionMapOptions = {}) {
-    this.max = Math.max(1, options.max ?? DEFAULT_MAX);
+    this.max = Math.max(0, options.max ?? DEFAULT_MAX);
     this.isEvictable = options.isEvictable ?? (() => true);
   }
 
@@ -42,12 +43,19 @@ export class BoundedSessionMap<T> {
     return entry.value;
   }
 
-  /** Stamp the entry if present, then evict. Never creates entries. */
-  touch(sessionID: string): void {
+  /** Unstamped value read. Returns undefined for missing entries. */
+  get(sessionID: string): T | undefined {
+    return this.entries.get(sessionID)?.value;
+  }
+
+  /** Stamp the entry if present, then evict. Never creates entries.
+   * Returns the stamped value, or undefined when the entry is missing. */
+  touch(sessionID: string): T | undefined {
     const entry = this.entries.get(sessionID);
-    if (!entry) return;
+    if (!entry) return undefined;
     entry.tick = ++this.tick;
     this.evict();
+    return entry.value;
   }
 
   /** Run the eviction scan alone without stamping anything. */
@@ -69,7 +77,7 @@ export class BoundedSessionMap<T> {
   }
 
   setMax(limit: number): void {
-    this.max = Math.max(1, limit);
+    this.max = Math.max(0, limit);
   }
 
   ids(): string[] {
