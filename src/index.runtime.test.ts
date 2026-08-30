@@ -496,9 +496,9 @@ describe('SessionState', () => {
     const { __testOnly } = await import('./index.js');
 
     __testOnly.setSessionStateLimit(2);
-    __testOnly.upsertSessionState('ses_1', s => void (s.lastUpdated = 1));
-    __testOnly.upsertSessionState('ses_2', s => void (s.lastUpdated = 2));
-    __testOnly.upsertSessionState('ses_3', s => void (s.lastUpdated = 3));
+    __testOnly.upsertSessionState('ses_1', () => {});
+    __testOnly.upsertSessionState('ses_2', () => {});
+    __testOnly.upsertSessionState('ses_3', () => {});
 
     const ids = __testOnly.getSessionStateIDs();
     expect(ids).toHaveLength(2);
