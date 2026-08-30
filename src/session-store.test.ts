@@ -5,9 +5,9 @@ describe('SessionStore', () => {
   it('prunes oldest sessions when over max', () => {
     const store = new SessionStore({ max: 2 });
 
-    store.upsert('ses_1', s => void (s.lastUpdated = 1));
-    store.upsert('ses_2', s => void (s.lastUpdated = 2));
-    store.upsert('ses_3', s => void (s.lastUpdated = 3));
+    store.upsert('ses_1', () => {});
+    store.upsert('ses_2', () => {});
+    store.upsert('ses_3', () => {});
 
     const ids = store.ids();
     expect(ids).toHaveLength(2);
@@ -15,10 +15,9 @@ describe('SessionStore', () => {
     expect(ids).toContain('ses_3');
   });
 
-  it('drains to empty when max is set to 0 (unclamped facade)', () => {
-    // Explicit ticket #64 decision: SessionStore.setMax keeps the raw limit
-    // so a limit of 0 drains the store to empty, unlike the shared
-    // BoundedSessionMap which clamps its bound to >= 1.
+  it('drains to empty when max is set to 0', () => {
+    // Ticket #64 decision: setMax keeps the raw limit, so a limit of 0
+    // drains the store to empty on the next upsert.
     const store = new SessionStore();
     store.upsert('ses_a', () => {});
     store.upsert('ses_b', () => {});
