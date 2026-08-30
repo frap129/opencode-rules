@@ -47,6 +47,7 @@ describe('SessionStore rule snapshots', () => {
     store.upsert('ses_clone', state => {
       state.ruleSnapshots = [
         {
+          name: 'plan',
           filePath: '/rules/plan.mdc',
           relativePath: 'plan.mdc',
           metadata: { agent: ['plan'] },
