@@ -4,10 +4,10 @@ import {
 } from './file-observation.js';
 import type { RawToolEvent } from './file-observation.js';
 import { normalizeContextPath } from './message-context.js';
+import { BoundedSessionMap } from './bounded-session-map.js';
 
 interface ObservationSession {
   observations: FileObservation[];
-  lastUpdated: number;
 }
 
 interface FileObservationContextOptions {
@@ -39,28 +39,26 @@ export function createFileObservationContext(
   options: FileObservationContextOptions
 ): FileObservationContext {
   const sessions = new Map<string, ObservationSession>();
-  const maxSessions = Math.max(1, options.maxSessions ?? 100);
-  let tick = 0;
+  /** Recency + eviction oracle; sessions holds the values. */
+  const recency = new BoundedSessionMap<void>({
+    max: options.maxSessions ?? 100,
+  });
+
+  const purgeEvicted = (): void => {
+    const live = new Set(recency.ids());
+    for (const sessionID of sessions.keys()) {
+      if (!live.has(sessionID)) sessions.delete(sessionID);
+    }
+  };
 
   const getSession = (sessionID: string): ObservationSession => {
     let session = sessions.get(sessionID);
     if (!session) {
-      session = { observations: [], lastUpdated: 0 };
+      session = { observations: [] };
       sessions.set(sessionID, session);
     }
-    session.lastUpdated = ++tick;
-    while (sessions.size > maxSessions) {
-      let oldestID: string | undefined;
-      let oldestUpdate = Infinity;
-      for (const [id, candidate] of sessions) {
-        if (candidate.lastUpdated < oldestUpdate) {
-          oldestID = id;
-          oldestUpdate = candidate.lastUpdated;
-        }
-      }
-      if (!oldestID) break;
-      sessions.delete(oldestID);
-    }
+    recency.ensure(sessionID, () => undefined);
+    purgeEvicted();
     return session;
   };
 
@@ -91,9 +89,10 @@ export function createFileObservationContext(
       recordNormalized(sessionID, observations.map(normalizeForContext));
     },
     getForMatching: sessionID => {
+      recency.touch(sessionID);
+      purgeEvicted();
       const session = sessions.get(sessionID);
       if (!session) return [];
-      session.lastUpdated = ++tick;
       return session.observations
         .map(observation => ({ ...observation }))
         .sort(pathComparator);
