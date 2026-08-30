@@ -73,7 +73,6 @@ Per-session state is stored in `sessionStateMap` with the following structure:
 interface SessionState {
   workingContextPaths: Set<string>; // Current working set of file paths
   lastUserPrompt?: string; // Latest user message text
-  lastUpdated: number; // Timestamp for LRU cache pruning
   workingContextSeeded: boolean; // Flag: first successful seeding source completed
   lastModelID?: string; // Latest model ID
   lastAgentType?: string; // Latest agent type
@@ -85,8 +84,9 @@ Delivery bookkeeping (dedup ledger, pending Hook queues, rescan flag) lives in
 the runtime-owned `RuleDelivery` instance, not in SessionState.
 
 - Maximum of 100 concurrent sessions in memory (LRU eviction)
-- Each entry is tagged with `lastUpdated` for age tracking
-- Sessions are automatically pruned when limit is exceeded
+- Eviction is owned by the internal `BoundedSessionMap` each store composes;
+  entries are stamped on write/read access and the least-recently-stamped
+  session is pruned when the limit is exceeded
 - Compaction invalidates durable delivery identities; the next transformed request rebuilds them from surviving synthetic delivery metadata, missing durable rules are re-appended, and ephemeral rules are recomputed per request
 
 ## Data Flow
