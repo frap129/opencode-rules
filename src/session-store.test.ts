@@ -15,6 +15,20 @@ describe('SessionStore', () => {
     expect(ids).toContain('ses_3');
   });
 
+  it('drains to empty when max is set to 0 (unclamped facade)', () => {
+    // Explicit ticket #64 decision: SessionStore.setMax keeps the raw limit
+    // so a limit of 0 drains the store to empty, unlike the shared
+    // BoundedSessionMap which clamps its bound to >= 1.
+    const store = new SessionStore();
+    store.upsert('ses_a', () => {});
+    store.upsert('ses_b', () => {});
+
+    store.setMax(0);
+    store.upsert('ses_c', () => {});
+
+    expect(store.ids()).toHaveLength(0);
+  });
+
   it('snapshots working-context paths without aliasing the live set', () => {
     const store = new SessionStore();
     store.upsert('ses_snap', s => {

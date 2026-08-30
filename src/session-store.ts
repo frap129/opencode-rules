@@ -1,4 +1,5 @@
 import type { RuleSnapshot } from './rule-discovery.js';
+import { BoundedSessionMap } from './bounded-session-map.js';
 export interface SessionState {
   /** Working context: monotonic set of observed file paths. Only
    * SessionWorkingContext production code reads or mutates these fields. */
@@ -20,13 +21,20 @@ export class SessionStore {
   private stateMap = new Map<string, SessionState>();
   private max: number;
   private tick = 0;
+  /** Recency + eviction oracle; stateMap holds the values. */
+  private recency: BoundedSessionMap<void>;
 
   constructor(opts: SessionStoreOptions = {}) {
     this.max = opts.max ?? 100;
+    this.recency = new BoundedSessionMap<void>({ max: Math.max(1, this.max) });
   }
 
   setMax(limit: number): void {
+    // Explicit ticket #64 decision: keep the facade unclamped. A limit of 0
+    // drains the store to empty on the next upsert, unlike the shared
+    // BoundedSessionMap which clamps its bound to >= 1.
     this.max = limit;
+    this.recency.setMax(Math.max(1, limit));
   }
 
   ids(): string[] {
@@ -54,6 +62,7 @@ export class SessionStore {
     this.stateMap.clear();
     this.max = 100;
     this.tick = 0;
+    this.recency.reset();
   }
 
   upsert(sessionID: string, mutator: (state: SessionState) => void): void {
@@ -68,21 +77,18 @@ export class SessionStore {
     // Match existing semantics: overwrite lastUpdated after mutation.
     state.lastUpdated = ++this.tick;
 
-    while (this.stateMap.size > this.max) {
-      let oldestID: string | null = null;
-      let oldestTime = Infinity;
+    this.recency.ensure(sessionID, () => undefined);
+    this.purgeEvicted();
+  }
 
-      for (const [id, st] of this.stateMap.entries()) {
-        if (st.lastUpdated < oldestTime) {
-          oldestTime = st.lastUpdated;
-          oldestID = id;
-        }
-      }
-
-      if (oldestID) {
-        this.stateMap.delete(oldestID);
-      }
+  private purgeEvicted(): void {
+    const live = new Set(this.recency.ids());
+    for (const id of this.stateMap.keys()) {
+      if (!live.has(id)) this.stateMap.delete(id);
     }
+    // Explicit ticket #64 decision: the facade stays unclamped, so a raw
+    // limit <= 0 drains the store entirely on each upsert.
+    if (this.max <= 0) this.stateMap.clear();
   }
 
   private createDefaultState(): SessionState {
