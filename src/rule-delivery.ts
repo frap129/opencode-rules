@@ -15,6 +15,7 @@ import {
 } from './rule-delivery-history.js';
 import { createDebugLog, formatError, type DebugLog } from './debug.js';
 import type { RuleLifetime } from './rule-filter.js';
+import { BoundedSessionMap } from './bounded-session-map.js';
 
 export interface RuleDelivery {
   deliverDurableTurn(input: DurableTurnInput): Promise<DurableTurnResult>;
@@ -98,7 +99,6 @@ interface DeliveryState {
         hookKeys: Set<string>;
       }
     | undefined;
-  lastUpdated: number;
 }
 
 function deliveryKey(rule: MatchedRuleContent): string {
@@ -118,18 +118,22 @@ function hasDeliveryKey(
 class DefaultRuleDelivery implements RuleDelivery {
   private readonly rawHistory: RawHistoryAdapter;
   private readonly debugLog: DebugLog;
-  private readonly maxSessions: number;
   private readonly persistAdmission:
     ((sessionID: string, part: DeliveryPart) => Promise<void>) | undefined;
   private readonly states = new Map<string, DeliveryState>();
   private readonly operationTails = new Map<string, Promise<void>>();
-  private tick = 0;
+  /** Recency + eviction oracle; states holds the values. Sessions with an
+   * in-flight operation are protected from eviction. */
+  private readonly recency: BoundedSessionMap<void>;
 
   constructor(options: RuleDeliveryOptions) {
     this.rawHistory = options.rawHistory;
     this.debugLog = options.debugLog ?? createDebugLog();
-    this.maxSessions = Math.max(1, options.maxSessions ?? 100);
     this.persistAdmission = options.persistAdmission;
+    this.recency = new BoundedSessionMap<void>({
+      max: options.maxSessions ?? 100,
+      isEvictable: sessionID => !this.operationTails.has(sessionID),
+    });
   }
 
   async admitDurableMatches(
@@ -509,28 +513,18 @@ class DefaultRuleDelivery implements RuleDelivery {
         durableHookQueue: [],
         transientHookQueue: [],
         transientTurn: undefined,
-        lastUpdated: 0,
       };
       this.states.set(sessionID, state);
     }
-    state.lastUpdated = ++this.tick;
-    this.evictOldestSessions();
+    this.recency.ensure(sessionID, () => undefined);
+    this.purgeEvicted();
     return state;
   }
 
-  private evictOldestSessions(): void {
-    while (this.states.size > this.maxSessions) {
-      let oldestID: string | undefined;
-      let oldestUpdate = Infinity;
-      for (const [sessionID, state] of this.states) {
-        if (this.operationTails.has(sessionID)) continue;
-        if (state.lastUpdated < oldestUpdate) {
-          oldestID = sessionID;
-          oldestUpdate = state.lastUpdated;
-        }
-      }
-      if (!oldestID) return;
-      this.states.delete(oldestID);
+  private purgeEvicted(): void {
+    const live = new Set(this.recency.ids());
+    for (const sessionID of this.states.keys()) {
+      if (!live.has(sessionID)) this.states.delete(sessionID);
     }
   }
 
@@ -549,10 +543,13 @@ class DefaultRuleDelivery implements RuleDelivery {
     try {
       return await result;
     } finally {
+      // Remove the tail entry before the eviction scan so this session is
+      // no longer protected while it settles.
       if (this.operationTails.get(sessionID) === tail) {
         this.operationTails.delete(sessionID);
       }
-      this.evictOldestSessions();
+      this.recency.evict();
+      this.purgeEvicted();
     }
   }
 }
