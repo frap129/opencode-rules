@@ -2,12 +2,15 @@
  * Internal bounded session map: the single owner of per-session values for
  * runtime call sites that keep recency-stamped entries. The tick counter
  * stays private; recency changes only through ensure/touch, which
- * auto-evict. Reads via get()/touch()-without-eviction are unstamped.
+ * auto-evict. get() is an unstamped read; touch() stamps, evicts, and
+ * returns the value.
  */
 
 interface BoundedSessionMapOptions {
-  /** Maximum retained sessions. Defaults to 100; clamps to at least 0. */
+  /** Maximum retained sessions. Defaults to 100; clamps to at least minBound. */
   max?: number;
+  /** Lower clamp for the bound. Defaults to 0; 1 means the map never drains to empty. */
+  minBound?: number;
   /** Optional protection predicate; entries returning false are never evicted. */
   isEvictable?: (sessionID: string) => boolean;
 }
@@ -20,14 +23,20 @@ interface Entry<T> {
   value: T;
 }
 
+function clampBound(minBound: number, limit: number): number {
+  return Math.max(minBound, limit);
+}
+
 export class BoundedSessionMap<T> {
   private readonly entries = new Map<string, Entry<T>>();
   private readonly isEvictable: (sessionID: string) => boolean;
+  private readonly minBound: number;
   private max: number;
   private tick = 0;
 
   constructor(options: BoundedSessionMapOptions = {}) {
-    this.max = Math.max(0, options.max ?? DEFAULT_MAX);
+    this.minBound = Math.max(0, options.minBound ?? 0);
+    this.max = clampBound(this.minBound, options.max ?? DEFAULT_MAX);
     this.isEvictable = options.isEvictable ?? (() => true);
   }
 
@@ -77,7 +86,7 @@ export class BoundedSessionMap<T> {
   }
 
   setMax(limit: number): void {
-    this.max = Math.max(0, limit);
+    this.max = clampBound(this.minBound, limit);
   }
 
   ids(): string[] {
@@ -86,7 +95,7 @@ export class BoundedSessionMap<T> {
 
   reset(): void {
     this.entries.clear();
-    this.max = DEFAULT_MAX;
+    this.max = clampBound(this.minBound, DEFAULT_MAX);
     this.tick = 0;
   }
 }

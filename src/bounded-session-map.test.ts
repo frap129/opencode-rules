@@ -143,12 +143,26 @@ describe('BoundedSessionMap protection', () => {
 describe('BoundedSessionMap bound configuration', () => {
   it('drains to empty when the bound is 0', () => {
     // SessionStore needs an unclamped bound so setMax(0) can drain the
-    // store; callers wanting the old at-least-one behavior clamp >= 1
-    // at their construction and setMax call sites.
+    // store; callers that must never drain to empty pass minBound: 1.
     const map = new BoundedSessionMap<{ n: number }>({ max: 0 });
     map.ensure('ses_1', () => ({ n: 1 }));
     map.ensure('ses_2', () => ({ n: 2 }));
     expect(map.ids()).toEqual([]);
+  });
+
+  it('clamps the bound to minBound', () => {
+    const map = new BoundedSessionMap<{ n: number }>({ minBound: 1, max: 0 });
+    map.ensure('ses_1', () => ({ n: 1 }));
+    map.ensure('ses_2', () => ({ n: 2 }));
+    expect(map.ids()).toEqual(['ses_2']);
+  });
+
+  it('setMax respects minBound', () => {
+    const map = new BoundedSessionMap<{ n: number }>({ minBound: 1, max: 3 });
+    map.ensure('ses_1', () => ({ n: 1 }));
+    map.setMax(0);
+    map.ensure('ses_2', () => ({ n: 2 }));
+    expect(map.ids()).toEqual(['ses_2']);
   });
 
   it('setMax drains to empty when set to 0', () => {
