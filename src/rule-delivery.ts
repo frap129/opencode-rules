@@ -128,8 +128,9 @@ class DefaultRuleDelivery implements RuleDelivery {
     this.debugLog = options.debugLog ?? createDebugLog();
     this.persistAdmission = options.persistAdmission;
     this.states = new BoundedSessionMap<DeliveryState>({
-      // Clamp >= 1: the bound never drains this store to empty.
-      max: Math.max(1, options.maxSessions ?? 100),
+      // The bound never drains this store to empty.
+      minBound: 1,
+      max: options.maxSessions ?? 100,
       // Sessions with an in-flight operation are protected from eviction.
       isEvictable: sessionID => !this.operationTails.has(sessionID),
     });
