@@ -1,5 +1,5 @@
 import { execFile, type ExecFileOptions } from 'node:child_process';
-import { createDebugLog } from './debug.js';
+import { createDebugLog } from '../shared/debug.js';
 
 const debugLog = createDebugLog();
 const GIT_TIMEOUT_MS = 5000;

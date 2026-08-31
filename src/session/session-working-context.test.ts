@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createSessionWorkingContext } from './session-working-context.js';
 import { SessionStore } from './session-store.js';
-import type { RawHistoryResult } from './rule-delivery-history.js';
-import type { MessageWithInfo } from './message-context.js';
+import type { RawHistoryResult } from '../delivery/rule-delivery-history.js';
+import type { MessageWithInfo } from './message-extraction.js';
 
 type Upstream = (sessionID: string) => Promise<RawHistoryResult>;
 const storesByContext = new WeakMap<object, SessionStore>();

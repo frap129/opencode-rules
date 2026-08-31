@@ -11,7 +11,7 @@ import {
   getTestDirs,
   setupTestDirs,
   teardownTestDirs,
-} from './test-fixtures.js';
+} from '../test-fixtures.js';
 
 const LSP_OPERATIONS = [
   'goToDefinition',
@@ -53,7 +53,7 @@ describe('LSP observation admission through the server hook', () => {
       }> = [];
       const {
         default: { server: plugin },
-      } = await import('./index.js');
+      } = await import('../index.js');
       const hooks = await plugin(
         createMockPluginInput({
           testDir,
@@ -119,7 +119,7 @@ describe('LSP observation admission through the server hook', () => {
     }> = [];
     const {
       default: { server: plugin },
-    } = await import('./index.js');
+    } = await import('../index.js');
     const hooks = await plugin(
       createMockPluginInput({
         testDir,

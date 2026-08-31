@@ -5,16 +5,17 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import path from 'node:path';
 import { writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { discoverRuleFiles, clearRuleCache } from './rules/rule-discovery.js';
+import { parseRuleMetadata } from './rules/rule-metadata.js';
 import {
-  discoverRuleFiles,
-  parseRuleMetadata,
-  extractFilePathsFromMessages,
   promptMatchesKeywords,
   toolsMatchAvailable,
-  clearRuleCache,
+} from './rules/rule-filter.js';
+import {
+  extractFilePathsFromMessages,
   type Message,
-} from './utils.js';
-import { extractToolCallPaths } from './message-paths.js';
+} from './session/message-extraction.js';
+import { extractToolCallPaths } from './session/message-extraction.js';
 import {
   setupTestDirs,
   teardownTestDirs,

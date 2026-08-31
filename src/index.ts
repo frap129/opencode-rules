@@ -1,12 +1,12 @@
 import type { Plugin, PluginInput } from '@opencode-ai/plugin';
-import { discoverRuleFiles } from './utils.js';
-import { OpenCodeRulesRuntime } from './runtime.js';
-import { SessionStore, type SessionState } from './session-store.js';
-import { MatchedRulesStateStore } from './matched-rules-state.js';
+import { discoverRuleFiles } from './rules/rule-discovery.js';
+import { OpenCodeRulesRuntime } from './runtime/orchestrator.js';
+import { SessionStore, type SessionState } from './session/session-store.js';
+import { MatchedRulesStateStore } from './session/matched-rules-state.js';
 
 const sessionStore = new SessionStore();
 const matchedRulesStateStore = new MatchedRulesStateStore();
-import { createDebugLog } from './debug.js';
+import { createDebugLog } from './shared/debug.js';
 
 const debugLog = createDebugLog();
 

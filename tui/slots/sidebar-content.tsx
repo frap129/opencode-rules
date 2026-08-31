@@ -10,8 +10,8 @@ import {
 import type { TuiPluginApi, TuiTheme } from '@opencode-ai/plugin/tui';
 import { loadSidebarRules, type SidebarRuleEntry } from '../data/rules.js';
 import { createRulesLoadCoordinator } from '../data/rules-load-coordinator.js';
-import type { RuleMetadata } from '../../src/utils.js';
-import { logError } from '../../src/debug.js';
+import type { RuleMetadata } from '../../src/rules/rule-metadata.js';
+import { logError } from '../../src/shared/debug.js';
 
 const metadataFieldDescriptors: Array<{
   key: keyof RuleMetadata;

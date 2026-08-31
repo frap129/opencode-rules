@@ -4,7 +4,7 @@
 
 - Use Aube and install with `aube install --frozen-lockfile`. Run checks in this order: `aube run lint` -> `aubx tsc --noEmit` -> `aube run test:run`.
 - There is no `typecheck` script; typecheck with `aubx tsc --noEmit`.
-- Run one colocated Vitest file with `aube run test:run src/<name>.test.ts` (or a path under `tui/`). `tsconfig.json` excludes test/spec files, so `tsc` does not typecheck them.
+- Run one colocated Vitest file with `aube run test:run src/<domain>/<name>.test.ts` (or a path under `tui/`). `tsconfig.json` excludes test/spec files, so `tsc` does not typecheck them.
 - `docs/silent-message-implementation.md` describes a superseded design; current delivery is synthetic parts via `chat.message`.
 
 ## Architecture
@@ -21,7 +21,7 @@
 - The `"./tui"` package export must point to `./dist/tui/index.js`, not raw `./tui/index.tsx`: OpenCode/Bun does not reliably remap `.js` relative imports when loading raw TSX, while those targets exist only after the TypeScript build.
 - OpenCode caches npm plugin specs by their literal specifier; an existing `~/.cache/opencode/packages/opencode-rules@latest` wrapper pins the version resolved when it was created and does not refresh when `latest` changes. Clear that cache or use an explicit new version when validating a release.
 - tsconfig is strict-plus (`exactOptionalPropertyTypes`, `noUnusedLocals`/`noUnusedParameters`, `verbatimModuleSyntax`), so type-only imports and unused symbols will fail typecheck even though lint passes.
-- `src/utils.ts` is the compatibility re-export facade; add logic to domain modules instead. `src/api-surface.typecheck.ts` enforces intentionally private exports during `tsc`.
+- Server source is grouped by domain: `src/rules/` (discovery, metadata, filter, hooks), `src/delivery/` (delivery engine composed behind `createRuleDelivery` plus codec and history port), `src/session/` (session/matched-rule state, file observations, message extraction), `src/runtime/` (orchestrator, client adapter, tool-hook flow, match context, chat capture), `src/detection/` (git-branch, project-fingerprint, mcp-tools), `src/shared/` (debug, bounded-session-map). `src/api-surface.typecheck.ts` enforces intentionally private exports during `tsc`.
 - Do not edit generated `dist/`; `tsc` builds it from `src/` and `tui/`.
 - This repo dogfoods its own plugin: `.opencode/rules/*.md` are injected into sessions and contain additional scoped guardrails.
 - When adding/removing/renaming production modules, update the README "Project Structure" section in the same change (`.opencode/rules/11-readme-and-doc-sync.md`).

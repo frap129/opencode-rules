@@ -7,15 +7,15 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import path from 'node:path';
 import { writeFileSync, mkdirSync } from 'node:fs';
-import { clearRuleCache } from './utils.js';
+import { clearRuleCache } from './rules/rule-discovery.js';
 import {
   setupTestDirs,
   teardownTestDirs,
   getTestDirs,
   createMockPluginInput,
 } from './test-fixtures.js';
-import { buildDurableDeliveryPart } from './rule-delivery-codec.js';
-import { MatchedRulesStateStore } from './matched-rules-state.js';
+import { buildDurableDeliveryPart } from './delivery/rule-delivery-codec.js';
+import { MatchedRulesStateStore } from './session/matched-rules-state.js';
 import { __testOnly } from './index.js';
 
 function createHooksWithMatchedRulesStateStore(

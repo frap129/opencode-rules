@@ -1,7 +1,7 @@
 import { stat, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { createDebugLog, logWarning } from './debug.js';
+import { createDebugLog, logWarning } from '../shared/debug.js';
 import {
   parseRuleMetadata,
   stripFrontmatter,

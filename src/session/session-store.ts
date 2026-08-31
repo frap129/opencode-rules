@@ -1,5 +1,5 @@
-import type { RuleSnapshot } from './rule-discovery.js';
-import { BoundedSessionMap } from './bounded-session-map.js';
+import type { RuleSnapshot } from '../rules/rule-discovery.js';
+import { BoundedSessionMap } from '../shared/bounded-session-map.js';
 export interface SessionState {
   /** Only SessionWorkingContext production code reads or mutates these. */
   workingContextPaths: Set<string>;

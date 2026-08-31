@@ -1,9 +1,9 @@
-import { extractSlashCommand } from './message-context.js';
-import { detectProjectTags } from './project-fingerprint.js';
-import { getGitBranch } from './git-branch.js';
-import type { RuleMatchContext } from './rule-filter.js';
-import type { FileObservation } from './file-observation.js';
-import type { DebugLog } from './debug.js';
+import { extractSlashCommand } from '../session/message-extraction.js';
+import { detectProjectTags } from '../detection/project-fingerprint.js';
+import { getGitBranch } from '../detection/git-branch.js';
+import type { RuleMatchContext } from '../rules/rule-filter.js';
+import type { FileObservation } from '../session/file-observation.js';
+import type { DebugLog } from '../shared/debug.js';
 
 export interface BuildRuleMatchContextOptions {
   fileObservations: FileObservation[];

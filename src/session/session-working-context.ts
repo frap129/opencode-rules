@@ -7,10 +7,10 @@ import {
   sanitizePathForContext,
   filterValidMessages,
   type MessageWithInfo,
-} from './message-context.js';
-import type { RawHistoryResult } from './rule-delivery-history.js';
+} from './message-extraction.js';
+import type { RawHistoryResult } from '../delivery/rule-delivery-history.js';
 import type { SessionStore } from './session-store.js';
-import type { DebugLog } from './debug.js';
+import type { DebugLog } from '../shared/debug.js';
 
 // A transform-first seed can leave prefetched histories unconsumed; this
 // bound keeps the worst case (a full history per session) negligible.

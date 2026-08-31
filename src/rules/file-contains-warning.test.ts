@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { parseRuleMetadata } from './rule-metadata.js';
 
 const warnings: string[] = [];
-vi.mock('./debug.js', async importOriginal => {
-  const actual = await importOriginal<typeof import('./debug.js')>();
+vi.mock('../shared/debug.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('../shared/debug.js')>();
   return {
     ...actual,
     logWarning: (context: string, error: unknown) => {

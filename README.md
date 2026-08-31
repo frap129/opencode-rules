@@ -492,30 +492,40 @@ The following shows the key source modules. Additional test files (`*.test.ts`) 
 opencode-rules/
 ├── src/
 │   ├── index.ts              # Main plugin entry point and exports
-│   ├── runtime.ts            # OpenCodeRulesRuntime class (hook orchestration)
-│   ├── file-observation-context.ts # Runtime-owned per-session File-observation store (bounded LRU; feeds globs/fileContains matching and earliest-dispatch admission; live events only)
-│   ├── session-working-context.ts # Runtime-owned Working context (path-only compaction projection, history prefetch, never a matching source)
-│   ├── file-observation.ts   # File-observation normalization for read/write/edit/apply_patch/lsp (live events; history parts feed path-only Working context)
-│   ├── rule-delivery.ts      # Durable/transient delivery, Hook queues, and identity ledger
-│   ├── rule-delivery-codec.ts # Delivery identifiers, formats, history decoding, and transient presence facts
-│   ├── rule-delivery-history.ts # Raw history port for delivery decoding
-│   ├── runtime-context.ts    # Context-building helpers (match context, project detection)
-│   ├── runtime-chat.ts       # Chat message handling and text extraction
-│   ├── rule-discovery.ts     # Rule file scanning, discovery, and per-session snapshots
-│   ├── rule-metadata.ts      # YAML frontmatter parsing
-│   ├── rule-filter.ts        # Rule matching against context, lifetime classification (globs, fileContains, keywords, tools, runtime)
-│   ├── message-paths.ts      # Legacy path-extraction compatibility facade
-│   ├── message-context.ts    # User prompt extraction from message parts
-│   ├── session-store.ts      # Per-session state management
-│   ├── bounded-session-map.ts # Shared internal LRU-bounded per-session map (sole value owner; unstamped reads; optional eviction protection)
-│   ├── project-fingerprint.ts # Project type detection (Node.js, Python, etc.)
-│   ├── mcp-tools.ts          # MCP tool ID extraction
-│   ├── git-branch.ts         # Git branch detection
-│   ├── matched-rules-state.ts # Persists Matched-rule state for TUI
-│   ├── debug.ts              # Debug logging utilities
-│   ├── utils.ts              # Re-export facade for backwards compatibility
 │   ├── test-fixtures.ts      # Shared test fixtures and builders
-│   └── *.test.ts             # Unit/integration tests in src
+│   ├── api-surface.typecheck.ts # Type-level privacy contract (checked by tsc)
+│   ├── rules/
+│   │   ├── rule-discovery.ts # Rule file scanning, discovery, and per-session snapshots
+│   │   ├── rule-metadata.ts  # YAML frontmatter parsing
+│   │   ├── rule-filter.ts    # Rule matching against context, lifetime classification (globs, fileContains, keywords, tools, runtime)
+│   │   └── rule-hooks.ts     # Hook evaluation against serialized tool args
+│   ├── delivery/
+│   │   ├── rule-delivery.ts  # Delivery engine composing the seams below (durable/transient delivery, Hook queues, identity ledger)
+│   │   ├── delivery-state.ts # Per-session delivery state and operation serialization
+│   │   ├── delivery-ledger.ts # History seeding and rule-admission persistence
+│   │   ├── delivery-transient.ts # Transient dispatch presence and turn tracking
+│   │   ├── rule-delivery-codec.ts # Delivery identifiers, formats, history decoding, and transient presence facts
+│   │   └── rule-delivery-history.ts # Raw history port for delivery decoding
+│   ├── session/
+│   │   ├── session-store.ts  # Per-session state management
+│   │   ├── matched-rules-state.ts # Persists Matched-rule state for TUI
+│   │   ├── file-observation.ts # File-observation normalization for read/write/edit/apply_patch/lsp (live events; history parts feed path-only Working context)
+│   │   ├── file-observation-context.ts # Runtime-owned per-session File-observation store (bounded LRU; feeds globs/fileContains matching and earliest-dispatch admission; live events only)
+│   │   ├── session-working-context.ts # Runtime-owned Working context (path-only compaction projection, history prefetch, never a matching source)
+│   │   └── message-extraction.ts # File-path, prompt, and session-ID extraction from message parts
+│   ├── runtime/
+│   │   ├── orchestrator.ts   # OpenCodeRulesRuntime class (hook orchestration)
+│   │   ├── client-adapter.ts # OpenCode client port (history reads, no-reply admission, tool-ID/MCP queries)
+│   │   ├── tool-hook-flow.ts # PreToolUse/PostToolUse evaluation, blockers, side-effects, Hook queuing
+│   │   ├── match-context.ts  # Context-building helpers (match context, project detection)
+│   │   └── chat-capture.ts   # Chat message handling and text extraction
+│   ├── detection/
+│   │   ├── project-fingerprint.ts # Project type detection (Node.js, Python, etc.)
+│   │   ├── mcp-tools.ts      # MCP tool ID extraction
+│   │   └── git-branch.ts     # Git branch detection
+│   └── shared/
+│       ├── bounded-session-map.ts # Shared internal LRU-bounded per-session map (sole value owner; unstamped reads; optional eviction protection)
+│       └── debug.ts          # Debug logging utilities
 ├── tui/
 │   ├── index.tsx             # TUI entrypoint, exports { id, tui }
 │   ├── slots/
@@ -527,7 +537,6 @@ opencode-rules/
 │       └── opencode-plugin-tui.d.ts  # Vendored type shim
 ├── docs/
 │   └── rules.md              # Detailed usage documentation
-├── openspec/                 # Project specifications and proposals
 └── dist/                     # Compiled JavaScript output
 ```
 
@@ -535,23 +544,31 @@ opencode-rules/
 
 The following highlights the primary runtime modules:
 
-- **runtime.ts** - Orchestrates hooks (`tool.execute.before`, `chat.message`, `experimental.chat.*`)
-- **rule-delivery.ts** - Owns durable/transient delivery, matched Hook queues, history reconstruction, and the identity ledger
-- **rule-delivery-codec.ts** - Encodes durable/transient delivery and decodes durable history facts plus transient presence facts
-- **rule-delivery-history.ts** - Defines the raw host-history port used by delivery decoding
-- **runtime-context.ts** - Builds `RuleMatchContext` from session state and environment
-- **runtime-chat.ts** - Extracts text from chat message parts for keyword matching
-- **rule-discovery.ts** - Recursively scans directories for `.md`/`.mdc` rule files
-- **rule-metadata.ts** - Parses YAML frontmatter into typed `RuleMetadata`
-- **rule-filter.ts** - Matches rules against context (file-observation family: globs + fileContains, keywords, tools, runtime filters) and classifies each match as session-durable or ephemeral
-- **message-paths.ts** - Compatibility facade for the legacy path-extraction API; runtime matching uses normalized File observations
-- **message-context.ts** - Extracts user prompt text, slash commands, and session IDs from message parts
-- **session-store.ts** - Manages per-session state with LRU eviction
-- **project-fingerprint.ts** - Detects project type from marker files (e.g., `package.json`)
-- **mcp-tools.ts** - Maps connected MCP clients to tool IDs for `tools` condition matching
-- **git-branch.ts** - Resolves current git branch for `branch` condition matching
-- **matched-rules-state.ts** - Persists Matched-rule state to `~/.opencode/state/opencode-rules/{sessionId}.json` for TUI consumption (atomic writes, per-session queuing)
-- **utils.ts** - Thin facade re-exporting from decomposed modules
+- **runtime/orchestrator.ts** - Orchestrates hooks (`tool.execute.before`, `chat.message`, `experimental.chat.*`)
+- **runtime/client-adapter.ts** - Isolates the OpenCode client port: history reads, no-reply admission via `session.prompt`, tool-ID/MCP queries
+- **runtime/tool-hook-flow.ts** - Evaluates PreToolUse/PostToolUse hooks, throws on blockers, runs side-effects, queues matched Hook content
+- **delivery/rule-delivery.ts** - Owns durable/transient delivery composed over per-session state, ledger, and transient seams
+- **delivery/delivery-state.ts** - Per-session delivery state with operation serialization
+- **delivery/delivery-ledger.ts** - History seeding and rule-admission persistence
+- **delivery/delivery-transient.ts** - Transient dispatch presence facts and per-turn tracking
+- **delivery/rule-delivery-codec.ts** - Encodes durable/transient delivery and decodes durable history facts plus transient presence facts
+- **delivery/rule-delivery-history.ts** - Defines the raw host-history port used by delivery decoding
+- **runtime/match-context.ts** - Builds `RuleMatchContext` from session state and environment
+- **runtime/chat-capture.ts** - Extracts text from chat message parts for keyword matching
+- **rules/rule-discovery.ts** - Recursively scans directories for `.md`/`.mdc` rule files
+- **rules/rule-metadata.ts** - Parses YAML frontmatter into typed `RuleMetadata`
+- **rules/rule-filter.ts** - Matches rules against context (file-observation family: globs + fileContains, keywords, tools, runtime filters) and classifies each match as session-durable or ephemeral
+- **rules/rule-hooks.ts** - Evaluates rule hooks against serialized tool arguments
+- **session/message-extraction.ts** - Extracts file paths, user prompt text, slash commands, and session IDs from message parts
+- **session/session-store.ts** - Manages per-session state with LRU eviction
+- **session/file-observation-context.ts** - Bounded per-session File-observation store feeding globs/fileContains matching
+- **session/session-working-context.ts** - Path-only Working context with history prefetch and compaction projection
+- **detection/project-fingerprint.ts** - Detects project type from marker files (e.g., `package.json`)
+- **detection/mcp-tools.ts** - Maps connected MCP clients to tool IDs for `tools` condition matching
+- **detection/git-branch.ts** - Resolves current git branch for `branch` condition matching
+- **session/matched-rules-state.ts** - Persists Matched-rule state to `~/.opencode/state/opencode-rules/{sessionId}.json` for TUI consumption (atomic writes, per-session queuing)
+- **shared/bounded-session-map.ts** - LRU-bounded per-session map shared across stores
+- **shared/debug.ts** - Gated debug logging utilities
 
 ### TUI Sidebar
 

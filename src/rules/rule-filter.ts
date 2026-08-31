@@ -1,9 +1,9 @@
 import { minimatch } from 'minimatch';
-import { createDebugLog } from './debug.js';
+import { createDebugLog } from '../shared/debug.js';
 import type { RuleSnapshot } from './rule-discovery.js';
 import { hasConditions } from './rule-metadata.js';
 import type { RuleMetadata } from './rule-metadata.js';
-import type { FileObservation } from './file-observation.js';
+import type { FileObservation } from '../session/file-observation.js';
 
 const debugLog = createDebugLog();
 

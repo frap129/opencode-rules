@@ -8,8 +8,8 @@ import {
   extractSlashCommand,
   extractTextFromParts,
   MessageWithInfo,
-} from './message-context.js';
-import { extractFilePathsFromMessages } from './message-paths.js';
+} from './message-extraction.js';
+import { extractFilePathsFromMessages } from './message-extraction.js';
 
 describe('message-context', () => {
   it('sanitizes control characters and truncates', () => {
