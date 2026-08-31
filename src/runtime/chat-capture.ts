@@ -1,6 +1,6 @@
-import { extractTextFromParts } from './message-context.js';
-import type { SessionStore } from './session-store.js';
-import type { DebugLog } from './debug.js';
+import { extractTextFromParts } from '../session/message-extraction.js';
+import type { SessionStore } from '../session/session-store.js';
+import type { DebugLog } from '../shared/debug.js';
 
 export interface ChatMessageInput {
   sessionID?: string;

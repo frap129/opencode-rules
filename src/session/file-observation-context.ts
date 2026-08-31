@@ -3,8 +3,8 @@ import {
   type FileObservation,
 } from './file-observation.js';
 import type { RawToolEvent } from './file-observation.js';
-import { normalizeContextPath } from './message-context.js';
-import { BoundedSessionMap } from './bounded-session-map.js';
+import { normalizeContextPath } from './message-extraction.js';
+import { BoundedSessionMap } from '../shared/bounded-session-map.js';
 
 interface ObservationSession {
   observations: FileObservation[];

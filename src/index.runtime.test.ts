@@ -17,113 +17,95 @@ import {
   type CiEnvSnapshot,
 } from './test-fixtures.js';
 
-import * as ruleDiscoveryModule from './rule-discovery.js';
-import * as ruleMetadataModule from './rule-metadata.js';
-import * as ruleFilterModule from './rule-filter.js';
-import * as messagePathsModule from './message-paths.js';
-import * as utilsModule from './utils.js';
-import * as sessionStoreModule from './session-store.js';
-import * as matchedRulesStateModule from './matched-rules-state.js';
-import * as runtimeContextModule from './runtime-context.js';
-import * as runtimeChatModule from './runtime-chat.js';
-import * as ruleHooksModule from './rule-hooks.js';
+import * as ruleDiscoveryModule from './rules/rule-discovery.js';
+import * as ruleMetadataModule from './rules/rule-metadata.js';
+import * as ruleFilterModule from './rules/rule-filter.js';
+import * as messagePathsModule from './session/message-extraction.js';
+import * as ruleHooksModule from './rules/rule-hooks.js';
+import * as sessionStoreModule from './session/session-store.js';
+import * as matchedRulesStateModule from './session/matched-rules-state.js';
+import * as runtimeContextModule from './runtime/match-context.js';
+import * as runtimeChatModule from './runtime/chat-capture.js';
 import { __testOnly } from './index.js';
 import {
   MatchedRulesStateStore,
   readMatchedRulesState,
-} from './matched-rules-state.js';
-import { clearRuleCache } from './utils.js';
-import { buildDurableDeliveryPart } from './rule-delivery-codec.js';
+} from './session/matched-rules-state.js';
+import { clearRuleCache } from './rules/rule-discovery.js';
+import { buildDurableDeliveryPart } from './delivery/rule-delivery-codec.js';
 
 describe('module boundary tests', () => {
-  it('should re-export discoverRuleFiles from rule-discovery module', () => {
+  it('should export discoverRuleFiles from rule-discovery module', () => {
     expect(ruleDiscoveryModule.discoverRuleFiles).toBeDefined();
     expect(typeof ruleDiscoveryModule.discoverRuleFiles).toBe('function');
-    expect(utilsModule.discoverRuleFiles).toBe(
-      ruleDiscoveryModule.discoverRuleFiles
-    );
   });
 
-  it('should re-export parseRuleMetadata from rule-metadata module', () => {
+  it('should export parseRuleMetadata from rule-metadata module', () => {
     expect(ruleMetadataModule.parseRuleMetadata).toBeDefined();
     expect(typeof ruleMetadataModule.parseRuleMetadata).toBe('function');
-    expect(utilsModule.parseRuleMetadata).toBe(
-      ruleMetadataModule.parseRuleMetadata
-    );
   });
 
-  it('should re-export promptMatchesKeywords and toolsMatchAvailable from rule-filter module', () => {
+  it('should export promptMatchesKeywords and toolsMatchAvailable from rule-filter module', () => {
     expect(ruleFilterModule.promptMatchesKeywords).toBeDefined();
     expect(ruleFilterModule.toolsMatchAvailable).toBeDefined();
     expect(typeof ruleFilterModule.promptMatchesKeywords).toBe('function');
     expect(typeof ruleFilterModule.toolsMatchAvailable).toBe('function');
-    expect(utilsModule.promptMatchesKeywords).toBe(
-      ruleFilterModule.promptMatchesKeywords
-    );
-    expect(utilsModule.toolsMatchAvailable).toBe(
-      ruleFilterModule.toolsMatchAvailable
-    );
   });
 
-  it('should re-export extractFilePathsFromMessages from message-paths module', () => {
+  it('should export extractFilePathsFromMessages from message-extraction module', () => {
     expect(messagePathsModule.extractFilePathsFromMessages).toBeDefined();
     expect(typeof messagePathsModule.extractFilePathsFromMessages).toBe(
       'function'
     );
-    expect(utilsModule.extractFilePathsFromMessages).toBe(
-      messagePathsModule.extractFilePathsFromMessages
-    );
   });
 
-  it('should re-export clearRuleCache from rule-discovery module', () => {
+  it('should export clearRuleCache from rule-discovery module', () => {
     expect(ruleDiscoveryModule.clearRuleCache).toBeDefined();
     expect(typeof ruleDiscoveryModule.clearRuleCache).toBe('function');
-    expect(utilsModule.clearRuleCache).toBe(ruleDiscoveryModule.clearRuleCache);
   });
 
-  it('should re-export DiscoveredRule type via utils facade', () => {
-    const rule: utilsModule.DiscoveredRule = {
+  it('should export DiscoveredRule type from rule-discovery module', () => {
+    const rule: ruleDiscoveryModule.DiscoveredRule = {
       filePath: '/test/rule.md',
       relativePath: 'rule.md',
     };
-    const ruleFromDiscovery: ruleDiscoveryModule.DiscoveredRule = rule;
-    expect(ruleFromDiscovery.filePath).toBe('/test/rule.md');
+    expect(rule.filePath).toBe('/test/rule.md');
   });
 
-  it('should re-export RuleMatchContext type via utils facade', () => {
-    const context: utilsModule.RuleMatchContext = {
+  it('should export RuleMatchContext type from rule-filter module', () => {
+    const context: ruleFilterModule.RuleMatchContext = {
       userPrompt: 'test',
       fileObservations: [{ path: 'src/test.ts', tool: 'read', content: '' }],
     };
     expect(context.userPrompt).toBe('test');
   });
 
-  it('should re-export Message and MessagePart types via utils facade', () => {
-    const msg: utilsModule.Message = {
+  it('should export Message and MessagePart types from message-extraction module', () => {
+    const msg: messagePathsModule.Message = {
       role: 'user',
       parts: [{ type: 'text', text: 'hello' }],
     };
     expect(msg.role).toBe('user');
   });
 
-  it('should export buildRuleMatchContext from runtime-context module', () => {
+  it('should export buildRuleMatchContext from match-context module', () => {
     expect(runtimeContextModule.buildRuleMatchContext).toBeDefined();
     expect(typeof runtimeContextModule.buildRuleMatchContext).toBe('function');
   });
 
-  it('should export detectCiEnvironment from runtime-context module', () => {
+  it('should export detectCiEnvironment from match-context module', () => {
     expect(runtimeContextModule.detectCiEnvironment).toBeDefined();
     expect(typeof runtimeContextModule.detectCiEnvironment).toBe('function');
   });
 
-  it('should export updateSessionFromChatMessage from runtime-chat module', () => {
+  it('should export updateSessionFromChatMessage from chat-capture module', () => {
     expect(runtimeChatModule.updateSessionFromChatMessage).toBeDefined();
     expect(typeof runtimeChatModule.updateSessionFromChatMessage).toBe(
       'function'
     );
   });
 
-  it('should detect CI environment correctly via runtime-context module', () => {
+  it('should detect CI environment correctly via match-context module', () => {
     const originalCI = process.env.CI;
 
     process.env.CI = 'true';
@@ -139,15 +121,11 @@ describe('module boundary tests', () => {
     }
   });
 
-  it('should re-export evaluateHooks and serializeToolArgs from rule-hooks module', () => {
+  it('should export evaluateHooks and serializeToolArgs from rule-hooks module', () => {
     expect(ruleHooksModule.evaluateHooks).toBeDefined();
     expect(ruleHooksModule.serializeToolArgs).toBeDefined();
     expect(typeof ruleHooksModule.evaluateHooks).toBe('function');
     expect(typeof ruleHooksModule.serializeToolArgs).toBe('function');
-    expect(utilsModule.evaluateHooks).toBe(ruleHooksModule.evaluateHooks);
-    expect(utilsModule.serializeToolArgs).toBe(
-      ruleHooksModule.serializeToolArgs
-    );
   });
 });
 
@@ -1364,21 +1342,14 @@ Conditional rule for gpt-5 only.`
   });
 });
 
-describe('utils runtime exports', () => {
+describe('rule-discovery runtime exports', () => {
   it('exports only expected functions at runtime', () => {
-    const exportedKeys = Object.keys(utilsModule).sort();
+    const exportedKeys = Object.keys(ruleDiscoveryModule).sort();
     expect(exportedKeys).toEqual([
       'clearRuleCache',
       'discoverRuleFiles',
-      'evaluateHooks',
-      'extractFilePathsFromMessages',
       'getCachedRule',
-      'hasConditions',
-      'parseRuleMetadata',
-      'promptMatchesKeywords',
-      'readMatchedRulesState',
-      'serializeToolArgs',
-      'toolsMatchAvailable',
+      'loadRuleSnapshots',
     ]);
   });
 });

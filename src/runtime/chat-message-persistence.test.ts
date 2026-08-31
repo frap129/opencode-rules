@@ -13,14 +13,14 @@ import {
   teardownTestDirs,
   type HookChatMessage,
   type HookChatOutput,
-} from './test-fixtures.js';
+} from '../test-fixtures.js';
 import {
   MatchedRulesStateStore,
   readMatchedRulesState,
-} from './matched-rules-state.js';
-import { buildDurableDeliveryPart } from './rule-delivery-codec.js';
-import { clearRuleCache } from './utils.js';
-import { __testOnly } from './index.js';
+} from '../session/matched-rules-state.js';
+import { buildDurableDeliveryPart } from '../delivery/rule-delivery-codec.js';
+import { clearRuleCache } from '../rules/rule-discovery.js';
+import { __testOnly } from '../index.js';
 
 describe('chat.message rule persistence', () => {
   let savedEnvXDG: string | undefined;
@@ -42,7 +42,7 @@ describe('chat.message rule persistence', () => {
   afterEach(async () => {
     teardownTestDirs();
     vi.resetAllMocks();
-    const { __testOnly } = await import('./index.js');
+    const { __testOnly } = await import('../index.js');
     __testOnly.resetSessionState();
     if (savedEnvXDG === undefined) {
       delete process.env.XDG_CONFIG_HOME;
@@ -187,7 +187,7 @@ describe('chat.message rule persistence', () => {
     // them without a second history fetch.
     const {
       default: { server: plugin },
-    } = await import('./index.js');
+    } = await import('../index.js');
     const mockInput = createMockPluginInput({ testDir });
     const persisted: HookChatOutput['parts'] = [];
     mockInput.client.session.messages = async () => ({
@@ -229,7 +229,7 @@ describe('chat.message rule persistence', () => {
     const { testDir } = getTestDirs();
     const {
       default: { server: plugin },
-    } = await import('./index.js');
+    } = await import('../index.js');
     const mockInput = createMockPluginInput({
       testDir,
       history: [
@@ -282,7 +282,7 @@ describe('chat.message rule persistence', () => {
 
     const {
       default: { server: plugin },
-    } = await import('./index.js');
+    } = await import('../index.js');
     const mockInput = createMockPluginInput({
       testDir,
       history: [
@@ -381,7 +381,7 @@ describe('chat.message rule persistence', () => {
 
     const {
       default: { server: plugin },
-    } = await import('./index.js');
+    } = await import('../index.js');
     const mockInput = createMockPluginInput({ testDir });
     const hooks = await plugin(
       mockInput as unknown as Parameters<typeof plugin>[0]
@@ -459,7 +459,7 @@ describe('chat.message rule persistence', () => {
 
     const {
       default: { server: plugin },
-    } = await import('./index.js');
+    } = await import('../index.js');
     const mockInput = createMockPluginInput({ testDir });
     const persisted: HookChatOutput['parts'] = [];
     mockInput.client.session.messages = async () => ({
@@ -506,7 +506,7 @@ describe('chat.message rule persistence', () => {
 
     const {
       default: { server: plugin },
-    } = await import('./index.js');
+    } = await import('../index.js');
     const mockInput = createMockPluginInput({ testDir });
     const hooks = await plugin(
       mockInput as unknown as Parameters<typeof plugin>[0]
@@ -563,7 +563,7 @@ describe('chat.message rule persistence', () => {
 
     const {
       default: { server: plugin },
-    } = await import('./index.js');
+    } = await import('../index.js');
     const mockInput = createMockPluginInput({ testDir });
     let failToolIds = false;
     mockInput.client.tool.ids = () => {
@@ -648,7 +648,7 @@ describe('chat.message rule persistence', () => {
 
     const {
       default: { server: plugin },
-    } = await import('./index.js');
+    } = await import('../index.js');
     const mockInput = createMockPluginInput({
       testDir,
       history: [
@@ -720,7 +720,7 @@ describe('chat.message rule persistence', () => {
 
     const {
       default: { server: plugin },
-    } = await import('./index.js');
+    } = await import('../index.js');
     const mockInput = createMockPluginInput({ testDir });
     // Simulate the real SDK: a prototype-style method that reads instance
     // state via `this` (arrow functions would mask the detachment bug).

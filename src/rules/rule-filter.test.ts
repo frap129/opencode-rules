@@ -10,7 +10,7 @@ import {
 import { loadRuleSnapshots } from './rule-discovery.js';
 import type { RuleSnapshot } from './rule-discovery.js';
 import type { RuleMetadata } from './rule-metadata.js';
-import { setupTestDirs, teardownTestDirs } from './test-fixtures.js';
+import { setupTestDirs, teardownTestDirs } from '../test-fixtures.js';
 
 const snapshot = (
   metadata: RuleMetadata | null,

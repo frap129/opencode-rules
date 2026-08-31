@@ -23,7 +23,7 @@ import {
 } from 'vitest';
 import path from 'node:path';
 import { writeFileSync, mkdirSync } from 'node:fs';
-import { clearRuleCache } from './utils.js';
+import { clearRuleCache } from './rules/rule-discovery.js';
 import { __testOnly } from './index.js';
 import {
   setupTestDirs,
@@ -656,7 +656,7 @@ Feature branch guidelines.`
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const gitBranchModule = await import('./git-branch.js');
+    const gitBranchModule = await import('./detection/git-branch.js');
     const getGitBranchSpy = vi
       .spyOn(gitBranchModule, 'getGitBranch')
       .mockResolvedValue('feature/add-login');

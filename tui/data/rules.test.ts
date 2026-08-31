@@ -16,7 +16,7 @@ import {
   writeFileSync,
   chmodSync,
 } from 'node:fs';
-import { clearRuleCache } from '../../src/rule-discovery.js';
+import { clearRuleCache } from '../../src/rules/rule-discovery.js';
 import {
   classifyRuleScope,
   hasConditions,

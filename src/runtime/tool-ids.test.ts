@@ -1,9 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { OpenCodeRulesRuntime } from './runtime.js';
-import { SessionStore } from './session-store.js';
-import * as runtimeModule from './runtime.js';
-import * as runtimeContextModule from './runtime-context.js';
-import * as runtimeChatModule from './runtime-chat.js';
+import { OpenCodeClientAdapter } from './client-adapter.js';
+import * as runtimeModule from './orchestrator.js';
+import * as runtimeContextModule from './match-context.js';
+import * as runtimeChatModule from './chat-capture.js';
 
 describe('runtime module runtime exports', () => {
   it('exports only OpenCodeRulesRuntime class at runtime', () => {
@@ -13,17 +12,17 @@ describe('runtime module runtime exports', () => {
 });
 
 describe('runtime module boundaries', () => {
-  it('exports buildRuleMatchContext from runtime-context module', () => {
+  it('exports buildRuleMatchContext from match-context module', () => {
     expect(runtimeContextModule.buildRuleMatchContext).toBeDefined();
     expect(typeof runtimeContextModule.buildRuleMatchContext).toBe('function');
   });
 
-  it('exports detectCiEnvironment from runtime-context module', () => {
+  it('exports detectCiEnvironment from match-context module', () => {
     expect(runtimeContextModule.detectCiEnvironment).toBeDefined();
     expect(typeof runtimeContextModule.detectCiEnvironment).toBe('function');
   });
 
-  it('exports updateSessionFromChatMessage from runtime-chat module', () => {
+  it('exports updateSessionFromChatMessage from chat-capture module', () => {
     expect(runtimeChatModule.updateSessionFromChatMessage).toBeDefined();
     expect(typeof runtimeChatModule.updateSessionFromChatMessage).toBe(
       'function'
@@ -31,9 +30,9 @@ describe('runtime module boundaries', () => {
   });
 });
 
-describe('OpenCodeRulesRuntime.queryAvailableToolIDs', () => {
+describe('OpenCodeClientAdapter.queryAvailableToolIDs', () => {
   it('augments tool ids with connected mcp capability ids', async () => {
-    const runtime = new OpenCodeRulesRuntime({
+    const adapter = new OpenCodeClientAdapter({
       client: {
         tool: { ids: async () => ({ data: ['bash'] }) },
         mcp: {
@@ -44,29 +43,25 @@ describe('OpenCodeRulesRuntime.queryAvailableToolIDs', () => {
       } as any,
       directory: '/tmp',
       projectDirectory: '/tmp',
-      ruleFiles: [],
-      sessionStore: new SessionStore({ max: 10 }),
       debugLog: () => {},
     });
 
-    const ids: string[] = await (runtime as any).queryAvailableToolIDs();
+    const ids: string[] = await adapter.queryAvailableToolIDs();
     expect(ids).toContain('bash');
     expect(ids).toContain('mcp_context7');
   });
 
   it('handles missing mcp.status gracefully', async () => {
-    const runtime = new OpenCodeRulesRuntime({
+    const adapter = new OpenCodeClientAdapter({
       client: {
         tool: { ids: async () => ({ data: ['bash'] }) },
       } as any,
       directory: '/tmp',
       projectDirectory: '/tmp',
-      ruleFiles: [],
-      sessionStore: new SessionStore({ max: 10 }),
       debugLog: () => {},
     });
 
-    const ids: string[] = await (runtime as any).queryAvailableToolIDs();
+    const ids: string[] = await adapter.queryAvailableToolIDs();
     expect(ids).toContain('bash');
   });
 });

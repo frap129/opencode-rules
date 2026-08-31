@@ -1,10 +1,12 @@
 import {
   discoverRuleFiles,
   getCachedRule,
-  readMatchedRulesState,
+} from '../../src/rules/rule-discovery.js';
+import { readMatchedRulesState } from '../../src/session/matched-rules-state.js';
+import {
   hasConditions,
   type RuleMetadata,
-} from '../../src/utils.js';
+} from '../../src/rules/rule-metadata.js';
 export { hasConditions };
 import path from 'node:path';
 

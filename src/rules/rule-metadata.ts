@@ -1,5 +1,5 @@
 const { parse: parseYaml } = await import('yaml');
-import { logWarning } from './debug.js';
+import { logWarning } from '../shared/debug.js';
 
 export interface RuleMetadata {
   name?: string;

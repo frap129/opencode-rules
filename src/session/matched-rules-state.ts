@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
-import { createDebugLog, logWarning } from './debug.js';
+import { createDebugLog, logWarning } from '../shared/debug.js';
 
 const debugLog = createDebugLog();
 

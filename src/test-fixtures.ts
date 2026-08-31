@@ -2,7 +2,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { __testOnly } from './index.js';
-import type { MatchedRulesStateStore } from './matched-rules-state.js';
+import type { MatchedRulesStateStore } from './session/matched-rules-state.js';
 
 interface TestDirs {
   testDir: string;

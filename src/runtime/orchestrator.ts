@@ -3,93 +3,48 @@ import {
   matchRuleSnapshots,
   type RuleMatchContext,
   type MatchedRuleEntry,
-} from './rule-filter.js';
+} from '../rules/rule-filter.js';
 import {
   loadRuleSnapshots,
   type DiscoveredRule,
   type RuleSnapshot,
-} from './rule-discovery.js';
+} from '../rules/rule-discovery.js';
 import {
   extractLatestUserPrompt,
   extractSessionID,
   type MessageWithInfo,
-} from './message-context.js';
-import { extractConnectedMcpCapabilityIDs } from './mcp-tools.js';
-import {
-  createDebugLog,
-  logWarning,
-  formatError,
-  type DebugLog,
-} from './debug.js';
-import type { SessionStore } from './session-store.js';
-import type { MatchedRulesStateStore } from './matched-rules-state.js';
-import { buildRuleMatchContext } from './runtime-context.js';
+} from '../session/message-extraction.js';
+import { createDebugLog, formatError, type DebugLog } from '../shared/debug.js';
+import type { SessionStore } from '../session/session-store.js';
+import type { MatchedRulesStateStore } from '../session/matched-rules-state.js';
+import { buildRuleMatchContext } from './match-context.js';
 import {
   updateSessionFromChatMessage,
   type ChatMessageInput,
   type ChatMessageOutput,
-} from './runtime-chat.js';
-import { evaluateHooks, serializeToolArgs } from './rule-hooks.js';
+} from './chat-capture.js';
 import {
   createRuleDelivery,
-  type MatchedHookContent,
   type MatchedRuleContent,
   type RuleDelivery,
-} from './rule-delivery.js';
-import type { RawHistoryResult } from './rule-delivery-history.js';
+} from '../delivery/rule-delivery.js';
 import {
   createSessionWorkingContext,
   type SessionWorkingContext,
-} from './session-working-context.js';
+} from '../session/session-working-context.js';
 import {
   createFileObservationContext,
   type FileObservationContext,
-} from './file-observation-context.js';
+} from '../session/file-observation-context.js';
+import { isRuleAdmissionPart } from '../delivery/rule-delivery-codec.js';
 import {
-  isRuleAdmissionPart,
-  type DeliveryPart,
-} from './rule-delivery-codec.js';
-import { exec } from 'node:child_process';
-import { promisify } from 'node:util';
-
-const execAsync = promisify(exec);
+  OpenCodeClientAdapter,
+  type OpenCodeClient,
+} from './client-adapter.js';
+import { ToolHookFlow } from './tool-hook-flow.js';
 
 interface MessagesTransformOutput {
   messages: MessageWithInfo[];
-}
-
-interface OpenCodeClient {
-  tool?: {
-    ids?: (args: {
-      query: { directory: string };
-    }) => Promise<{ data: string[] }>;
-  };
-  mcp?: {
-    status?: (args: {
-      query: { directory: string };
-    }) => Promise<{ connected?: Array<{ id: string }> }>;
-  };
-  session?: {
-    messages?: (args: {
-      path: { id: string };
-      query?: { directory?: string };
-    }) => Promise<{ data?: Array<{ info?: unknown; parts?: unknown[] }> }>;
-    prompt?: (args: {
-      path: { id: string };
-      query?: { directory?: string };
-      body: {
-        messageID?: string;
-        noReply: boolean;
-        parts: Array<{
-          id?: string;
-          type: 'text';
-          text: string;
-          synthetic?: boolean;
-          metadata?: Record<string, unknown>;
-        }>;
-      };
-    }) => Promise<unknown>;
-  };
 }
 
 interface OpenCodeRulesRuntimeOptions {
@@ -111,87 +66,54 @@ interface SessionRuleEvaluationInput {
 }
 
 export class OpenCodeRulesRuntime {
-  private client: OpenCodeClient;
   private directory: string;
-  private projectDirectory: string;
   private ruleFiles: DiscoveredRule[];
   private sessionStore: SessionStore;
   private matchedRulesStateStore: MatchedRulesStateStore;
   private debugLog: DebugLog;
+  private clientAdapter: OpenCodeClientAdapter;
+  private toolHookFlow: ToolHookFlow;
   private ruleDelivery: RuleDelivery;
   private sessionWorkingContext: SessionWorkingContext;
   private fileObservationContext: FileObservationContext;
   private snapshotPromises = new Map<string, Promise<RuleSnapshot[]>>();
 
   constructor(opts: OpenCodeRulesRuntimeOptions) {
-    this.client = opts.client as OpenCodeClient;
     this.directory = opts.directory;
-    this.projectDirectory = opts.projectDirectory;
     this.ruleFiles = opts.ruleFiles;
     this.sessionStore = opts.sessionStore;
     this.matchedRulesStateStore = opts.matchedRulesStateStore;
     this.debugLog = opts.debugLog ?? createDebugLog();
+    this.clientAdapter = new OpenCodeClientAdapter({
+      client: opts.client as OpenCodeClient,
+      directory: opts.directory,
+      projectDirectory: opts.projectDirectory,
+      debugLog: this.debugLog,
+    });
     this.fileObservationContext = createFileObservationContext({
       projectDirectory: opts.projectDirectory,
     });
     this.sessionWorkingContext = createSessionWorkingContext({
       sessionStore: opts.sessionStore,
       projectDirectory: opts.projectDirectory,
-      readHistory: sessionID => this.readClientHistory(sessionID),
+      readHistory: sessionID => this.clientAdapter.readClientHistory(sessionID),
       debugLog: this.debugLog,
     });
     this.ruleDelivery = createRuleDelivery({
       rawHistory: this.sessionWorkingContext.rawHistory,
       debugLog: this.debugLog,
       persistAdmission: (sessionID, part) =>
-        this.persistRuleAdmission(sessionID, part),
+        this.clientAdapter.persistRuleAdmission(sessionID, part),
     });
-  }
-
-  private async persistRuleAdmission(
-    sessionID: string,
-    part: DeliveryPart
-  ): Promise<void> {
-    const prompt = this.client.session?.prompt;
-    if (!prompt || part.type !== 'text' || typeof part.text !== 'string') {
-      throw new Error('OpenCode session.prompt is unavailable');
-    }
-    await prompt({
-      path: { id: sessionID },
-      query: { directory: this.projectDirectory },
-      body: {
-        ...(typeof part.messageID === 'string'
-          ? { messageID: part.messageID }
-          : {}),
-        noReply: true,
-        parts: [
-          {
-            ...(typeof part.id === 'string' ? { id: part.id } : {}),
-            type: 'text',
-            text: part.text,
-            synthetic: true,
-            ...(part.metadata ? { metadata: part.metadata } : {}),
-          },
-        ],
-      },
+    this.toolHookFlow = new ToolHookFlow({
+      debugLog: this.debugLog,
+      projectDirectory: opts.projectDirectory,
+      ensureSessionRuleSnapshot: sessionID =>
+        this.ensureSessionRuleSnapshot(sessionID),
+      buildMatchContext: sessionID =>
+        this.buildSessionRuleMatchContext(sessionID),
+      queueMatchedHooks: input => this.ruleDelivery.queueMatchedHooks(input),
     });
-  }
-
-  private async readClientHistory(
-    sessionID: string
-  ): Promise<RawHistoryResult> {
-    const session = this.client.session;
-    if (!session?.messages) return { ok: true, messages: [] };
-    try {
-      const result = await session.messages({
-        path: { id: sessionID },
-        query: { directory: this.directory },
-      });
-      return { ok: true, messages: result?.data ?? [] };
-    } catch (error) {
-      logWarning('Failed to fetch session history', error);
-      return { ok: false };
-    }
   }
 
   createHooks(): Record<string, unknown> {
@@ -401,20 +323,20 @@ export class OpenCodeRulesRuntime {
 
   private async buildSessionRuleMatchContext(
     sessionID: string,
-    userPrompt: string | undefined,
-    modelID: string | undefined,
-    agentType: string | undefined
+    userPrompt?: string,
+    modelID?: string,
+    agentType?: string
   ): Promise<RuleMatchContext> {
     const fileObservations =
       this.fileObservationContext.getForMatching(sessionID);
-    const availableToolIDs = await this.queryAvailableToolIDs();
+    const availableToolIDs = await this.clientAdapter.queryAvailableToolIDs();
     return buildRuleMatchContext({
       fileObservations,
       userPrompt,
       availableToolIDs,
       modelID,
       agentType,
-      projectDirectory: this.projectDirectory,
+      projectDirectory: this.directory,
       debugLog: this.debugLog,
     });
   }
@@ -508,64 +430,6 @@ export class OpenCodeRulesRuntime {
     }
   }
 
-  private async queryAvailableToolIDs(): Promise<string[]> {
-    const ids = new Set<string>();
-    const query = { directory: this.directory };
-
-    const toolPromise = this.client.tool?.ids?.({ query });
-    const mcpPromise = this.client.mcp?.status?.({ query });
-
-    const [toolResult, mcpResult] = await Promise.allSettled([
-      toolPromise,
-      mcpPromise,
-    ] as const);
-
-    const logSettledError = (
-      label: string,
-      result: PromiseRejectedResult
-    ): void => {
-      const message =
-        result.reason instanceof Error
-          ? result.reason.message
-          : String(result.reason);
-      logWarning(`Failed to query ${label}`, message);
-    };
-
-    if (
-      toolResult.status === 'fulfilled' &&
-      Array.isArray(toolResult.value?.data)
-    ) {
-      for (const id of toolResult.value.data) {
-        ids.add(id);
-      }
-      this.debugLog(
-        `Built-in tools: ${toolResult.value.data.slice(0, 10).join(', ')}${toolResult.value.data.length > 10 ? '...' : ''} (${toolResult.value.data.length} total)`
-      );
-    } else if (toolResult.status === 'rejected') {
-      logSettledError('tool IDs', toolResult);
-    }
-
-    if (
-      mcpResult.status === 'fulfilled' &&
-      mcpResult.value &&
-      'data' in mcpResult.value
-    ) {
-      const mcpIds = extractConnectedMcpCapabilityIDs(
-        mcpResult.value.data as Record<string, { status?: string }>
-      );
-      for (const id of mcpIds) {
-        ids.add(id);
-      }
-      if (mcpIds.length > 0) {
-        this.debugLog(`MCP capability IDs: ${mcpIds.join(', ')}`);
-      }
-    } else if (mcpResult.status === 'rejected') {
-      logSettledError('MCP status', mcpResult);
-    }
-
-    return Array.from(ids);
-  }
-
   private async onSessionCompacting(
     input: { sessionID?: string },
     output: { context?: string[] }
@@ -598,23 +462,6 @@ export class OpenCodeRulesRuntime {
     );
   }
 
-  private async executeHookSideEffect(
-    command: string,
-    sessionID: string
-  ): Promise<void> {
-    try {
-      this.debugLog(
-        `Executing hook side-effect for session ${sessionID}: ${command}`
-      );
-      await execAsync(command, { cwd: this.projectDirectory });
-      this.debugLog(
-        `Hook side-effect completed for session ${sessionID}: ${command}`
-      );
-    } catch (error) {
-      logWarning('Hook side-effect failed', error);
-    }
-  }
-
   /** @throws when a blocking PreToolUse hook matches. */
   private async evaluateAndQueueHooks(
     hookType: 'PreToolUse' | 'PostToolUse',
@@ -622,91 +469,11 @@ export class OpenCodeRulesRuntime {
     toolName: string,
     args: Record<string, unknown>
   ): Promise<void> {
-    const serializedArgs = serializeToolArgs(args);
-
-    const snapshots = await this.ensureSessionRuleSnapshot(sessionID);
-
-    const allMatches: Array<{
-      hook: { type: string; run?: string };
-      rule: RuleSnapshot;
-    }> = [];
-
-    for (const rule of snapshots) {
-      if (!rule.metadata?.hooks) continue;
-
-      const typeFiltered = rule.metadata.hooks.filter(h => h.type === hookType);
-      if (typeFiltered.length === 0) continue;
-
-      const matched = evaluateHooks(typeFiltered, {
-        toolName,
-        serializedArgs,
-        hookType,
-      });
-
-      for (const hook of matched) {
-        allMatches.push({ hook, rule });
-      }
-    }
-
-    if (allMatches.length === 0) return;
-
-    // The context queries (tool RPCs, project tags, git branch) are the
-    // expensive part of this path; skip them when nothing matched.
-    const state = this.sessionStore.get(sessionID);
-    const matchContext = await this.buildSessionRuleMatchContext(
+    await this.toolHookFlow.evaluateAndQueueHooks(
+      hookType,
       sessionID,
-      state?.lastUserPrompt,
-      state?.lastModelID,
-      state?.lastAgentType
+      toolName,
+      args
     );
-
-    // A blocker must fire before any side-effect runs.
-    if (hookType === 'PreToolUse') {
-      const blocker = allMatches.find(
-        m =>
-          m.hook.type === 'PreToolUse' && (m.hook as { block?: boolean }).block
-      );
-      if (blocker) {
-        this.debugLog(
-          `PreToolUse block fired for rule ${blocker.rule.relativePath}, tool ${toolName}`
-        );
-        throw new Error(
-          `[opencode-rules] Blocked by rule "${blocker.rule.relativePath}": ` +
-            `tool "${toolName}" matched blocked pattern`
-        );
-      }
-    }
-
-    // Queue each rule once no matter how many of its hooks matched.
-    const seenRules = new Set<string>();
-    const matchedHooks: MatchedHookContent[] = [];
-    for (const { hook, rule } of allMatches) {
-      if (!seenRules.has(rule.filePath)) {
-        seenRules.add(rule.filePath);
-        const lifetime =
-          matchRuleSnapshots([rule], matchContext)[0]?.lifetime ?? 'ephemeral';
-        matchedHooks.push({
-          identity: rule.filePath,
-          relativePath: rule.relativePath,
-          name: rule.name,
-          content: rule.strippedContent,
-          lifetime,
-        });
-
-        this.debugLog(
-          `${hookType} hook fired for rule ${rule.relativePath}, tool ${toolName} (${lifetime})`
-        );
-      }
-
-      if (hook.run) {
-        await this.executeHookSideEffect(hook.run, sessionID);
-      }
-    }
-    if (matchedHooks.length > 0) {
-      this.ruleDelivery.queueMatchedHooks({
-        sessionID,
-        hooks: matchedHooks,
-      });
-    }
   }
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { updateSessionFromChatMessage } from './runtime-chat.js';
-import { SessionStore } from './session-store.js';
+import { updateSessionFromChatMessage } from './chat-capture.js';
+import { SessionStore } from '../session/session-store.js';
 
 describe('updateSessionFromChatMessage', () => {
   it('captures canonical model and agent from output.message', () => {

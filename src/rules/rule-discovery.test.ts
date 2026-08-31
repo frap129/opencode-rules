@@ -6,7 +6,7 @@ import {
   getCachedRule,
   clearRuleCache,
 } from './rule-discovery.js';
-import { setupTestDirs, teardownTestDirs } from './test-fixtures.js';
+import { setupTestDirs, teardownTestDirs } from '../test-fixtures.js';
 
 describe('loadRuleSnapshots', () => {
   afterEach(teardownTestDirs);

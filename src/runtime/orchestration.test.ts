@@ -13,11 +13,11 @@ import {
   teardownTestDirs,
   type HookChatMessage,
   type HookChatOutput,
-} from './test-fixtures.js';
+} from '../test-fixtures.js';
 import {
   MatchedRulesStateStore,
   readMatchedRulesState,
-} from './matched-rules-state.js';
+} from '../session/matched-rules-state.js';
 
 describe('observation admission and noReply persistence', () => {
   let savedXDG: string | undefined;
@@ -45,7 +45,7 @@ describe('observation admission and noReply persistence', () => {
     const sessionID = 'ses_no_history_replay';
     const {
       default: { server: plugin },
-    } = await import('./index.js');
+    } = await import('../index.js');
     const hooks = await plugin(
       createMockPluginInput({
         testDir,
@@ -133,7 +133,7 @@ describe('observation admission and noReply persistence', () => {
     }> = [];
     const {
       default: { server: plugin },
-    } = await import('./index.js');
+    } = await import('../index.js');
     const mockInput = createMockPluginInput({
       testDir,
       sessionPrompt: async args => {
@@ -187,7 +187,7 @@ describe('observation admission and noReply persistence', () => {
     let promptCount = 0;
     const {
       default: { server: plugin },
-    } = await import('./index.js');
+    } = await import('../index.js');
     const mockInput = createMockPluginInput({
       testDir,
       sessionPrompt: async () => {
@@ -232,7 +232,7 @@ describe('observation admission and noReply persistence', () => {
     }> = [];
     const {
       default: { server: plugin },
-    } = await import('./index.js');
+    } = await import('../index.js');
     const mockInput = createMockPluginInput({
       testDir,
       sessionPrompt: async args => {
@@ -349,7 +349,7 @@ describe('observation admission and noReply persistence', () => {
     }> = [];
     const {
       default: { server: plugin },
-    } = await import('./index.js');
+    } = await import('../index.js');
     const hooks = await plugin(
       createMockPluginInput({
         testDir,
