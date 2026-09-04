@@ -38,20 +38,16 @@ describe('sidebar mount', () => {
     process.env.XDG_CONFIG_HOME = path.join(tmp, '.config');
     delete process.env.OPENCODE_CONFIG_DIR;
 
-    const theme = {
-      current: { text: 'white', textMuted: 'gray', success: 'green' },
-    };
-    const api = {
-      state: { path: { directory: tmp } },
-      event: { on: () => () => {} },
-    };
+    const theme = { text: 'white', textMuted: 'gray', success: 'green' };
+    const data = { on: () => () => {} };
 
     try {
       const setup = await testRender(
         () => (
           <SidebarContent
             sessionId="ses_sidebar_mount_render_only"
-            api={api as never}
+            projectDir={tmp}
+            data={data as never}
             theme={theme as never}
           />
         ),

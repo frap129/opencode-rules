@@ -528,14 +528,13 @@ opencode-rules/
 │       ├── bounded-session-map.ts # Shared internal LRU-bounded per-session map (sole value owner; unstamped reads; optional eviction protection)
 │       └── debug.ts          # Debug logging utilities
 ├── tui/
-│   ├── index.tsx             # TUI entrypoint, exports { id, tui }
+│   ├── index.tsx             # CLI-plugin entrypoint, exports { id, setup(ctx) }
 │   ├── slots/
-│   │   └── sidebar-content.tsx # Sidebar widget component
+│   │   ├── sidebar-content.tsx # Sidebar widget component (sidebar.content slot)
+│   │   └── sidebar-mount.test.tsx # Mount smoke test
 │   ├── data/
 │   │   ├── rules.ts          # Rule discovery + formatting for sidebar
 │   │   └── rules.test.ts     # Data layer tests
-│   └── types/
-│       └── opencode-plugin-tui.d.ts  # Vendored type shim
 ├── docs/
 │   └── rules.md              # Detailed usage documentation
 └── dist/                     # Compiled JavaScript output

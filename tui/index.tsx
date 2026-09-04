@@ -1,22 +1,22 @@
 /** @jsxImportSource @opentui/solid */
-import type { TuiPlugin } from '@opencode-ai/plugin/tui';
+import type { Plugin as TuiPluginNamespace } from '@opencode-ai/plugin/tui';
 import { SidebarContent } from './slots/sidebar-content.js';
 
-const id = 'opencode-rules' as const;
-
-const tui: TuiPlugin = async api => {
-  api.slots.register({
-    order: 350,
-    slots: {
-      sidebar_content: (ctx, props) => (
+const tui: TuiPluginNamespace.Definition = {
+  id: 'opencode-rules',
+  async setup(ctx) {
+    ctx.ui.slot({
+      append: 'sidebar.content',
+      render: input => (
         <SidebarContent
-          sessionId={props.session_id}
-          api={api}
+          sessionId={input.sessionID}
+          projectDir={ctx.data.session.root(input.sessionID)}
+          data={ctx.data}
           theme={ctx.theme}
         />
       ),
-    },
-  });
+    });
+  },
 };
 
-export default { id, tui };
+export default tui;

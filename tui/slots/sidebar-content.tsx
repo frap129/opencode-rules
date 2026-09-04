@@ -7,7 +7,7 @@ import {
   For,
   type JSX,
 } from 'solid-js';
-import type { TuiPluginApi, TuiTheme } from '@opencode-ai/plugin/tui';
+import type { Plugin as TuiPluginNamespace } from '@opencode-ai/plugin/tui';
 import { loadSidebarRules, type SidebarRuleEntry } from '../data/rules.js';
 import { createRulesLoadCoordinator } from '../data/rules-load-coordinator.js';
 import type { RuleMetadata } from '../../src/rules/rule-metadata.js';
@@ -31,8 +31,9 @@ const metadataFieldDescriptors: Array<{
 
 interface SidebarContentProps {
   sessionId: string;
-  api: TuiPluginApi;
-  theme: TuiTheme;
+  projectDir: string | null;
+  data: TuiPluginNamespace.Context['data'];
+  theme: TuiPluginNamespace.Context['theme'];
 }
 
 type ThemeColor = string | import('@opentui/core').RGBA;
@@ -158,11 +159,9 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
   const [globalOpen, setGlobalOpen] = createSignal(false);
   const [refreshCounter, setRefreshCounter] = createSignal(0);
 
-  const theme = (): ThemeColors => props.theme.current as ThemeColors;
+  const theme = (): ThemeColors => props.theme as unknown as ThemeColors;
 
-  const resolveProjectDir = (): string | null => {
-    return props.api.state.path.directory ?? null;
-  };
+  const resolveProjectDir = (): string | null => props.projectDir;
 
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -213,12 +212,8 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
     }
   });
 
-  const triggerRefresh = (event: {
-    type: string;
-    properties: Record<string, unknown>;
-  }): void => {
-    // SDK events nest sessionID inside properties.
-    const eventSessionID = event.properties.sessionID;
+  const triggerRefresh = (event: { data: { sessionID?: string } }): void => {
+    const eventSessionID = event.data?.sessionID;
     if (
       typeof eventSessionID === 'string' &&
       eventSessionID !== props.sessionId
@@ -235,14 +230,11 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
     }, 150);
   };
 
-  const unsubMessageUpdated = props.api.event.on(
-    'message.updated',
+  const unsubMessageUpdated = props.data.on(
+    'session.message.content.updated',
     triggerRefresh
   );
-  const unsubSessionStatus = props.api.event.on(
-    'session.status',
-    triggerRefresh
-  );
+  const unsubSessionStatus = props.data.on('session.status', triggerRefresh);
 
   onCleanup(() => {
     if (debounceTimer !== null) {
