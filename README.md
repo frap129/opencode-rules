@@ -46,27 +46,27 @@ approach.
 ### Installation
 
 ```bash
-opencode plugin opencode-rules@latest --global
+opencode plugin opencode-rules@v2 --global
 ```
 
 <details>
 <summary>Manual installation</summary>
 
-Add the plugin to your opencode config:
+Add the plugin to your opencode config (v2 uses the `plugins` key):
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-rules@latest"]
+  "plugins": ["opencode-rules@v2"]
 }
 ```
 
-To enable the TUI sidebar, add the same plugin entry to your TUI config:
+To enable the TUI sidebar, add the same entry to your `cli.json`:
 
 ```json
-// ~/.config/opencode/tui.json
+// ~/.config/opencode/cli.json
 {
-  "plugin": ["opencode-rules@latest"]
+  "plugins": ["opencode-rules@v2"]
 }
 ```
 
@@ -74,14 +74,14 @@ To enable the TUI sidebar, add the same plugin entry to your TUI config:
 
 ### Beta Channel
 
-Pre-release versions from the `dev` branch are published under the `beta` npm dist-tag. These include upcoming features and fixes but may be unstable.
+v2 pre-releases from the `v2` branch are published under the `v2` npm dist-tag. These include upcoming features and fixes but may be unstable.
 
 ```bash
-opencode plugin opencode-rules@beta --global
+opencode plugin opencode-rules@v2 --global
 ```
 
 > [!WARNING]
-> Beta releases track the `dev` branch and may contain breaking changes or bugs. Test thoroughly in non-critical workflows before using.
+> v2 betas target the OpenCode v2 beta line and may contain breaking changes or bugs. Test thoroughly in non-critical workflows before using. v1 users tracking `beta` are unaffected: v2 builds never move that tag.
 
 ### Create Your First Rule
 
@@ -110,11 +110,11 @@ That's it! The rule will now be automatically delivered to all AI agent conversa
 1. **Discovery**: Scan global and project directories for `.md` and `.mdc` files (at plugin init)
 2. **Parsing**: Extract metadata from files with YAML front matter
 3. **File Observations**: Successful live Read, Write, Edit, Apply Patch, and path-associated LSP `tool.execute.after` events create File observations. Historical tool parts do not recreate File observations or select new file-scoped Rules.
-4. **History Seeding**: `experimental.chat.messages.transform` rebuilds the path-only Working context for compaction from message history once and lets RuleDelivery rebuild identity-ledger evidence from synthetic delivery metadata when resuming a session
-5. **Earliest Dispatch**: A newly Matched Durable Rule in the file-observation family (`globs`, `fileContains`, or both) is admitted immediately through an awaited `session.prompt({ noReply: true })`; pending guidance is included transiently in the next usable dispatch and persistence retries there. Initial Durable matches still append to `chat.message`.
-6. **Rule Delivery**: Each injection event is one `<system-message>` block with one plugin preamble and a `<rule name="...">` block per rule. The name comes from frontmatter `name` or the filename stem. Session-durable rules (unconditional, `globs`, `fileContains`, `keywords`, `command`, `project`, `os`, and `ci`) are appended once to the user message as one persisted synthetic text part via `chat.message`, hidden in the TUI but included in provider requests so the system prompt stays byte-stable for prompt caching. Agent, `model`, `branch`, and `tools` rules are appended only to the transformed model request as one transient synthetic message per matching turn, so changing agent or model does not leave stale rule text in new history. Path-based deduplication applies only to durable delivery.
+4. **History Seeding**: The session `context` hook rebuilds the path-only Working context for compaction from message history once and lets RuleDelivery rebuild identity-ledger evidence from synthetic delivery metadata when resuming a session
+5. **Earliest Dispatch**: A newly Matched Durable Rule in the file-observation family (`globs`, `fileContains`, or both) is admitted immediately through an awaited `session.prompt({ resume: false })`; pending guidance is included transiently in the next usable dispatch and persistence retries there. Initial Durable matches are published through `session.synthetic` on the session `prompt` hook.
+6. **Rule Delivery**: Each injection event is one `<system-message>` block with one plugin preamble and a `<rule name="...">` block per rule. The name comes from frontmatter `name` or the filename stem. Session-durable rules (unconditional, `globs`, `fileContains`, `keywords`, `command`, `project`, `os`, and `ci`) are published once per turn as one persisted synthetic message via `session.synthetic`, hidden in the TUI but included in provider requests. Agent, `model`, `branch`, and `tools` rules are appended only to the model request as one transient synthetic message per matching turn via the session `context` hook, so changing agent or model does not leave stale rule text in new history. Path-based deduplication applies only to durable delivery.
 7. **State Persistence**: Matched rule paths are written to `~/.opencode/state/opencode-rules/{sessionId}.json` for TUI consumption
-8. **Compaction Persistence**: `experimental.session.compacting` preserves Working-context paths and invalidates the durable delivery ledger; the next transformed request rebuilds it from surviving parts so missing durable rules are re-appended, while ephemeral rules continue to be recomputed per request
+8. **Compaction Persistence**: The `session.compaction.started` event preserves Working-context paths and invalidates the durable delivery ledger; the projection rides the next session-`context` dispatch, and the ledger heals on the first durable turn after compaction by re-decoding the compacted history, so missing durable rules are re-appended exactly once, while ephemeral rules continue to be recomputed per request
 
 ## Performance
 
@@ -491,7 +491,7 @@ The following shows the key source modules. Additional test files (`*.test.ts`) 
 ```
 opencode-rules/
 ├── src/
-│   ├── index.ts              # Main plugin entry point and exports
+│   ├── index.ts              # Plugin entry point (v2 default export { id, setup })
 │   ├── test-fixtures.ts      # Shared test fixtures and builders
 │   ├── api-surface.typecheck.ts # Type-level privacy contract (checked by tsc)
 │   ├── rules/
@@ -514,14 +514,15 @@ opencode-rules/
 │   │   ├── session-working-context.ts # Runtime-owned Working context (path-only compaction projection, history prefetch, never a matching source)
 │   │   └── message-extraction.ts # File-path, prompt, and session-ID extraction from message parts
 │   ├── runtime/
-│   │   ├── orchestrator.ts   # OpenCodeRulesRuntime class (hook orchestration)
-│   │   ├── client-adapter.ts # OpenCode client port (history reads, no-reply admission, tool-ID/MCP queries)
+│   │   ├── orchestrator.ts   # OpenCodeRulesRuntime class (v2 hook orchestration: wire, tool hooks, session context/prompt hooks, event loop)
+│   │   ├── create-runtime.ts # Runtime factory and test seam (v2 default-export entry is loader-only)
+│   │   ├── client-adapter.ts # v2 plugin-context client port (session.context history reads, session.prompt no-reply admission, MCP list queries)
 │   │   ├── tool-hook-flow.ts # PreToolUse/PostToolUse evaluation, blockers, side-effects, Hook queuing
 │   │   ├── match-context.ts  # Context-building helpers (match context, project detection)
-│   │   └── chat-capture.ts   # Chat message handling and text extraction
+│   │   └── chat-capture.ts   # Session context/prompt capture (model, agent, and user prompt from the v2 session hooks)
 │   ├── detection/
 │   │   ├── project-fingerprint.ts # Project type detection (Node.js, Python, etc.)
-│   │   ├── mcp-tools.ts      # MCP tool ID extraction
+│   │   ├── mcp-tools.ts      # MCP tool ID extraction (v2 McpServer[] or legacy status map)
 │   │   └── git-branch.ts     # Git branch detection
 │   └── shared/
 │       ├── bounded-session-map.ts # Shared internal LRU-bounded per-session map (sole value owner; unstamped reads; optional eviction protection)
@@ -544,7 +545,7 @@ opencode-rules/
 
 The following highlights the primary runtime modules:
 
-- **runtime/orchestrator.ts** - Orchestrates hooks (`tool.execute.before`, `chat.message`, `experimental.chat.*`)
+- **runtime/orchestrator.ts** - Orchestrates v2 hooks (`tool.execute.before/after`, session `context`/`prompt` hooks, event loop) and wires the runtime
 - **runtime/client-adapter.ts** - Isolates the OpenCode client port: history reads, no-reply admission via `session.prompt`, tool-ID/MCP queries
 - **runtime/tool-hook-flow.ts** - Evaluates PreToolUse/PostToolUse hooks, throws on blockers, runs side-effects, queues matched Hook content
 - **delivery/rule-delivery.ts** - Owns durable/transient delivery composed over per-session state, ledger, and transient seams
@@ -554,7 +555,7 @@ The following highlights the primary runtime modules:
 - **delivery/rule-delivery-codec.ts** - Encodes durable/transient delivery and decodes durable history facts plus transient presence facts
 - **delivery/rule-delivery-history.ts** - Defines the raw host-history port used by delivery decoding
 - **runtime/match-context.ts** - Builds `RuleMatchContext` from session state and environment
-- **runtime/chat-capture.ts** - Extracts text from chat message parts for keyword matching
+- **runtime/chat-capture.ts** - Captures model, agent, and user prompt from the v2 session `context` and `prompt` hooks
 - **rules/rule-discovery.ts** - Recursively scans directories for `.md`/`.mdc` rule files
 - **rules/rule-metadata.ts** - Parses YAML frontmatter into typed `RuleMetadata`
 - **rules/rule-filter.ts** - Matches rules against context (file-observation family: globs + fileContains, keywords, tools, runtime filters) and classifies each match as session-durable or ephemeral
@@ -572,9 +573,9 @@ The following highlights the primary runtime modules:
 
 ### TUI Sidebar
 
-The plugin registers a `sidebar_content` slot in the OpenCode TUI, displaying all discovered rules (global and project-local) with their active state and metadata.
+The plugin registers a `sidebar.content` slot in the OpenCode v2 TUI, displaying all discovered rules (global and project-local) with their active state and metadata.
 
-**Requirements:** `@opencode-ai/plugin` ^1.3.7 with TUI support.
+**Requirements:** OpenCode v2 with `@opencode-ai/plugin` on the v2 beta line.
 
 **What it shows:**
 
@@ -618,7 +619,7 @@ bun run lint
 ### Tech Stack
 
 - **TypeScript** - Type-safe development
-- **@opencode-ai/plugin** - OpenCode plugin framework
+- **@opencode-ai/plugin** (v2 beta) - OpenCode plugin framework
 - **Vitest** - Fast unit testing
 - **Prettier** - Code formatting
 - **ESLint** - Linting and code quality
@@ -642,9 +643,9 @@ This plugin uses OpenCode's hook system for incremental, stateful rule delivery:
    - Evaluates `PostToolUse` hooks for reactive rule triggering
    - Queues corrective rule content for delivery on the next turn; hook blocking
      and `run` side effects are unchanged
-   - Hook text uses the same single-event framing as ordinary rules. Durable-owner hooks join the next durable `chat.message` delivery; ephemeral-owner hooks join the next transient `experimental.chat.messages.transform` delivery and are never persisted
+   - Hook text uses the same single-event framing as ordinary rules. Durable-owner hooks join the next durable `session.synthetic` delivery; ephemeral-owner hooks join the next transient session-`context` delivery and are never persisted
 
-3. **`chat.message`** - User prompt capture and synthetic-part rule delivery
+3. **session `prompt` hook** - User prompt capture and durable synthetic rule delivery
    - Fires as each user message arrives
    - Extracts and stores the latest user prompt text
    - Enables keyword-based rule matching across the conversation flow
@@ -658,10 +659,10 @@ This plugin uses OpenCode's hook system for incremental, stateful rule delivery:
    - Appends all newly matched **session-durable** rules and durable hook guidance to the user message as one framed synthetic text part (id prefix `prt_rules_`) before opencode persists it; ephemeral matches (agent, model, branch, tools) are never written here
    - Synthetic parts are hidden in the TUI but included in provider requests, keeping the system prompt byte-stable across requests for provider prompt caching
    - Path-derived identity keys ensure durable rules already present in session history are not re-appended when content changes or a session resumes
-   - `message.removed` events invalidate the delivery ledger so rules attached to canceled or reverted messages are retried on the replacement message
+   - `session.revert.*` events invalidate the delivery ledger so rules attached to canceled or reverted messages are retried on the replacement message
    - Rule content and metadata are snapshotted per session at first evaluation; in-process file edits do not change an existing session's delivery
 
-4. **`experimental.chat.messages.transform`** - History seeding, ephemeral rule delivery, and transient hook delivery
+4. **session `context` hook** - History seeding, ephemeral rule delivery, and transient hook delivery
    - Fires before each model request; history seeding runs only on the first
      call (gated by seededFromHistory), while transient rule/hook delivery runs
      on every request
@@ -673,19 +674,19 @@ This plugin uses OpenCode's hook system for incremental, stateful rule delivery:
      never persisted, so switching agent or model swaps the applicable rules
    - Delivers all queued hook content together with matching ephemeral rules in the same framed transient synthetic user message (`prt_rule_ephemeral_`) appended to the very next model request - never persisted
 
-5. **`experimental.session.compacting`** - Compaction context preservation
+5. **`session.compaction.started` event** - Compaction invalidation and healing
    - Fires when a session is compacted (summarized)
-   - Injects Working-context paths into the compaction context
-   - Rebuilds the durable delivery ledger from post-compaction request history so rules removed by compaction are re-appended, while rules still present are not duplicated
+   - Preserves Working-context paths; the projection rides the next session-`context` dispatch exactly once
+   - Re-decodes the compacted history on the first durable turn after compaction so durable rules the summary dropped are re-appended exactly once, while rules still present are not duplicated
 
 ### Experimental API Notice
 
 This plugin depends on experimental OpenCode APIs:
 
-- `experimental.chat.messages.transform` (history seeding, transient rule and hook delivery)
-- `experimental.session.compacting` (compaction context)
+- session `context` hook (history seeding, transient rule and hook delivery)
+- `session.compaction.started` event (compaction invalidation; ledger heal on the next durable turn)
 
-It also uses the stable `chat.message` hook for synthetic-part rule delivery.
+It also uses the session `prompt` hook for durable synthetic rule delivery and the session `prompt` client API (resume:false) for awaited no-reply admission.
 
 These APIs may change in future OpenCode versions. Check OpenCode release notes when upgrading.
 
@@ -741,21 +742,21 @@ We welcome contributions! Please:
 - Update documentation for API changes
 - Use TypeScript for all new code
 
-### Publishing a Beta Release
+### Publishing a v2 Beta Release
 
-Beta releases are published from the `dev` branch. To cut a beta:
+v2 betas are published from the `v2` branch. To cut one:
 
-1. Ensure all checks pass on `dev`
-2. Bump the version in `package.json` using a semver prerelease suffix (e.g., `0.7.0-beta.1`)
-3. Commit: `chore: bump to 0.7.0-beta.1`
-4. Tag: `git tag v0.7.0-beta.1`
-5. Push: `git push origin dev --tags`
+1. Ensure all checks pass on `v2`
+2. Bump the version in `package.json` using a semver prerelease suffix (e.g., `2.0.0-beta.1`)
+3. Commit: `chore(release): bump to 2.0.0-beta.1`
+4. Tag: `git tag v2.0.0-beta.1`
+5. Push: `git push origin v2 --tags`
 
-The `release-beta.yml` workflow publishes to npm with `--tag beta` and creates a prerelease GitHub Release.
+The `release-beta.yml` workflow publishes to npm with `--tag v2` and creates a prerelease GitHub Release. Tags must be contained by `dev` or `v2`.
 
 ### Publishing a Stable Release
 
-Stable releases are published from `main`. Same process as beta but use a plain semver version (e.g., `0.7.0`). The `release.yml` workflow publishes to npm with the `latest` dist-tag.
+Stable releases are published from `main`. Same process as beta but use a plain semver version (e.g., `1.0.1`). The `release.yml` workflow publishes to npm with the `latest` dist-tag.
 
 ## See Also
 

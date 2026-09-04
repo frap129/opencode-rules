@@ -6,7 +6,7 @@ on:
 
 jobs:
   release:
-    if: ${{ !contains(github.ref, '-beta') && !contains(github.ref, '-alpha') }}
+    if: ${{ !contains(github.ref, '-beta') && !contains(github.ref, '-alpha') && !contains(github.ref, '-rc') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

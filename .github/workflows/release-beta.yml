@@ -18,10 +18,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Verify dev branch
+      - name: Verify dev or v2 branch
         run: |
-          if ! git branch -r --contains $GITHUB_SHA | grep -q 'origin/dev'; then
-            echo "ERROR: Beta releases must be tagged on the dev branch"
+          if ! git branch -r --contains $GITHUB_SHA | grep -Eq 'origin/(dev|v2)'; then
+            echo "ERROR: Beta releases must be tagged on the dev or v2 branch"
             exit 1
           fi
 
@@ -49,8 +49,8 @@ jobs:
       - name: Install npm with trusted publishing support
         run: npm install -g npm@latest
 
-      - name: Publish to npm (beta)
-        run: npm publish --access public --tag beta
+      - name: Publish to npm (v2)
+        run: npm publish --access public --tag v2
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@26e8ad27a09a225049a7075d7ec1caa2df6ff332 # v2
