@@ -216,7 +216,15 @@ export function decodeRawHistory(
 
   for (const message of messages) {
     const messageRecord = asRecord(message);
-    if (!messageRecord || !Array.isArray(messageRecord.parts)) continue;
+    if (!messageRecord) continue;
+
+    // v2 session messages carry ledger keys at message level (synthetic
+    // messages have no parts; metadata rides the message itself).
+    const messageMetadata = asRecord(messageRecord.metadata);
+    recordKeys(facts.ruleKeys, messageMetadata?.ruleKeys);
+    recordKeys(facts.hookKeys, messageMetadata?.hookKeys);
+
+    if (!Array.isArray(messageRecord.parts)) continue;
 
     for (const value of messageRecord.parts) {
       const part = asRecord(value);

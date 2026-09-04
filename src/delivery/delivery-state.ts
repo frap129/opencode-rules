@@ -11,6 +11,8 @@ export interface DeliveryState {
   ledgerRevision: number;
   seededFromHistory: boolean;
   needsRescan: boolean;
+  /** Set by markCompacted; the next durable turn re-decodes history. */
+  pendingCompactionHeal: boolean;
   pendingHookQueue: MatchedHookContent[];
   pendingRuleQueue: MatchedRuleContent[];
   durableHookQueue: MatchedHookContent[];
@@ -31,6 +33,7 @@ export function createDeliveryState(): DeliveryState {
     ledgerRevision: 0,
     seededFromHistory: false,
     needsRescan: false,
+    pendingCompactionHeal: false,
     pendingHookQueue: [],
     pendingRuleQueue: [],
     durableHookQueue: [],

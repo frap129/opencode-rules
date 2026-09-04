@@ -162,8 +162,12 @@ export interface MessagePartWithSession {
   callID?: string;
   tool?: string;
   state?: {
+    status?: unknown;
     input?: unknown;
   };
+  /** v2 history adapter: tool result text on a tool part. */
+  output?: string;
+  metadata?: unknown;
 }
 
 export interface MessageWithInfo {

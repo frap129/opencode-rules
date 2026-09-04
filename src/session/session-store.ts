@@ -5,6 +5,8 @@ export interface SessionState {
   workingContextPaths: Set<string>;
   lastUserPrompt?: string;
   workingContextSeeded: boolean;
+  /** Set when a compaction event was observed; drives the projection. */
+  compacted?: boolean;
   lastModelID?: string;
   lastAgentType?: string;
   ruleSnapshots?: RuleSnapshot[];

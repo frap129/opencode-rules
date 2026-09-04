@@ -1,7 +1,14 @@
 import path from 'node:path';
 import os from 'node:os';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { __testOnly } from './index.js';
+import { createRuntime } from './runtime/create-runtime.js';
+import type { OpenCodeRulesRuntime } from './runtime/orchestrator.js';
+import type {
+  V2SessionContextInput,
+  V2SessionPromptInput,
+  V2ToolExecuteAfterInput,
+  V2ToolExecuteBeforeInput,
+} from './runtime/orchestrator.js';
 import type { MatchedRulesStateStore } from './session/matched-rules-state.js';
 
 interface TestDirs {
@@ -75,108 +82,209 @@ export function restoreCiEnvVars(saved: CiEnvSnapshot): void {
   }
 }
 
-interface MockPluginInput {
+export interface MockPluginInput {
   testDir: string;
-  toolIds?: string[];
-  mcpStatus?: Record<string, { status: string }>;
-  history?: Array<{ info?: unknown; parts?: unknown[] }>;
-  sessionPrompt?: (args: {
-    path: { id: string };
-    query?: { directory?: string };
-    body: {
-      messageID?: string;
-      noReply?: boolean;
-      parts: Array<Record<string, unknown>>;
-    };
-  }) => Promise<unknown>;
+  /** v2 mcp.list() shape: McpServer[] tagged by status. */
+  mcpServers?: Array<{ name: string; status: string }>;
+  /** Session history returned by client.session.context(). */
+  history?: unknown[];
+  /** Session context implementation; defaults to returning opts.history. */
+  sessionContext?: (input: { sessionID: string }) => Promise<unknown>;
+  /** Awaited no-reply admissions; captures calls to session.prompt. */
+  promptCalls?: Array<{
+    sessionID: string;
+    id?: string;
+    text: string;
+    metadata?: Record<string, unknown>;
+    resume?: boolean;
+  }>;
+  /** Durable synthetic deliveries; captures calls to session.synthetic. */
+  syntheticCalls?: Array<{
+    sessionID: string;
+    id: string;
+    text: string;
+    metadata?: Record<string, unknown>;
+    delivery?: string;
+  }>;
+  /**
+   * Events drained by the runtime's event loop; use pushEvent (or seed
+   * before wire) to inject v2 events through the real subscription path.
+   */
+  events?: MockEvent[];
 }
 
-export function createMockPluginInput(opts: MockPluginInput): {
-  client: {
-    tool: { ids: () => Promise<{ data: string[] }> };
-    mcp?: {
-      status: () => Promise<{ data: Record<string, { status: string }> }>;
-    };
-    session: {
-      messages: () => Promise<{
-        data: Array<{ info?: unknown; parts?: unknown[] }>;
-      }>;
-    };
+export interface MockEvent {
+  type?: string;
+  data?: { sessionID?: unknown };
+}
+
+export interface HookRecorders {
+  toolBefore: Array<(input: V2ToolExecuteBeforeInput) => Promise<void> | void>;
+  toolAfter: Array<(input: V2ToolExecuteAfterInput) => Promise<void> | void>;
+  sessionContext: Array<(input: V2SessionContextInput) => Promise<void> | void>;
+  sessionPrompt: Array<(input: V2SessionPromptInput) => Promise<void> | void>;
+}
+
+export interface MockPluginContext {
+  location: { directory: string };
+  tool: {
+    hook: (
+      name: 'execute.before' | 'execute.after',
+      handler: (input: never) => Promise<void> | void
+    ) => Promise<{ dispose(): Promise<void> }>;
   };
-  project: Record<string, unknown>;
-  directory: string;
-  worktree: string;
-  $: Record<string, unknown>;
-  serverUrl: URL;
+  session: {
+    hook: (
+      name: 'context' | 'prompt',
+      handler: (input: never) => Promise<void> | void
+    ) => Promise<{ dispose(): Promise<void> }>;
+    synthetic?: (input: {
+      sessionID: string;
+      id: string;
+      text: string;
+      metadata?: Record<string, unknown>;
+      delivery?: string;
+    }) => Promise<unknown>;
+    /** Client surface (v2 context IS the client): session.context() history. */
+    context?: (input: { sessionID: string }) => Promise<unknown>;
+    /** Client surface: awaited no-reply admissions. */
+    prompt?: (input: {
+      sessionID: string;
+      id?: string;
+      text: string;
+      metadata?: Record<string, unknown>;
+      resume?: boolean;
+    }) => Promise<unknown>;
+  };
+  event: {
+    subscribe(options?: { signal?: AbortSignal }): AsyncIterable<unknown>;
+  };
+  mcp: {
+    list(input?: {
+      location?: { directory?: string };
+    }): Promise<{ data?: unknown }>;
+  };
+}
+
+/**
+ * Builds a mock v2 plugin context (the context IS the client in v2) that
+ * records every registered hook so tests invoke handlers directly.
+ */
+export function createMockPluginInput(opts: MockPluginInput): {
+  context: MockPluginContext;
+  hooks: HookRecorders;
+  syntheticCalls: NonNullable<MockPluginInput['syntheticCalls']>;
+  promptCalls: NonNullable<MockPluginInput['promptCalls']>;
+  /** Delivers an event to the wired runtime's event loop. */
+  pushEvent: (event: MockEvent) => void;
 } {
-  const client: {
-    tool: { ids: () => Promise<{ data: string[] }> };
-    mcp?: {
-      status: () => Promise<{ data: Record<string, { status: string }> }>;
-    };
+  const hooks: HookRecorders = {
+    toolBefore: [],
+    toolAfter: [],
+    sessionContext: [],
+    sessionPrompt: [],
+  };
+  const syntheticCalls: NonNullable<MockPluginInput['syntheticCalls']> =
+    opts.syntheticCalls ?? [];
+  const promptCalls: NonNullable<MockPluginInput['promptCalls']> =
+    opts.promptCalls ?? [];
+  opts.syntheticCalls = syntheticCalls;
+  opts.promptCalls = promptCalls;
+
+  const events: MockEvent[] = opts.events ?? [];
+  opts.events = events;
+  let wakeEventLoop: (() => void) | undefined;
+  const waitForEvent = (): Promise<void> =>
+    new Promise(resolve => {
+      wakeEventLoop = resolve;
+    });
+  const pushEvent = (event: MockEvent): void => {
+    events.push(event);
+    wakeEventLoop?.();
+    wakeEventLoop = undefined;
+  };
+
+  const context: MockPluginContext = {
+    location: { directory: opts.testDir },
+    tool: {
+      hook: async (name, handler) => {
+        if (name === 'execute.before') {
+          hooks.toolBefore.push(handler as never);
+        } else if (name === 'execute.after') {
+          hooks.toolAfter.push(handler as never);
+        }
+        return { dispose: async () => undefined };
+      },
+    },
     session: {
-      messages: () => Promise<{
-        data: Array<{ info?: unknown; parts?: unknown[] }>;
-      }>;
-    };
-  } = {
-    tool: { ids: async () => ({ data: opts.toolIds ?? [] }) },
-    session: {
-      messages: async () => ({ data: opts.history ?? [] }),
-      ...(opts.sessionPrompt ? { prompt: opts.sessionPrompt } : {}),
+      hook: async (name, handler) => {
+        if (name === 'context') {
+          hooks.sessionContext.push(handler as never);
+        } else if (name === 'prompt') {
+          hooks.sessionPrompt.push(handler as never);
+        }
+        return { dispose: async () => undefined };
+      },
+      synthetic: async input => {
+        opts.syntheticCalls?.push(input);
+        return { id: input.id };
+      },
+      // v2 context IS the client: history and admissions ride session.*.
+      ...(opts.sessionContext
+        ? { context: opts.sessionContext }
+        : {
+            context: async () => ({ data: opts.history ?? [] }),
+          }),
+      ...(opts.promptCalls
+        ? {
+            prompt: async (
+              input: NonNullable<MockPluginContextOptions_promptCalls>[number]
+            ) => {
+              opts.promptCalls?.push(input);
+              return { id: input.id ?? 'msg_admitted' };
+            },
+          }
+        : {}),
+    },
+    event: {
+      // Drains opts.events; suspends when empty until pushEvent wakes it,
+      // so tests can inject v2 events through the runtime's real event
+      // path at any point after wiring.
+      async *subscribe() {
+        let index = 0;
+        while (true) {
+          while (index < events.length) {
+            yield events[index];
+            index++;
+          }
+          await waitForEvent();
+        }
+      },
+    },
+    mcp: {
+      list: async () => ({ data: opts.mcpServers ?? [] }),
     },
   };
 
-  if (opts.mcpStatus) {
-    client.mcp = {
-      status: async () => ({ data: opts.mcpStatus! }),
-    };
-  }
-
-  return {
-    client,
-    project: {},
-    directory: opts.testDir,
-    worktree: opts.testDir,
-    $: {},
-    serverUrl: new URL('http://localhost:3000'),
-  };
+  return { context, hooks, syntheticCalls, promptCalls, pushEvent };
 }
 
-// Injecting the store keeps tests off the real ~/.opencode state directory.
-export function createHooksWithStore(
+type MockPluginContextOptions_promptCalls = MockPluginInput['promptCalls'];
+
+/** Wires a runtime against a mock context; returns the runtime for state inspection. */
+export async function wireRuntime(
   mockInput: ReturnType<typeof createMockPluginInput>,
-  store: MatchedRulesStateStore
-): ReturnType<typeof __testOnly.createHooksWithMatchedRulesStateStore> {
-  return __testOnly.createHooksWithMatchedRulesStateStore(
-    mockInput as unknown as Parameters<
-      typeof __testOnly.createHooksWithMatchedRulesStateStore
-    >[0],
-    store
-  );
+  store?: MatchedRulesStateStore
+): Promise<OpenCodeRulesRuntime> {
+  const runtime = await createRuntime({
+    client: mockInput.context,
+    directory: mockInput.context.location.directory,
+    projectDirectory: mockInput.context.location.directory,
+    ...(store !== undefined ? { matchedRulesStateStore: store } : {}),
+  });
+  await runtime.wire(mockInput.context as never);
+  return runtime;
 }
-
-export type HookChatMessage = (
-  input: { sessionID: string; messageID?: string },
-  output: HookChatOutput
-) => Promise<void>;
-
-export type HookChatOutput = {
-  message: {
-    role: string;
-    id?: string;
-    agent?: string;
-    model?: { modelID?: string };
-  };
-  parts: Array<{
-    id?: string;
-    type?: string;
-    text?: string;
-    synthetic?: boolean;
-    sessionID?: string;
-    messageID?: string;
-  }>;
-};
 
 export type EnvSnapshot = Map<string, string | undefined>;
 

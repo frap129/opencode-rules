@@ -121,8 +121,9 @@ class DefaultRuleDelivery implements RuleDelivery {
   /**
    * Seeds the ledger from live history when stale. Returns false when
    * history is unreadable, which callers treat as "still pending".
-   * Compaction leaves needsRescan set: the caller defers, because a
-   * mid-read revision bump cannot be retried from here.
+   * A pending compaction heal never re-seeds here: the dispatch-supplied
+   * decode must not clobber the heal's own guarded re-read, which
+   * deliverDurableTurn runs via pendingCompactionHeal.
    */
   private async seedFromHistory(
     sessionID: string,
@@ -130,6 +131,9 @@ class DefaultRuleDelivery implements RuleDelivery {
     source?: TransientDispatchMessage[]
   ): Promise<boolean> {
     if (state.seededFromHistory && !state.needsRescan) return true;
+    if (state.needsRescan && (!source || state.pendingCompactionHeal)) {
+      return false;
+    }
     const facts = source
       ? decodeRawHistory(source)
       : await this.ledger.decodeHistory(sessionID);
@@ -162,20 +166,28 @@ class DefaultRuleDelivery implements RuleDelivery {
     input: DurableTurnInput
   ): Promise<DurableTurnResult> {
     const state = this.states.getState(input.sessionID);
-    if (state.needsRescan) return 'deferred';
 
-    if (!state.seededFromHistory) {
-      // Compaction may bump the revision while history reads; a stale
-      // decode must not clobber the newer ledger.
-      const ledgerRevision = state.ledgerRevision;
+    // Unavailable history stays deferred until a dispatch supplies
+    // messages; compaction heals here instead.
+    if (state.needsRescan && !state.pendingCompactionHeal) return 'deferred';
+
+    if (state.pendingCompactionHeal || !state.seededFromHistory) {
+      // First contact seeds the ledger; after compaction the same guarded
+      // re-decode heals it. The revision guard discards a decode whose
+      // read was invalidated mid-read, leaving the heal pending for the
+      // next turn.
+      const revision = state.ledgerRevision;
       const facts = await this.ledger.decodeHistory(input.sessionID);
       if (!facts) {
         state.needsRescan = true;
+        state.pendingCompactionHeal = false;
         return 'deferred';
       }
-      if (state.ledgerRevision !== ledgerRevision) return 'deferred';
+      if (state.ledgerRevision !== revision) return 'deferred';
       this.ledger.replaceLedger(state, facts);
       state.seededFromHistory = true;
+      state.needsRescan = false;
+      state.pendingCompactionHeal = false;
     }
     this.routePendingHooks(state);
 
@@ -266,6 +278,7 @@ class DefaultRuleDelivery implements RuleDelivery {
     const state = this.states.getState(sessionID);
     state.ledgerRevision++;
     state.needsRescan = true;
+    state.pendingCompactionHeal = true;
     state.transientTurn = undefined;
   }
 

@@ -12,6 +12,7 @@ import {
   setupTestDirs,
   teardownTestDirs,
 } from '../test-fixtures.js';
+import { createRuntime } from '../runtime/create-runtime.js';
 
 const LSP_OPERATIONS = [
   'goToDefinition',
@@ -48,57 +49,43 @@ describe('LSP observation admission through the server hook', () => {
       );
       process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-      const promptCalls: Array<{
-        body: { noReply?: boolean; parts: Array<Record<string, unknown>> };
-      }> = [];
-      const {
-        default: { server: plugin },
-      } = await import('../index.js');
-      const hooks = await plugin(
-        createMockPluginInput({
-          testDir,
-          sessionPrompt: async args => {
-            promptCalls.push(args);
-            return { data: {} };
-          },
-        }) as unknown as Parameters<typeof plugin>[0]
-      );
-      const after = hooks['tool.execute.after'] as (
-        input: {
-          tool: string;
-          sessionID: string;
-          callID: string;
-          args: Record<string, unknown>;
-        },
-        output: { title: string; output: string; metadata: unknown }
-      ) => Promise<void>;
+      const mockInput = createMockPluginInput({ testDir });
+      const runtime = await createRuntime({
+        client: mockInput.context,
+        directory: testDir,
+        projectDirectory: testDir,
+      });
+      await runtime.wire(mockInput.context as never);
+      const after = mockInput.hooks.toolAfter[0]!;
 
       const output =
         operation === 'workspaceSymbol'
           ? `No results found for ${operation}\nlsp:${operation}`
           : JSON.stringify({ marker: `lsp:${operation}` });
 
-      await after(
-        {
-          tool: 'lsp',
-          sessionID: `ses_lsp_${operation}`,
-          callID: `call_${operation}`,
-          args: {
-            operation,
-            filePath: 'src/query.ts',
-            line: 1,
-            character: 1,
-            ...(operation === 'workspaceSymbol' ? { query: '' } : {}),
-          },
+      await after({
+        tool: 'lsp',
+        sessionID: `ses_lsp_${operation}`,
+        id: `call_${operation}`,
+        input: {
+          operation,
+          filePath: 'src/query.ts',
+          line: 1,
+          character: 1,
+          ...(operation === 'workspaceSymbol' ? { query: '' } : {}),
         },
-        { title: operation, output, metadata: {} }
-      );
+        status: 'completed',
+        result: { content: output },
+      });
 
-      expect(promptCalls).toHaveLength(1);
-      expect(promptCalls[0]?.body.noReply).toBe(true);
-      const part = promptCalls[0]?.body.parts[0] ?? {};
-      expect(part.metadata).toMatchObject({ ruleAdmission: true });
-      expect(String(part.text)).toContain(`LSP ${operation} guidance.`);
+      expect(mockInput.promptCalls).toHaveLength(1);
+      expect(mockInput.promptCalls[0]?.resume).toBe(false);
+      expect(mockInput.promptCalls[0]?.metadata).toMatchObject({
+        ruleAdmission: true,
+      });
+      expect(String(mockInput.promptCalls[0]?.text)).toContain(
+        `LSP ${operation} guidance.`
+      );
     }
   );
 
@@ -114,54 +101,35 @@ describe('LSP observation admission through the server hook', () => {
     );
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
-    const promptCalls: Array<{
-      body: { parts: Array<Record<string, unknown>> };
-    }> = [];
-    const {
-      default: { server: plugin },
-    } = await import('../index.js');
-    const hooks = await plugin(
-      createMockPluginInput({
-        testDir,
-        sessionPrompt: async args => {
-          promptCalls.push(args);
-          return { data: {} };
-        },
-      }) as unknown as Parameters<typeof plugin>[0]
-    );
-    const after = hooks['tool.execute.after'] as (
-      input: {
-        tool: string;
-        sessionID: string;
-        callID: string;
-        args: Record<string, unknown>;
-      },
-      output: { title: string; output: string; metadata: unknown }
-    ) => Promise<void>;
+    const mockInput = createMockPluginInput({ testDir });
+    const runtime = await createRuntime({
+      client: mockInput.context,
+      directory: testDir,
+      projectDirectory: testDir,
+    });
+    await runtime.wire(mockInput.context as never);
+    const after = mockInput.hooks.toolAfter[0]!;
 
-    await after(
-      {
-        tool: 'lsp',
-        sessionID: 'ses_lsp_corr',
-        callID: 'call_lsp_corr',
-        args: {
-          operation: 'findReferences',
-          filePath: 'src/query.ts',
-          line: 1,
-          character: 1,
-        },
+    await after({
+      tool: 'lsp',
+      sessionID: 'ses_lsp_corr',
+      id: 'call_lsp_corr',
+      input: {
+        operation: 'findReferences',
+        filePath: 'src/query.ts',
+        line: 1,
+        character: 1,
       },
-      {
-        title: 'src/query.ts',
-        output: JSON.stringify([
+      status: 'completed',
+      result: {
+        content: JSON.stringify([
           { uri: 'file:///other/file.ts', line: 9, marker: '/other/file.ts' },
         ]),
-        metadata: {},
-      }
-    );
+      },
+    });
 
-    expect(promptCalls).toHaveLength(1);
-    const admittedText = String(promptCalls[0]?.body.parts[0]?.text);
+    expect(mockInput.promptCalls).toHaveLength(1);
+    const admittedText = String(mockInput.promptCalls[0]?.text);
     expect(admittedText).toContain('Queried file guidance');
     expect(admittedText).not.toContain('Mentioned file guidance');
   });

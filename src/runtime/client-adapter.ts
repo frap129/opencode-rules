@@ -3,114 +3,120 @@ import { logWarning } from '../shared/debug.js';
 import type { DebugLog } from '../shared/debug.js';
 import type { RawHistoryResult } from '../delivery/rule-delivery-history.js';
 import type { DeliveryPart } from '../delivery/rule-delivery-codec.js';
+import { fromSessionMessages } from '../session/v2-messages.js';
 
+/**
+ * Structural view of the opencode v2 client surface this plugin consumes.
+ * The v2 plugin context IS the client (v1's `pluginInput.client` is gone),
+ * so adapters receive the context object itself. Session history in v2 is
+ * `session.context({ sessionID })` -> SessionMessageInfo[]; the v1
+ * `session.messages` and `tool.ids` RPCs are gone.
+ */
 export interface OpenCodeClient {
-  tool?: {
-    ids?: (args: {
-      query: { directory: string };
-    }) => Promise<{ data: string[] }>;
+  session?: {
+    prompt?: (input: {
+      sessionID: string;
+      id?: string;
+      text: string;
+      metadata?: Record<string, unknown>;
+      resume?: boolean;
+    }) => Promise<unknown>;
+    synthetic?: (input: {
+      sessionID: string;
+      id?: string;
+      text: string;
+      description?: string;
+      metadata?: Record<string, unknown>;
+      delivery?: 'steer' | 'queue';
+    }) => Promise<unknown>;
+    context?: (input: { sessionID: string }) => Promise<{ data?: unknown }>;
   };
   mcp?: {
-    status?: (args: {
-      query: { directory: string };
-    }) => Promise<{ connected?: Array<{ id: string }> }>;
-  };
-  session?: {
-    messages?: (args: {
-      path: { id: string };
-      query?: { directory?: string };
-    }) => Promise<{ data?: Array<{ info?: unknown; parts?: unknown[] }> }>;
-    prompt?: (args: {
-      path: { id: string };
-      query?: { directory?: string };
-      body: {
-        messageID?: string;
-        noReply: boolean;
-        parts: Array<{
-          id?: string;
-          type: 'text';
-          text: string;
-          synthetic?: boolean;
-          metadata?: Record<string, unknown>;
-        }>;
-      };
-    }) => Promise<unknown>;
+    list?: (input?: {
+      location?: { directory?: string; workspace?: string };
+    }) => Promise<{ data?: unknown }>;
   };
 }
 
 export class OpenCodeClientAdapter {
   private readonly client: OpenCodeClient;
   private readonly directory: string;
-  private readonly projectDirectory: string;
   private readonly debugLog: DebugLog;
 
   constructor(options: {
     client: OpenCodeClient;
     directory: string;
-    projectDirectory: string;
     debugLog: DebugLog;
   }) {
     this.client = options.client;
     this.directory = options.directory;
-    this.projectDirectory = options.projectDirectory;
     this.debugLog = options.debugLog;
   }
 
+  // Awaited no-reply admission: v2 session.prompt with resume:false never
+  // generates an assistant reply or runs prompt hooks. Invoked as a method
+  // so prototype-style SDK methods keep their `this` receiver.
   async persistRuleAdmission(
     sessionID: string,
     part: DeliveryPart
   ): Promise<void> {
-    const prompt = this.client.session?.prompt;
-    if (!prompt || part.type !== 'text' || typeof part.text !== 'string') {
+    const session = this.client.session;
+    if (
+      !session?.prompt ||
+      part.type !== 'text' ||
+      typeof part.text !== 'string'
+    ) {
       throw new Error('OpenCode session.prompt is unavailable');
     }
-    await prompt({
-      path: { id: sessionID },
-      query: { directory: this.projectDirectory },
-      body: {
-        ...(typeof part.messageID === 'string'
-          ? { messageID: part.messageID }
-          : {}),
-        noReply: true,
-        parts: [
-          {
-            ...(typeof part.id === 'string' ? { id: part.id } : {}),
-            type: 'text',
-            text: part.text,
-            synthetic: true,
-            ...(part.metadata ? { metadata: part.metadata } : {}),
-          },
-        ],
-      },
+    await session.prompt({
+      ...(typeof part.messageID === 'string' ? { id: part.messageID } : {}),
+      sessionID,
+      text: part.text,
+      ...(part.metadata ? { metadata: part.metadata } : {}),
+      resume: false,
     });
   }
 
   async readClientHistory(sessionID: string): Promise<RawHistoryResult> {
     const session = this.client.session;
-    if (!session?.messages) return { ok: true, messages: [] };
+    if (!session?.context) return { ok: true, messages: [] };
     try {
-      const result = await session.messages({
-        path: { id: sessionID },
-        query: { directory: this.directory },
-      });
-      return { ok: true, messages: result?.data ?? [] };
+      const result = await session.context({ sessionID });
+      const data = result?.data;
+      if (!Array.isArray(data)) return { ok: true, messages: [] };
+      return { ok: true, messages: fromSessionMessages(data) };
     } catch (error) {
       logWarning('Failed to fetch session history', error);
       return { ok: false };
     }
   }
 
-  async queryAvailableToolIDs(): Promise<string[]> {
+  async queryAvailableToolIDs(
+    contextToolIDs?: readonly string[]
+  ): Promise<string[]> {
     const ids = new Set<string>();
-    const query = { directory: this.directory };
 
-    const toolPromise = this.client.tool?.ids?.({ query });
-    const mcpPromise = this.client.mcp?.status?.({ query });
+    // v2 removed the tool.ids RPC; the session context hook's tool table is
+    // the source of truth for available built-in tools.
+    if (contextToolIDs) {
+      for (const id of contextToolIDs) {
+        ids.add(id);
+      }
+      if (contextToolIDs.length > 0) {
+        this.debugLog(
+          `Available tools from session context: ${contextToolIDs
+            .slice(0, 10)
+            .join(
+              ', '
+            )}${contextToolIDs.length > 10 ? '...' : ''} (${contextToolIDs.length} total)`
+        );
+      }
+    }
 
-    const [toolResult, mcpResult] = await Promise.allSettled([
-      toolPromise,
-      mcpPromise,
-    ] as const);
+    const mcpPromise = this.client.mcp?.list?.({
+      location: { directory: this.directory },
+    });
+    const [mcpResult] = await Promise.allSettled([mcpPromise] as const);
 
     const logSettledError = (
       label: string,
@@ -123,27 +129,9 @@ export class OpenCodeClientAdapter {
       logWarning(`Failed to query ${label}`, message);
     };
 
-    if (
-      toolResult.status === 'fulfilled' &&
-      Array.isArray(toolResult.value?.data)
-    ) {
-      for (const id of toolResult.value.data) {
-        ids.add(id);
-      }
-      this.debugLog(
-        `Built-in tools: ${toolResult.value.data.slice(0, 10).join(', ')}${toolResult.value.data.length > 10 ? '...' : ''} (${toolResult.value.data.length} total)`
-      );
-    } else if (toolResult.status === 'rejected') {
-      logSettledError('tool IDs', toolResult);
-    }
-
-    if (
-      mcpResult.status === 'fulfilled' &&
-      mcpResult.value &&
-      'data' in mcpResult.value
-    ) {
+    if (mcpResult.status === 'fulfilled' && mcpResult.value) {
       const mcpIds = extractConnectedMcpCapabilityIDs(
-        mcpResult.value.data as Record<string, { status?: string }>
+        mcpResult.value.data as unknown
       );
       for (const id of mcpIds) {
         ids.add(id);
