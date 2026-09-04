@@ -535,6 +535,8 @@ opencode-rules/
 │   ├── data/
 │   │   ├── rules.ts          # Rule discovery + formatting for sidebar
 │   │   └── rules.test.ts     # Data layer tests
+├── server.js                  # Root entry shim for v2 directory loading (re-exports dist/src)
+├── tui.js                     # Root entry shim for v2 directory loading (re-exports dist/tui)
 ├── docs/
 │   └── rules.md              # Detailed usage documentation
 └── dist/                     # Compiled JavaScript output

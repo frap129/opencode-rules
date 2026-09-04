@@ -56,6 +56,10 @@
       "types": "./dist/src/index.d.ts",
       "import": "./dist/src/index.js"
     },
+    "./server": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    },
     "./tui": {
       "types": "./dist/tui/index.d.ts",
       "import": "./dist/tui/index.js"
