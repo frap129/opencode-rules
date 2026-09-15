@@ -46,7 +46,7 @@ approach.
 ### Installation
 
 ```bash
-opencode plugin opencode-rules@v2 --global
+opencode plugin opencode-rules@next --global
 ```
 
 <details>
@@ -57,7 +57,7 @@ Add the plugin to your opencode config (v2 uses the `plugins` key):
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugins": ["opencode-rules@v2"]
+  "plugins": ["opencode-rules@next"]
 }
 ```
 
@@ -66,7 +66,7 @@ To enable the TUI sidebar, add the same entry to your `cli.json`:
 ```json
 // ~/.config/opencode/cli.json
 {
-  "plugins": ["opencode-rules@v2"]
+  "plugins": ["opencode-rules@next"]
 }
 ```
 
@@ -74,10 +74,10 @@ To enable the TUI sidebar, add the same entry to your `cli.json`:
 
 ### Beta Channel
 
-v2 pre-releases from the `v2` branch are published under the `v2` npm dist-tag. These include upcoming features and fixes but may be unstable.
+v2 pre-releases from the `v2` branch are published under the `next` npm dist-tag (`v2` cannot be a dist-tag: npm rejects tag names that parse as a SemVer range). These include upcoming features and fixes but may be unstable.
 
 ```bash
-opencode plugin opencode-rules@v2 --global
+opencode plugin opencode-rules@next --global
 ```
 
 > [!WARNING]
@@ -753,7 +753,7 @@ v2 betas are published from the `v2` branch. To cut one:
 4. Tag: `git tag v2.0.0-beta.1`
 5. Push: `git push origin v2 --tags`
 
-The `release-beta.yml` workflow publishes to npm with `--tag v2` and creates a prerelease GitHub Release. Tags must be contained by `dev` or `v2`.
+The `release-beta.yml` workflow publishes to npm with `--tag next` and creates a prerelease GitHub Release. Tags must be contained by `dev` or `v2`.
 
 ### Publishing a Stable Release
 

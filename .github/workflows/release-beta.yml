@@ -49,8 +49,8 @@ jobs:
       - name: Install npm with trusted publishing support
         run: npm install -g npm@latest
 
-      - name: Publish to npm (v2)
-        run: npm publish --access public --tag v2
+      - name: Publish to npm (next)
+        run: npm publish --access public --tag next
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@26e8ad27a09a225049a7075d7ec1caa2df6ff332 # v2

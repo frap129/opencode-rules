@@ -19,7 +19,7 @@
 
 - ESM with NodeNext resolution: relative imports need `.js` extensions even in `.ts`/`.tsx` source.
 - The `"./tui"` package export must point to `./dist/tui/index.js`, not raw `./tui/index.tsx`: OpenCode/Bun does not reliably remap `.js` relative imports when loading raw TSX, while those targets exist only after the TypeScript build.
-- OpenCode caches npm plugin specs by their literal specifier; an existing `~/.cache/opencode/packages/opencode-rules@v2` wrapper pins the version resolved when it was created and does not refresh when `v2` changes. Clear that cache or use an explicit new version when validating a release.
+- OpenCode caches npm plugin specs by their literal specifier; an existing `~/.cache/opencode/packages/opencode-rules@next` wrapper pins the version resolved when it was created and does not refresh when `next` changes. Clear that cache or use an explicit new version when validating a release.
 - tsconfig is strict-plus (`exactOptionalPropertyTypes`, `noUnusedLocals`/`noUnusedParameters`, `verbatimModuleSyntax`), so type-only imports and unused symbols will fail typecheck even though lint passes.
 - Server source is grouped by domain: `src/rules/` (discovery, metadata, filter, hooks), `src/delivery/` (delivery engine composed behind `createRuleDelivery` plus codec and history port), `src/session/` (session/matched-rule state, file observations, message extraction, v2 message adapters), `src/runtime/` (orchestrator, runtime factory, client adapter, tool-hook flow, match context, chat capture), `src/detection/` (git-branch, project-fingerprint, mcp-tools), `src/shared/` (debug, bounded-session-map). `src/api-surface.typecheck.ts` enforces intentionally private exports during `tsc`.
 - Do not edit generated `dist/`; `tsc` builds it from `src/` and `tui/`.
@@ -28,7 +28,7 @@
 
 ## Releases
 
-- Stable publishing triggers on non-prerelease `v*` tags (the workflow does not verify branch containment). v2 beta tags must be contained by `dev` or `v2` and publish with the npm `v2` dist-tag; the v1 `beta` dist-tag stays frozen for v1 users.
+- Stable publishing triggers on non-prerelease `v*` tags (the workflow does not verify branch containment). v2 beta tags must be contained by `dev` or `v2` and publish with the npm `next` dist-tag (npm rejects `v2`: it parses as a valid SemVer range); the v1 `beta` dist-tag stays frozen for v1 users.
 
 ## Agent skills
 
