@@ -10,6 +10,7 @@ import {
   createMockPluginInput,
   getTestDirs,
   setupTestDirs,
+  syntheticAdmissions,
   teardownTestDirs,
 } from '../test-fixtures.js';
 import { createRuntime } from '../runtime/create-runtime.js';
@@ -78,14 +79,17 @@ describe('LSP observation admission through the server hook', () => {
         result: { content: output },
       });
 
-      expect(mockInput.promptCalls).toHaveLength(1);
-      expect(mockInput.promptCalls[0]?.resume).toBe(false);
-      expect(mockInput.promptCalls[0]?.metadata).toMatchObject({
+      const admissions = syntheticAdmissions(mockInput);
+      expect(admissions).toHaveLength(1);
+      expect(admissions[0]?.resume).toBe(false);
+      expect(admissions[0]?.description).toBeUndefined();
+      expect(admissions[0]?.metadata).toMatchObject({
         ruleAdmission: true,
       });
-      expect(String(mockInput.promptCalls[0]?.text)).toContain(
+      expect(String(admissions[0]?.text)).toContain(
         `LSP ${operation} guidance.`
       );
+      expect(mockInput.promptCalls).toHaveLength(0);
     }
   );
 
@@ -128,8 +132,9 @@ describe('LSP observation admission through the server hook', () => {
       },
     });
 
-    expect(mockInput.promptCalls).toHaveLength(1);
-    const admittedText = String(mockInput.promptCalls[0]?.text);
+    const admissions = syntheticAdmissions(mockInput);
+    expect(admissions).toHaveLength(1);
+    const admittedText = String(admissions[0]?.text);
     expect(admittedText).toContain('Queried file guidance');
     expect(admittedText).not.toContain('Mentioned file guidance');
   });

@@ -100,12 +100,12 @@ FileObservationContext (matching, resident process only)
     ↓
 SessionWorkingContext (path-only compaction projection)
     ↓
-chat.message: initial session-durable matching rules append to the user
-message as one synthetic part; a Durable Rule first matched by a live File
-observation is admitted immediately through a no-reply session.prompt
-(earliest dispatch), with transient fallback and retry; ephemeral rules
-(agent, model, branch, tools) are delivered only in the transformed model
-request
+session.synthetic: initial session-durable matching rules publish as one
+synthetic message; a Durable Rule first matched by a live File observation is
+admitted immediately as an awaited hidden synthetic message (resume: false, no
+description; earliest dispatch), with transient fallback and retry; ephemeral
+rules (agent, model, branch, tools) are delivered only in the transformed
+model request
     ↓
 AI processes request with full context
 ```
@@ -219,7 +219,7 @@ When running with `OPENCODE_RULES_DEBUG=1`, you'll see:
 
 **Advantages**:
 
-- Initial durable delivery via the standard `chat.message` hook; mid-session file-family matches are admitted earlier through a no-reply `session.prompt` call
+- Initial durable delivery via the `session.synthetic` client API; mid-session file-family matches are admitted earlier through an awaited hidden `session.synthetic` message (`resume: false`, no description)
 - Synthetic parts are hidden in the TUI but included in provider requests
 - System prompt stays byte-stable across requests, preserving provider prompt caching
 - Path-derived identity keys prevent re-appending durable rules already delivered in the session

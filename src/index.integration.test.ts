@@ -4,10 +4,11 @@
  * compaction context, and the synthetic-part delivery lifecycle.
  * Split from index.test.ts for maintainability.
  *
- * v2 port: durable rules deliver via ctx.session.synthetic (prompt hook),
- * admissions via awaited session.prompt resume:false, transient rules via
- * the session context hook. Compaction has no output.context channel; the
- * projection rides the next context dispatch.
+ * v2 port: durable rules and observation admissions deliver via
+ * ctx.session.synthetic (prompt hook and resume:false observations
+ * respectively), transient rules via the session context hook. Compaction
+ * has no output.context channel; the projection rides the next context
+ * dispatch.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import path from 'node:path';
@@ -17,6 +18,7 @@ import {
   setupTestDirs,
   teardownTestDirs,
   getTestDirs,
+  admissionText,
   createMockPluginInput,
 } from './test-fixtures.js';
 import { buildDurableDeliveryPart } from './delivery/rule-delivery-codec.js';
@@ -107,7 +109,7 @@ Use React best practices for components.`
       prompt: { text: 'hello' },
     });
 
-    const admittedText = mockInput.promptCalls.map(c => c.text).join('\n');
+    const admittedText = admissionText(mockInput);
     expect(admittedText).not.toContain('React best practices');
   });
 
@@ -155,7 +157,7 @@ Use React best practices for components.`
       prompt: { text: 'continue after restart' },
     });
 
-    const admittedText = mockInput.promptCalls.map(c => c.text).join('\n');
+    const admittedText = admissionText(mockInput);
     expect(admittedText).not.toContain('React best practices');
   });
 
@@ -185,7 +187,7 @@ Rust unsafe guidance.`
       result: { content: 'Wrote file successfully.' },
     });
 
-    const admittedText = mockInput.promptCalls.map(c => c.text).join('\n');
+    const admittedText = admissionText(mockInput);
     expect(admittedText).toContain('Rust unsafe guidance.');
   });
 
@@ -225,7 +227,7 @@ Rust unsafe guidance.`
       result: { content: 'ok' },
     });
 
-    const admittedText = mockInput.promptCalls.map(c => c.text).join('\n');
+    const admittedText = admissionText(mockInput);
     expect(admittedText).not.toContain('Rust unsafe guidance.');
   });
 
@@ -253,7 +255,7 @@ Cleanup todos.`
       result: { content: 'ok' },
     });
 
-    const admittedText = mockInput.promptCalls.map(c => c.text).join('\n');
+    const admittedText = admissionText(mockInput);
     expect(admittedText).toContain('Cleanup todos.');
   });
 
@@ -284,7 +286,7 @@ Never delivered.`
         result: { content: 'ok' },
       });
 
-      const admittedText = mockInput.promptCalls.map(c => c.text).join('\n');
+      const admittedText = admissionText(mockInput);
       expect(admittedText).not.toContain('Never delivered.');
     } finally {
       console.warn = originalWarn;
@@ -325,6 +327,7 @@ Prose-only guidance.`
       messageID: 'msg_prose',
       prompt: { text: 'continue' },
     });
+    expect(admissionText(mockInput)).toBe('');
     expect(mockInput.promptCalls).toHaveLength(0);
   });
 
@@ -354,7 +357,7 @@ Read-content guidance.`
       result: { content: outputText },
     });
 
-    const admittedText = mockInput.promptCalls.map(c => c.text).join('\n');
+    const admittedText = admissionText(mockInput);
     expect(admittedText).toContain('Read-content guidance.');
   });
 
@@ -399,7 +402,7 @@ Use React best practices for components.`
       prompt: { text: 'hello' },
     });
 
-    const admittedText = mockInput.promptCalls.map(c => c.text).join('\n');
+    const admittedText = admissionText(mockInput);
     expect(admittedText).not.toContain('React best practices');
   });
 

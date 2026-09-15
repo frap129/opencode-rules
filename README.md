@@ -111,7 +111,7 @@ That's it! The rule will now be automatically delivered to all AI agent conversa
 2. **Parsing**: Extract metadata from files with YAML front matter
 3. **File Observations**: Successful live Read, Write, Edit, Apply Patch, and path-associated LSP `tool.execute.after` events create File observations. Historical tool parts do not recreate File observations or select new file-scoped Rules.
 4. **History Seeding**: The session `context` hook rebuilds the path-only Working context for compaction from message history once and lets RuleDelivery rebuild identity-ledger evidence from synthetic delivery metadata when resuming a session
-5. **Earliest Dispatch**: A newly Matched Durable Rule in the file-observation family (`globs`, `fileContains`, or both) is admitted immediately through an awaited `session.prompt({ resume: false })`; pending guidance is included transiently in the next usable dispatch and persistence retries there. Initial Durable matches are published through `session.synthetic` on the session `prompt` hook.
+5. **Earliest Dispatch**: A newly Matched Durable Rule in the file-observation family (`globs`, `fileContains`, or both) is admitted immediately through an awaited `session.synthetic` message (`resume: false`, no description, so it never triggers a reply or surfaces as a user turn or UI notice); pending guidance is included transiently in the next usable dispatch and persistence retries there. Initial Durable matches are published through `session.synthetic` on the session `prompt` hook, making synthetic admission the single durable channel.
 6. **Rule Delivery**: Each injection event is one `<system-message>` block with one plugin preamble and a `<rule name="...">` block per rule. The name comes from frontmatter `name` or the filename stem. Session-durable rules (unconditional, `globs`, `fileContains`, `keywords`, `command`, `project`, `os`, and `ci`) are published once per turn as one persisted synthetic message via `session.synthetic`, hidden in the TUI but included in provider requests. Agent, `model`, `branch`, and `tools` rules are appended only to the model request as one transient synthetic message per matching turn via the session `context` hook, so changing agent or model does not leave stale rule text in new history. Path-based deduplication applies only to durable delivery.
 7. **State Persistence**: Matched rule paths are written to `~/.opencode/state/opencode-rules/{sessionId}.json` for TUI consumption
 8. **Compaction Persistence**: The `session.compaction.started` event preserves Working-context paths and invalidates the durable delivery ledger; the projection rides the next session-`context` dispatch, and the ledger heals on the first durable turn after compaction by re-decoding the compacted history, so missing durable rules are re-appended exactly once, while ephemeral rules continue to be recomputed per request
@@ -516,7 +516,7 @@ opencode-rules/
 │   ├── runtime/
 │   │   ├── orchestrator.ts   # OpenCodeRulesRuntime class (v2 hook orchestration: wire, tool hooks, session context/prompt hooks, event loop)
 │   │   ├── create-runtime.ts # Runtime factory and test seam (v2 default-export entry is loader-only)
-│   │   ├── client-adapter.ts # v2 plugin-context client port (session.context history reads, session.prompt no-reply admission, MCP list queries)
+│   │   ├── client-adapter.ts # v2 plugin-context client port (session.context history reads, session.synthetic no-reply admission, MCP list queries)
 │   │   ├── tool-hook-flow.ts # PreToolUse/PostToolUse evaluation, blockers, side-effects, Hook queuing
 │   │   ├── match-context.ts  # Context-building helpers (match context, project detection)
 │   │   └── chat-capture.ts   # Session context/prompt capture (model, agent, and user prompt from the v2 session hooks)
@@ -547,7 +547,7 @@ opencode-rules/
 The following highlights the primary runtime modules:
 
 - **runtime/orchestrator.ts** - Orchestrates v2 hooks (`tool.execute.before/after`, session `context`/`prompt` hooks, event loop) and wires the runtime
-- **runtime/client-adapter.ts** - Isolates the OpenCode client port: history reads, no-reply admission via `session.prompt`, tool-ID/MCP queries
+- **runtime/client-adapter.ts** - Isolates the OpenCode client port: history reads, no-reply admission via `session.synthetic`, tool-ID/MCP queries
 - **runtime/tool-hook-flow.ts** - Evaluates PreToolUse/PostToolUse hooks, throws on blockers, runs side-effects, queues matched Hook content
 - **delivery/rule-delivery.ts** - Owns durable/transient delivery composed over per-session state, ledger, and transient seams
 - **delivery/delivery-state.ts** - Per-session delivery state with operation serialization
@@ -640,7 +640,7 @@ This plugin uses OpenCode's hook system for incremental, stateful rule delivery:
 2. **`tool.execute.after`** - File observation capture, admission, and post-execution guidance
    - Fires after each successful tool completes (failed executions never reach this hook)
    - Normalizes Read, Write, Edit, Apply Patch, and LSP events into File observations (path plus content) — the sole source for `globs` and `fileContains`
-   - Immediately evaluates file-observation-family rules (`globs`, `fileContains`, or both) against fresh observations; a durable match is admitted synchronously and persisted through a `noReply` `session.prompt` call (earliest dispatch), with retry on the next dispatch if persistence fails
+   - Immediately evaluates file-observation-family rules (`globs`, `fileContains`, or both) against fresh observations; a durable match is admitted synchronously and persisted through an awaited hidden `session.synthetic` message (`resume: false`, no description, earliest dispatch), with retry on the next dispatch if persistence fails
    - Evaluates `PostToolUse` hooks for reactive rule triggering
    - Queues corrective rule content for delivery on the next turn; hook blocking
      and `run` side effects are unchanged
@@ -687,7 +687,7 @@ This plugin depends on experimental OpenCode APIs:
 - session `context` hook (history seeding, transient rule and hook delivery)
 - `session.compaction.started` event (compaction invalidation; ledger heal on the next durable turn)
 
-It also uses the session `prompt` hook for durable synthetic rule delivery and the session `prompt` client API (resume:false) for awaited no-reply admission.
+It also uses the session `prompt` hook and the `session.synthetic` client API (`resume: false`) for durable synthetic rule delivery and awaited no-reply admission.
 
 These APIs may change in future OpenCode versions. Check OpenCode release notes when upgrading.
 

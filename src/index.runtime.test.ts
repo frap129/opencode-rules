@@ -13,10 +13,12 @@ import {
   setupTestDirs,
   teardownTestDirs,
   getTestDirs,
+  admissionText,
   createMockPluginInput,
   saveCiEnvVars,
   clearCiEnvVars,
   restoreCiEnvVars,
+  syntheticAdmissions,
   type CiEnvSnapshot,
 } from './test-fixtures.js';
 import {
@@ -519,12 +521,13 @@ describe('SessionState', () => {
       result: { content: 'export const Button;' },
     });
 
-    // Glob rules admit at observation time via awaited session.prompt
-    // (resume:false); the durable turn delivery is #72's territory.
-    const admittedText = mockInput.promptCalls.map(c => c.text).join('\n');
-    expect(admittedText).toContain('React best practices');
-    expect(mockInput.promptCalls[0]?.resume).toBe(false);
-    expect(mockInput.promptCalls[0]?.metadata).toMatchObject({
+    // Glob rules admit at observation time through a hidden synthetic
+    // message (resume:false); the durable turn delivery is #72's territory.
+    const admissions = syntheticAdmissions(mockInput);
+    expect(admissionText(mockInput)).toContain('React best practices');
+    expect(mockInput.promptCalls).toHaveLength(0);
+    expect(admissions[0]?.resume).toBe(false);
+    expect(admissions[0]?.metadata).toMatchObject({
       ruleAdmission: true,
     });
   });
@@ -577,8 +580,7 @@ describe('SessionState', () => {
       true
     );
 
-    const admittedText = mockInput.promptCalls.map(c => c.text).join('\n');
-    expect(admittedText).toContain('Legacy module guidance');
+    expect(admissionText(mockInput)).toContain('Legacy module guidance');
   });
 });
 
@@ -784,7 +786,7 @@ describe('history scan and rescan', () => {
       messageID: 'msg_after_removal',
       prompt: { text: 'check kept files' },
     });
-    // The globs rule admits at observation time via awaited session.prompt.
+    // The globs rule admits at observation time via session.synthetic.
     expect(promptResult.text).toContain('Kept-directory guidance.');
   });
 
@@ -820,8 +822,7 @@ async function runPromptWithSynthetic(
   input: { sessionID: string; messageID: string; prompt: { text: string } }
 ): Promise<{ text: string }> {
   await mockInput.hooks.sessionPrompt[0]!(input);
-  const text = mockInput.promptCalls.map(c => c.text).join('\n');
-  return { text };
+  return { text: admissionText(mockInput) };
 }
 
 describe('Matched rules state persistence', () => {
@@ -1147,4 +1148,3 @@ describe('CI environment detection', () => {
     expect(synthetic).not.toContain('CI-build-number guidelines');
   });
 });
-

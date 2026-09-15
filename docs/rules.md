@@ -310,12 +310,12 @@ Rule delivery is split by the rule's **lifetime classification**:
   opencode persists it. Once
   persisted, a durable rule is never re-evaluated for removal during that
   session. A Durable Rule first matched by a live File observation is admitted
-  at that observation's earliest applicable dispatch: the runtime persists one
-  synthetic no-reply user part through `session.prompt`; equivalent pending
-  guidance remains available transiently if persistence fails, and persistence
-  retries on a later dispatch. Initial Durable matches continue to use the
-  current `chat.message` part, and identity-ledger evidence prevents duplicate
-  delivery.
+  at that observation's earliest applicable dispatch as one hidden synthetic
+  message (`session.synthetic` with `resume: false` and no description);
+  equivalent pending guidance remains available transiently if persistence
+  fails, and persistence retries on a later dispatch. Identity-ledger evidence
+  prevents duplicate delivery, including admissions persisted by the retired
+  prompt channel in older sessions.
 - **Ephemeral rules** — rules gated by `agent`, `model`, `branch`, or `tools`
   — are appended only to the transformed model request via
   `experimental.chat.messages.transform` as one transient synthetic message

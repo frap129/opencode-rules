@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import path from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import {
+  admissionText,
   createMockPluginInput,
   getTestDirs,
   setupTestDirs,
@@ -245,8 +246,8 @@ describe('durable rule persistence', () => {
 
     const snapshot = sessionStore.snapshot('ses_bash_restart');
     expect(snapshot?.workingContextPaths.has('src/tools/index.ts')).toBe(true);
-    const admittedText = mockInput.promptCalls.map(c => c.text).join('\n');
-    expect(admittedText).not.toContain('Tools directory guidance');
+    expect(admissionText(mockInput)).not.toContain('Tools directory guidance');
+    expect(mockInput.promptCalls).toHaveLength(0);
   });
 
   it('keeps the original rule content after an in-process file edit', async () => {

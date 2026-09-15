@@ -109,8 +109,8 @@ describe('Runtime match context integration (plugin-level)', () => {
     return {
       syntheticCalls,
       async promptTurn({ sessionID, messageID, text, agent, model }) {
-        // The context dispatch precedes the prompt admission in a real
-        // turn; drive both so capture + ephemeral matching stay faithful.
+        // The context dispatch precedes the prompt hook in a real turn;
+        // drive both so capture + ephemeral matching stay faithful.
         // The context hook may append ephemeral rules to the messages
         // array; the prompt hook delivers durable rules via synthetic.
         const messages: Array<Record<string, unknown>> = [

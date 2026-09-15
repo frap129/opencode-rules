@@ -604,8 +604,8 @@ export class OpenCodeRulesRuntime {
       const promptText = input?.prompt?.text;
       if (!sessionID || !promptText) return;
 
-      // Our own admission parts are prompts too; never treat them as user
-      // turns (v1 skipped its admission parts in chat.message).
+      // Defensive: a legacy prompt-path admission in flight (or any other
+      // replay of our own framing) must never be treated as a user turn.
       if (promptText.startsWith('<system-message>')) return;
 
       const captured = captureSessionPrompt(

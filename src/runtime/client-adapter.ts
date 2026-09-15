@@ -14,13 +14,6 @@ import { fromSessionMessages } from '../session/v2-messages.js';
  */
 export interface OpenCodeClient {
   session?: {
-    prompt?: (input: {
-      sessionID: string;
-      id?: string;
-      text: string;
-      metadata?: Record<string, unknown>;
-      resume?: boolean;
-    }) => Promise<unknown>;
     synthetic?: (input: {
       sessionID: string;
       id?: string;
@@ -28,6 +21,7 @@ export interface OpenCodeClient {
       description?: string;
       metadata?: Record<string, unknown>;
       delivery?: 'steer' | 'queue';
+      resume?: boolean;
     }) => Promise<unknown>;
     context?: (input: { sessionID: string }) => Promise<{ data?: unknown }>;
   };
@@ -53,22 +47,24 @@ export class OpenCodeClientAdapter {
     this.debugLog = options.debugLog;
   }
 
-  // Awaited no-reply admission: v2 session.prompt with resume:false never
-  // generates an assistant reply or runs prompt hooks. Invoked as a method
-  // so prototype-style SDK methods keep their `this` receiver.
+  // Awaited no-reply admission: v2 session.synthetic with resume:false
+  // never generates an assistant reply or wakes an idle session, and
+  // without a description the admitted message stays hidden from the UI
+  // (session.prompt always admits a visible `user` message). Invoked as a
+  // method so prototype-style SDK methods keep their `this` receiver.
   async persistRuleAdmission(
     sessionID: string,
     part: DeliveryPart
   ): Promise<void> {
     const session = this.client.session;
     if (
-      !session?.prompt ||
+      !session?.synthetic ||
       part.type !== 'text' ||
       typeof part.text !== 'string'
     ) {
-      throw new Error('OpenCode session.prompt is unavailable');
+      throw new Error('OpenCode session.synthetic is unavailable');
     }
-    await session.prompt({
+    await session.synthetic({
       ...(typeof part.messageID === 'string' ? { id: part.messageID } : {}),
       sessionID,
       text: part.text,

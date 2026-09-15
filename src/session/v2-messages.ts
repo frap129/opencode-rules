@@ -180,9 +180,14 @@ export function fromSessionMessages(
 
     if (type === 'user') {
       const text = asString(record.text);
+      // Message-level delivery keys survive for legacy prompt-path
+      // admissions, which were persisted as user-typed messages.
+      const keys = deliveryKeyMetadata(metadata);
       result.push({
         info: messageInfo(id, 'user'),
-        ...(text !== undefined ? { parts: [{ type: 'text', text }] } : {}),
+        ...(text !== undefined
+          ? { parts: [{ type: 'text', text, ...keys }] }
+          : {}),
       });
       continue;
     }
@@ -230,24 +235,28 @@ export function fromSessionMessages(
   return result;
 }
 
+function deliveryKeyMetadata(metadata: Record<string, unknown> | undefined): {
+  metadata?: Record<string, unknown>;
+} {
+  const ruleKeys = metadata?.ruleKeys;
+  const hookKeys = metadata?.hookKeys;
+  if (!Array.isArray(ruleKeys) && !Array.isArray(hookKeys)) return {};
+  return {
+    metadata: {
+      ...(Array.isArray(ruleKeys) ? { ruleKeys } : {}),
+      ...(Array.isArray(hookKeys) ? { hookKeys } : {}),
+    },
+  };
+}
+
 function syntheticTextPart(
   text: string,
   metadata: Record<string, unknown> | undefined
 ): MessagePartWithSession {
-  const ruleKeys = metadata?.ruleKeys;
-  const hookKeys = metadata?.hookKeys;
-  const hasKeys = Array.isArray(ruleKeys) || Array.isArray(hookKeys);
   return {
     type: 'text',
     text,
     synthetic: true,
-    ...(hasKeys
-      ? {
-          metadata: {
-            ...(Array.isArray(ruleKeys) ? { ruleKeys } : {}),
-            ...(Array.isArray(hookKeys) ? { hookKeys } : {}),
-          },
-        }
-      : {}),
+    ...deliveryKeyMetadata(metadata),
   };
 }

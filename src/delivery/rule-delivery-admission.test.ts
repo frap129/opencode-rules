@@ -68,8 +68,11 @@ describe('durable admission', () => {
     expect(harness.persisted).toHaveLength(1);
     const part = harness.persisted[0]!;
     expect(part.sessionID).toBe('ses_admit');
+    // Synthetic channel identity: a stable msg_ id retries idempotently.
     expect(part.synthetic).toBe(true);
     expect(part.type).toBe('text');
+    expect(part.messageID).toMatch(/^msg_rule_admission_/);
+    expect(part.id).toContain(part.messageID);
     expect(part.metadata?.ruleKeys).toEqual(ADMISSION_RULE_KEYS);
     expect(part.metadata?.ruleAdmission).toBe(true);
     expect(part.text).toContain('Unsafe guidance.');

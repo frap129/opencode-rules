@@ -1,6 +1,6 @@
 /**
- * Observation-time rule admission and awaited session.prompt (resume:false)
- * persistence tests.
+ * Observation-time rule admission through ctx.session.synthetic
+ * (resume:false, no description) persistence tests.
  * Split from index.runtime.test.ts for maintainability.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -10,9 +10,11 @@ import {
   createMockPluginInput,
   getTestDirs,
   setupTestDirs,
+  syntheticAdmissions,
   teardownTestDirs,
 } from '../test-fixtures.js';
 import { createRuntime } from '../runtime/create-runtime.js';
+import { ruleKeyFor } from '../delivery/rule-delivery-codec.js';
 import {
   MatchedRulesStateStore,
   readMatchedRulesState,
@@ -115,10 +117,11 @@ describe('observation admission and noReply persistence', () => {
       status: 'completed',
       result: { content: 'Wrote file successfully.' },
     });
-    expect(mockInput.promptCalls).toHaveLength(1);
+    expect(syntheticAdmissions(mockInput)).toHaveLength(1);
+    expect(mockInput.promptCalls).toHaveLength(0);
   });
 
-  it('persists a matched fileContains rule via awaited session.prompt resume:false', async () => {
+  it('persists a matched fileContains rule via ctx.session.synthetic resume:false', async () => {
     const { testDir, globalRulesDir } = getTestDirs();
     writeFileSync(
       path.join(globalRulesDir, 'rust-unsafe.mdc'),
@@ -138,16 +141,61 @@ describe('observation admission and noReply persistence', () => {
       result: { content: 'Wrote file successfully.' },
     });
 
-    expect(mockInput.promptCalls).toHaveLength(1);
-    expect(mockInput.promptCalls[0]?.sessionID).toBe('ses_admit_e2e');
-    expect(mockInput.promptCalls[0]?.resume).toBe(false);
-    expect(mockInput.promptCalls[0]?.metadata).toMatchObject({
+    // Single durable admission channel: no user turn is created.
+    expect(mockInput.promptCalls).toHaveLength(0);
+    const admissions = syntheticAdmissions(mockInput);
+    expect(admissions).toHaveLength(1);
+    const admission = admissions[0]!;
+    expect(admission.sessionID).toBe('ses_admit_e2e');
+    expect(admission.resume).toBe(false);
+    expect(admission.description).toBeUndefined();
+    expect(admission.id).toMatch(/^msg_rule_admission_/);
+    expect(admission.metadata).toMatchObject({
       ruleKeys: [expect.any(String)],
       ruleAdmission: true,
     });
-    expect(String(mockInput.promptCalls[0]?.text)).toContain(
-      'Rust unsafe guidance.'
+    expect(String(admission.text)).toContain('Rust unsafe guidance.');
+  });
+
+  it('seeds the ledger from a legacy user-typed admission in history', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    const rulePath = path.join(globalRulesDir, 'rust-unsafe.mdc');
+    writeFileSync(
+      rulePath,
+      `---\nglobs:\n  - "**/*.rs"\nfileContains: "unsafe {"\n---\n\nRust unsafe guidance.`
     );
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    // Old prompt-path admission: a user-typed session message carrying the
+    // delivery metadata at message level.
+    const mockInput = createMockPluginInput({
+      testDir,
+      history: [
+        {
+          id: 'msg_rule_admission_legacy',
+          type: 'user',
+          text: '<system-message>\n<rule name="rust-unsafe">legacy</rule>\n</system-message>',
+          metadata: {
+            ruleKeys: [ruleKeyFor(rulePath)],
+            ruleAdmission: true,
+          },
+        },
+      ],
+    });
+    await wire(mockInput);
+
+    await mockInput.hooks.toolAfter[0]!({
+      tool: 'write',
+      sessionID: 'ses_legacy_admit',
+      id: 'call_legacy',
+      input: { filePath: 'src/lib.rs', content: 'unsafe { }' },
+      status: 'completed',
+      result: { content: 'ok' },
+    });
+
+    // Already delivered in history: nothing re-admits, no user turn appears.
+    expect(syntheticAdmissions(mockInput)).toHaveLength(0);
+    expect(mockInput.promptCalls).toHaveLength(0);
   });
 
   it('ignores its own admission prompt text in the prompt hook', async () => {
@@ -161,8 +209,8 @@ describe('observation admission and noReply persistence', () => {
     const mockInput = createMockPluginInput({ testDir });
     await wire(mockInput);
 
-    // The admission prompt itself arrives at the prompt hook; it must be
-    // treated as our own part, not a user turn.
+    // A legacy admission prompt can still surface at the prompt hook; it
+    // must be treated as our own part, not a user turn.
     await mockInput.hooks.sessionPrompt[0]!({
       sessionID: 'ses_own_admit',
       messageID: 'msg_admission',
@@ -183,12 +231,14 @@ describe('observation admission and noReply persistence', () => {
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
     const mockInput = createMockPluginInput({ testDir });
-    let failPrompt = true;
-    if (mockInput.context.session?.prompt) {
-      const inner = mockInput.context.session.prompt;
-      mockInput.context.session.prompt = async input => {
-        if (failPrompt) {
-          mockInput.promptCalls.push(input);
+    let failAdmission = true;
+    if (mockInput.context.session?.synthetic) {
+      const inner = mockInput.context.session.synthetic.bind(
+        mockInput.context.session
+      );
+      mockInput.context.session.synthetic = async input => {
+        if (failAdmission) {
+          mockInput.syntheticCalls.push(input);
           throw new Error('server unavailable');
         }
         return inner(input);
@@ -206,7 +256,8 @@ describe('observation admission and noReply persistence', () => {
     });
     // Attempt 1 fired from the after-hook and failed (recorded by the
     // wrapper), leaving the admission pending.
-    expect(mockInput.promptCalls).toHaveLength(1);
+    expect(syntheticAdmissions(mockInput)).toHaveLength(1);
+    expect(mockInput.promptCalls).toHaveLength(0);
 
     // Next dispatch carries the pending admission transiently and retries
     // persistence on a later dispatch.
@@ -226,14 +277,14 @@ describe('observation admission and noReply persistence', () => {
       .join('\n');
     expect(fallbackText).toContain('Rust unsafe guidance.');
 
-    failPrompt = false;
+    failAdmission = false;
     await ctx({
       sessionID: 'ses_fallback',
       messages: [...messages],
     });
     // Attempt 1 (after-hook) + attempt 2 (first dispatch retry, still
     // failing) + attempt 3 (second dispatch retry, succeeding).
-    expect(mockInput.promptCalls).toHaveLength(3);
+    expect(syntheticAdmissions(mockInput)).toHaveLength(3);
   });
 
   it('refreshes matched-rules sidebar state after successful admission', async () => {
@@ -288,9 +339,12 @@ describe('observation admission and noReply persistence', () => {
       },
     });
 
-    expect(mockInput.promptCalls).toHaveLength(1);
-    expect(mockInput.promptCalls[0]?.resume).toBe(false);
-    expect(mockInput.promptCalls[0]?.metadata).toMatchObject({
+    expect(mockInput.promptCalls).toHaveLength(0);
+    const admissions = syntheticAdmissions(mockInput);
+    expect(admissions).toHaveLength(1);
+    expect(admissions[0]?.resume).toBe(false);
+    expect(admissions[0]?.description).toBeUndefined();
+    expect(admissions[0]?.metadata).toMatchObject({
       ruleAdmission: true,
     });
   });

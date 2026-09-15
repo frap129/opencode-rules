@@ -82,6 +82,16 @@ export function restoreCiEnvVars(saved: CiEnvSnapshot): void {
   }
 }
 
+export interface SyntheticCall {
+  sessionID: string;
+  id: string;
+  text: string;
+  description?: string;
+  metadata?: Record<string, unknown>;
+  delivery?: string;
+  resume?: boolean;
+}
+
 export interface MockPluginInput {
   testDir: string;
   /** v2 mcp.list() shape: McpServer[] tagged by status. */
@@ -90,7 +100,7 @@ export interface MockPluginInput {
   history?: unknown[];
   /** Session context implementation; defaults to returning opts.history. */
   sessionContext?: (input: { sessionID: string }) => Promise<unknown>;
-  /** Awaited no-reply admissions; captures calls to session.prompt. */
+  /** Retired admission channel; tests assert this stays empty. */
   promptCalls?: Array<{
     sessionID: string;
     id?: string;
@@ -99,13 +109,7 @@ export interface MockPluginInput {
     resume?: boolean;
   }>;
   /** Durable synthetic deliveries; captures calls to session.synthetic. */
-  syntheticCalls?: Array<{
-    sessionID: string;
-    id: string;
-    text: string;
-    metadata?: Record<string, unknown>;
-    delivery?: string;
-  }>;
+  syntheticCalls?: SyntheticCall[];
   /**
    * Events drained by the runtime's event loop; use pushEvent (or seed
    * before wire) to inject v2 events through the real subscription path.
@@ -138,16 +142,10 @@ export interface MockPluginContext {
       name: 'context' | 'prompt',
       handler: (input: never) => Promise<void> | void
     ) => Promise<{ dispose(): Promise<void> }>;
-    synthetic?: (input: {
-      sessionID: string;
-      id: string;
-      text: string;
-      metadata?: Record<string, unknown>;
-      delivery?: string;
-    }) => Promise<unknown>;
+    synthetic?: (input: SyntheticCall) => Promise<unknown>;
     /** Client surface (v2 context IS the client): session.context() history. */
     context?: (input: { sessionID: string }) => Promise<unknown>;
-    /** Client surface: awaited no-reply admissions. */
+    /** Retired admission channel; tests assert this stays empty. */
     prompt?: (input: {
       sessionID: string;
       id?: string;
@@ -284,6 +282,24 @@ export async function wireRuntime(
   });
   await runtime.wire(mockInput.context as never);
   return runtime;
+}
+
+/** Rule admissions routed through ctx.session.synthetic. */
+export function syntheticAdmissions(
+  mockInput: ReturnType<typeof createMockPluginInput>
+): SyntheticCall[] {
+  return mockInput.syntheticCalls.filter(
+    call => call.metadata?.ruleAdmission === true
+  );
+}
+
+/** Joined text of every rule admission captured by a mock context. */
+export function admissionText(
+  mockInput: ReturnType<typeof createMockPluginInput>
+): string {
+  return syntheticAdmissions(mockInput)
+    .map(call => call.text)
+    .join('\n');
 }
 
 export type EnvSnapshot = Map<string, string | undefined>;
