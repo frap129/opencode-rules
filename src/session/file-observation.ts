@@ -50,17 +50,29 @@ function asString(value: unknown): string | undefined {
 
 // Directory listings yield no observation; binary, image, PDF, and other
 // unrecognized formats fail closed with empty content (path still matches
-// globs).
+// globs). v2 read output is a "Read file <path>, lines N-M" header followed
+// by "N: " numbered lines; the legacy <content> wrapper is still parsed for
+// older peers.
 function readContent(output: string | undefined): string | null | undefined {
   if (output === undefined) return undefined;
-  if (/<type>directory<\/type>/i.test(output)) return null;
-  const contentMatch = /<content>([\s\S]*?)<\/content>/.exec(output);
-  if (!contentMatch) {
-    return '';
+  if (
+    /<type>directory<\/type>/i.test(output) ||
+    /^Read directory /.test(output)
+  ) {
+    return null;
   }
-  return contentMatch[1]
-    .replace(/^\n+/, '')
-    .replace(/\n+$/, '')
+  const contentMatch = /<content>([\s\S]*?)<\/content>/.exec(output);
+  if (contentMatch) {
+    return stripLineNumbers(
+      contentMatch[1].replace(/^\n+/, '').replace(/\n+$/, '')
+    );
+  }
+  if (!/^Read file /.test(output)) return '';
+  return stripLineNumbers(output.replace(/^Read file [^\n]*\n?/, ''));
+}
+
+function stripLineNumbers(text: string): string {
+  return text
     .split('\n')
     .map(line => line.replace(/^\s*\d+:\s?/, ''))
     .join('\n');
