@@ -56,8 +56,8 @@ The plugin builds the Working context from successful live events and eligible
 history parts (paths only, never content):
 
 1. **`tool.execute.after`**: Successful Read, Write, Edit, Apply Patch, and path-associated LSP events contribute normalized paths (and File observations for matching)
-2. **`experimental.chat.messages.transform`**: Rebuilds path-only Working context from message history on first encounter
-3. **`chat.message`**: Updates Working context with tool parts of the current message
+2. **Session `context` hook**: Rebuilds path-only Working context from message history on first encounter
+3. **Session `prompt` hook**: Captures the latest user prompt as the durable turn begins
 
 This multi-hook approach ensures:
 

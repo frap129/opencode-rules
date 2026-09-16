@@ -86,7 +86,7 @@ export interface V2DeliverySink {
     id: string;
     text: string;
     metadata?: Record<string, unknown>;
-    delivery?: 'steer' | 'queue';
+    resume?: boolean;
   }): Promise<unknown>;
 }
 
@@ -654,12 +654,15 @@ export class OpenCodeRulesRuntime {
         // v2 validates synthetic ids as Session.Message.ID ("msg_" prefix);
         // the codec's "prt_rules_" part id is an internal identity and must
         // be converted to idempotency-stable message form.
+        // resume:false is required: the prompt hook runs before the user
+        // message is dispatched, so a scheduled run would execute on a
+        // context containing only the rule block.
         await sink.synthetic({
           sessionID,
           id: syntheticMessageId(part.id),
           text: typeof part.text === 'string' ? part.text : '',
           ...(part.metadata !== undefined ? { metadata: part.metadata } : {}),
-          delivery: 'steer',
+          resume: false,
         });
       }
 

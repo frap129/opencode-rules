@@ -88,7 +88,6 @@ export interface SyntheticCall {
   text: string;
   description?: string;
   metadata?: Record<string, unknown>;
-  delivery?: string;
   resume?: boolean;
 }
 

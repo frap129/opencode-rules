@@ -112,7 +112,7 @@ describe('durable rule persistence', () => {
         { sessionID: 'ses_append', messageID: 'msg_append_1' }
       ).text
     );
-    expect(synthetic[0]?.delivery).toBe('steer');
+    expect(synthetic[0]?.resume).toBe(false);
   });
 
   it('skips injection without a messageID (no part owner)', async () => {

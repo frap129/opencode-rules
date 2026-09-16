@@ -20,7 +20,6 @@ export interface OpenCodeClient {
       text: string;
       description?: string;
       metadata?: Record<string, unknown>;
-      delivery?: 'steer' | 'queue';
       resume?: boolean;
     }) => Promise<unknown>;
     context?: (input: { sessionID: string }) => Promise<{ data?: unknown }>;

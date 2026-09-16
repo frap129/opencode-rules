@@ -281,8 +281,8 @@ The plugin uses OpenCode's hook system to track context and inject rules:
 
 1. **Context Tracking**:
    - `tool.execute.after` hook normalizes successful live file-handling tool events (read, edit, write, apply_patch, lsp) into File observations with path and content — the sole source for `globs` and `fileContains`
-   - `chat.message` hook captures the latest user prompt as messages arrive
-   - `experimental.chat.messages.transform` hook rebuilds the path-only Working context from message history on first call only; it never feeds rule matching
+   - The session `prompt` hook captures the latest user prompt as messages arrive
+   - The session `context` hook rebuilds the path-only Working context from message history on first call only; it never feeds rule matching
    - Excluded tools (grep, glob, bash, task, webfetch, custom/MCP, ...) contribute
      nothing, and historical tool parts never recreate File observations.
 
@@ -304,11 +304,13 @@ The plugin uses OpenCode's hook system to track context and inject rules:
 Rule delivery is split by the rule's **lifetime classification**:
 
 - **Session-durable rules** — unconditional rules and rules gated only by
-  `globs`, `fileContains`, `keywords`, `command`, `project`, `os`, or `ci` — are appended once
-  per session via the `chat.message` hook. All newly delivered rules for an
-  event are appended to the user message as one _synthetic_ text part before
-  opencode persists it. Once
-  persisted, a durable rule is never re-evaluated for removal during that
+  `globs`, `fileContains`, `keywords`, `command`, `project`, `os`, or `ci` — are
+  published once per turn as one persisted synthetic message via
+  `session.synthetic` on the session `prompt` hook (`resume: false`, no
+  description, so the admitted rule never triggers a reply and stays hidden
+  from the UI); the prompt hook runs before the user message is dispatched, so
+  a scheduled run would execute on a context containing the rule block alone.
+  Once persisted, a durable rule is never re-evaluated for removal during that
   session. A Durable Rule first matched by a live File observation is admitted
   at that observation's earliest applicable dispatch as one hidden synthetic
   message (`session.synthetic` with `resume: false` and no description);
@@ -318,9 +320,9 @@ Rule delivery is split by the rule's **lifetime classification**:
   prompt channel in older sessions.
 - **Ephemeral rules** — rules gated by `agent`, `model`, `branch`, or `tools`
   — are appended only to the transformed model request via
-  `experimental.chat.messages.transform` as one transient synthetic message
+  the session `context` hook as one transient synthetic message
   per matching turn.
-  They are never written to `chat.message` output or persisted history, so
+  They are never written to persisted history, so
   switching agent or model does not leave stale rule text behind.
 
 Each durable or transient injection event uses the same framing:
@@ -402,16 +404,15 @@ respects `.gitignore` by default, and produces better formatted output.
 1. When a tool call matches a hook's `tool` and `match`, the rule's body is queued as a **pending hook injection** in the session state. Hook blocking (`block: true`) and `run` side effects are unchanged.
 2. Pending hook injections are routed by the owning rule's lifetime:
    - **Durable owners** are delivered two ways: immediately, joined into the
-     next framed transient synthetic user message
-     (`experimental.chat.messages.transform`, never persisted), and durably,
-     joined into the next framed synthetic part attached to the next user
-     message (`chat.message`) so they remain in session history.
+     next framed transient synthetic message (session `context` hook, never
+     persisted), and durably, joined into the next framed synthetic message
+     admitted through `session.synthetic` on the session `prompt` hook
+     (`resume: false`) so they remain in session history.
    - **Ephemeral owners** (rules gated by `agent`, `model`, `branch`, or
-     `tools`) are joined into the transient synthetic message via
-     `experimental.chat.messages.transform` and are never flushed into
-     `chat.message` output or persisted history.
+     `tools`) are joined into the transient synthetic message via the session
+     `context` hook and are never persisted into history.
 3. The agent sees the corrective guidance on its next turn and can self-correct.
-4. Durable pending injections are cleared once delivered durably via `chat.message`; ephemeral pending injections are cleared after a successful transient delivery.
+4. Durable pending injections are cleared once delivered durably via `session.synthetic`; ephemeral pending injections are cleared after a successful transient delivery.
 
 ### Security Example: Blocking Insecure Bindings
 
@@ -473,9 +474,9 @@ respects `.gitignore` by default, and produces better formatted output.
 ### Scenario 3: User Mentions Testing
 
 - User types prompt: "How do I write unit tests for this function?"
-- `chat.message` hook captures the prompt
+- The session `prompt` hook captures the prompt
 - Plugin evaluates rules with `keywords: ['testing', 'unit test']`
-- Testing rules are appended to the user message as synthetic parts
+- The matched rule is published as a hidden synthetic message (`resume: false`) for the dispatch
 
 ### Scenario 4: Tool-Based Rules
 
