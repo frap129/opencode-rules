@@ -7,6 +7,7 @@ import {
   afterEach,
   type MockInstance,
 } from 'vitest';
+import { formatError } from './debug.js';
 
 async function loadDebugModule(enabled: boolean) {
   vi.resetModules();
@@ -17,6 +18,53 @@ async function loadDebugModule(enabled: boolean) {
   }
   return import('./debug.js');
 }
+
+describe('formatError', () => {
+  it('uses the message of an Error', () => {
+    expect(formatError(new Error('plain failure'))).toBe('plain failure');
+  });
+
+  it('stringifies non-Error values', () => {
+    expect(formatError('string failure')).toBe('string failure');
+    expect(formatError(42)).toBe('42');
+    expect(formatError(null)).toBe('null');
+  });
+
+  it('never returns an empty string', () => {
+    expect(formatError(new Error(''))).toContain('Error');
+    expect(formatError(new Error('   '))).not.toBe('   ');
+    expect(formatError('')).toContain('""');
+    expect(formatError(undefined)).toBe('undefined');
+  });
+
+  it('includes the error name for Error subclasses', () => {
+    class Boom extends Error {
+      constructor() {
+        super('detonated');
+        this.name = 'Boom';
+      }
+    }
+    const formatted = formatError(new Boom());
+    expect(formatted).toContain('Boom');
+    expect(formatted).toContain('detonated');
+  });
+
+  it('includes a cause chain when present', () => {
+    const error = new Error('outer', { cause: new Error('inner cause') });
+    const formatted = formatError(error);
+    expect(formatted).toContain('outer');
+    expect(formatted).toContain('inner cause');
+  });
+
+  it('falls back to serialization for objects with throwing getters', () => {
+    const hostile = {
+      get message(): string {
+        throw new Error('getter exploded');
+      },
+    };
+    expect(formatError(hostile)).toContain('getter exploded');
+  });
+});
 
 describe('debug output', () => {
   let debugSpy: MockInstance;
