@@ -8,6 +8,7 @@ import {
   type JSX,
 } from 'solid-js';
 import type { Plugin as TuiPluginNamespace } from '@opencode-ai/plugin/tui';
+import type { RGBA } from '@opentui/core';
 import { loadSidebarRules, type SidebarRuleEntry } from '../data/rules.js';
 import { createRulesLoadCoordinator } from '../data/rules-load-coordinator.js';
 import type { RuleMetadata } from '../../src/rules/rule-metadata.js';
@@ -36,19 +37,12 @@ interface SidebarContentProps {
   theme: TuiPluginNamespace.Context['theme'];
 }
 
-type ThemeColor = string | import('@opentui/core').RGBA;
-
-interface ThemeColors {
-  text: ThemeColor;
-  textMuted: ThemeColor;
-  success: ThemeColor;
-  [key: string]: unknown;
-}
+type Theme = TuiPluginNamespace.Context['theme'];
 
 interface RuleSectionProps {
   title: string;
   rules: SidebarRuleEntry[];
-  theme: ThemeColors;
+  theme: Theme;
   open: boolean;
   onToggle: () => void;
   expandedIndex: number | null;
@@ -69,8 +63,10 @@ function RuleSection(props: RuleSectionProps): JSX.Element {
     return `(${props.rules.length})`;
   });
 
-  const bulletColor = (rule: SidebarRuleEntry): ThemeColor => {
-    return rule.isActive === true ? props.theme.success : props.theme.textMuted;
+  const bulletColor = (rule: SidebarRuleEntry): RGBA => {
+    return rule.isActive === true
+      ? props.theme.text.feedback.success.default
+      : props.theme.text.subdued;
   };
 
   return (
@@ -78,11 +74,11 @@ function RuleSection(props: RuleSectionProps): JSX.Element {
       {props.rules.length > 0 && (
         <>
           <box flexDirection="row" gap={1} onMouseDown={() => props.onToggle()}>
-            <text fg={props.theme.text}>{props.open ? '▼' : '▶'}</text>
-            <text fg={props.theme.text}>
+            <text fg={props.theme.text.default}>{props.open ? '▼' : '▶'}</text>
+            <text fg={props.theme.text.default}>
               {props.title}
               {!props.open && (
-                <span style={{ fg: props.theme.textMuted }}>
+                <span style={{ fg: props.theme.text.subdued }}>
                   {' '}
                   {headerCount()}
                 </span>
@@ -100,17 +96,17 @@ function RuleSection(props: RuleSectionProps): JSX.Element {
                   >
                     <box flexDirection="row" gap={1}>
                       <text fg={bulletColor(rule)}>•</text>
-                      <text fg={props.theme.text}>{rule.name}</text>
+                      <text fg={props.theme.text.default}>{rule.name}</text>
                     </box>
                     {props.expandedIndex === globalIndex() && (
                       <box flexDirection="column" paddingLeft={4}>
-                        <text fg={props.theme.textMuted}>{rule.path}</text>
+                        <text fg={props.theme.text.subdued}>{rule.path}</text>
                         <For each={metadataFieldDescriptors}>
                           {({ key, label }) => {
                             const value = rule.metadata[key];
                             if (Array.isArray(value) && value.length > 0) {
                               return (
-                                <text fg={props.theme.textMuted}>
+                                <text fg={props.theme.text.subdued}>
                                   {label}: {value.join(', ')}
                                 </text>
                               );
@@ -119,12 +115,12 @@ function RuleSection(props: RuleSectionProps): JSX.Element {
                           }}
                         </For>
                         {rule.metadata.ci !== undefined && (
-                          <text fg={props.theme.textMuted}>
+                          <text fg={props.theme.text.subdued}>
                             CI: {String(rule.metadata.ci)}
                           </text>
                         )}
                         {rule.metadata.match && (
-                          <text fg={props.theme.textMuted}>
+                          <text fg={props.theme.text.subdued}>
                             Match: {rule.metadata.match}
                           </text>
                         )}
@@ -159,7 +155,7 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
   const [globalOpen, setGlobalOpen] = createSignal(false);
   const [refreshCounter, setRefreshCounter] = createSignal(0);
 
-  const theme = (): ThemeColors => props.theme as unknown as ThemeColors;
+  const theme = (): Theme => props.theme;
 
   const resolveProjectDir = (): string | null => props.projectDir;
 
@@ -258,13 +254,15 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
 
   return (
     <box>
-      <text fg={theme().text}>
+      <text fg={theme().text.default}>
         <b>Rules</b>
       </text>
 
-      {status() === 'loading' && <text fg={theme().textMuted}>Loading...</text>}
+      {status() === 'loading' && (
+        <text fg={theme().text.subdued}>Loading...</text>
+      )}
       {status() === 'error' && (
-        <text fg={theme().textMuted}>Failed to load rules</text>
+        <text fg={theme().text.subdued}>Failed to load rules</text>
       )}
 
       {status() === 'loaded' && (
@@ -295,10 +293,10 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
               />
             </>
           ) : (
-            <text fg={theme().textMuted}>No rules found</text>
+            <text fg={theme().text.subdued}>No rules found</text>
           )}
           {skippedCount() > 0 && (
-            <text fg={theme().textMuted}>
+            <text fg={theme().text.subdued}>
               {skippedCount()} rules skipped (unreadable)
             </text>
           )}
