@@ -139,6 +139,13 @@ export function formatConditionSummary(meta: RuleMetadata): string {
   return parts.join(', ');
 }
 
+export function formatRuleDetail(
+  entry: Pick<SidebarRuleEntry, 'conditionSummary' | 'path'>
+): string {
+  const matcher = entry.conditionSummary || 'always active';
+  return `${matcher} · ${entry.path}`;
+}
+
 // Three-pass disambiguation: filename stem, then parent-dir prefix for
 // duplicates, then full relative path if still ambiguous. Mutates
 // entries[].name in place.

@@ -21,6 +21,7 @@ import {
   classifyRuleScope,
   hasConditions,
   formatConditionSummary,
+  formatRuleDetail,
   disambiguateNames,
   loadSidebarRules,
   type SidebarRuleEntry,
@@ -154,6 +155,23 @@ describe('formatConditionSummary', () => {
     expect(result).toBe(
       'globs: *.md, fileContains: TODO, os: linux, ci: false, match: all'
     );
+  });
+});
+
+describe('formatRuleDetail', () => {
+  it('joins matcher and path with a middle dot', () => {
+    expect(
+      formatRuleDetail({ conditionSummary: 'agent: plan', path: 'plan.mdc' })
+    ).toBe('agent: plan · plan.mdc');
+  });
+
+  it('formats unconditional rules', () => {
+    expect(
+      formatRuleDetail({
+        conditionSummary: 'always active',
+        path: 'always.mdc',
+      })
+    ).toBe('always active · always.mdc');
   });
 });
 

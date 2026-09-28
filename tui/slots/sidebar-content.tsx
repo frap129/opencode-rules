@@ -8,9 +8,12 @@ import {
   type JSX,
 } from 'solid-js';
 import type { Plugin as TuiPluginNamespace } from '@opencode-ai/plugin/tui';
-import { loadSidebarRules, type SidebarRuleEntry } from '../data/rules.js';
+import {
+  formatRuleDetail,
+  loadSidebarRules,
+  type SidebarRuleEntry,
+} from '../data/rules.js';
 import { createRulesLoadCoordinator } from '../data/rules-load-coordinator.js';
-import type { RuleMetadata } from '../../src/rules/rule-metadata.js';
 import { logError } from '../../src/shared/debug.js';
 import {
   fgProps,
@@ -18,22 +21,6 @@ import {
   type SidebarColor,
   type SidebarColors,
 } from './theme-colors.js';
-
-const metadataFieldDescriptors: Array<{
-  key: keyof RuleMetadata;
-  label: string;
-}> = [
-  { key: 'globs', label: 'Globs' },
-  { key: 'fileContains', label: 'File contains' },
-  { key: 'keywords', label: 'Keywords' },
-  { key: 'tools', label: 'Tools' },
-  { key: 'model', label: 'Model' },
-  { key: 'agent', label: 'Agent' },
-  { key: 'command', label: 'Command' },
-  { key: 'project', label: 'Project' },
-  { key: 'branch', label: 'Branch' },
-  { key: 'os', label: 'OS' },
-];
 
 interface SidebarContentProps {
   sessionId: string;
@@ -98,37 +85,14 @@ function RuleSection(props: RuleSectionProps): JSX.Element {
                     onMouseDown={() => props.onExpandToggle(globalIndex())}
                   >
                     <box flexDirection="row" gap={1}>
-                      <text {...fgProps(bulletColor(rule))}>•</text>
+                      <text {...fgProps(bulletColor(rule))}>·</text>
                       <text {...fgProps(props.colors.text)}>{rule.name}</text>
                     </box>
                     {props.expandedIndex === globalIndex() && (
                       <box flexDirection="column" paddingLeft={4}>
                         <text {...fgProps(props.colors.subdued)}>
-                          {rule.path}
+                          <i>{formatRuleDetail(rule)}</i>
                         </text>
-                        <For each={metadataFieldDescriptors}>
-                          {({ key, label }) => {
-                            const value = rule.metadata[key];
-                            if (Array.isArray(value) && value.length > 0) {
-                              return (
-                                <text {...fgProps(props.colors.subdued)}>
-                                  {label}: {value.join(', ')}
-                                </text>
-                              );
-                            }
-                            return null;
-                          }}
-                        </For>
-                        {rule.metadata.ci !== undefined && (
-                          <text {...fgProps(props.colors.subdued)}>
-                            CI: {String(rule.metadata.ci)}
-                          </text>
-                        )}
-                        {rule.metadata.match && (
-                          <text {...fgProps(props.colors.subdued)}>
-                            Match: {rule.metadata.match}
-                          </text>
-                        )}
                       </box>
                     )}
                   </box>

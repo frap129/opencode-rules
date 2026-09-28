@@ -105,10 +105,28 @@ describe('sidebar mount', () => {
       expect(openFrame).toContain('plan');
       expect(openFrame).toContain('always');
 
+      const planRow = openFrame
+        .split('\n')
+        .findIndex(line => line.includes('plan'));
+      expect(planRow).toBeGreaterThanOrEqual(0);
+      await setup.mockMouse.click(2, planRow);
+
+      const detailDeadline = Date.now() + 2000;
+      let detailFrame = setup.captureCharFrame();
+      while (
+        !detailFrame.includes('agent: plan · plan.mdc') &&
+        Date.now() < detailDeadline
+      ) {
+        await new Promise(resolve => setTimeout(resolve, 10));
+        await setup.flush();
+        detailFrame = setup.captureCharFrame();
+      }
+      expect(detailFrame).toContain('agent: plan · plan.mdc');
+
       const captured = setup.captureSpans();
       const bullets = captured.lines
         .flatMap(line => line.spans)
-        .filter(span => span.text.trim() === '•');
+        .filter(span => span.text.trim() === '·');
       expect(bullets).toHaveLength(2);
       const active = bullets.filter(span =>
         span.fg.equals(theme.text.feedback.success.default)
