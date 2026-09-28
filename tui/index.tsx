@@ -1,6 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 import type { Plugin as TuiPluginNamespace } from '@opencode-ai/plugin/tui';
 import { SidebarContent } from './slots/sidebar-content.js';
+import { projectDirFor } from './data/project-dir.js';
 
 const tui: TuiPluginNamespace.Definition = {
   id: 'opencode-rules',
@@ -10,7 +11,7 @@ const tui: TuiPluginNamespace.Definition = {
       render: input => (
         <SidebarContent
           sessionId={input.sessionID}
-          projectDir={ctx.data.session.root(input.sessionID)}
+          projectDir={projectDirFor(ctx.data, input.sessionID)}
           data={ctx.data}
           theme={ctx.theme}
         />

@@ -533,6 +533,8 @@ opencode-rules/
 │   │   ├── sidebar-content.tsx # Sidebar widget component (sidebar.content slot)
 │   │   └── sidebar-mount.test.tsx # Mount smoke test
 │   ├── data/
+│   │   ├── project-dir.ts     # Session data to project directory resolution
+│   │   ├── project-dir.test.ts # Project directory resolution tests
 │   │   ├── rules.ts          # Rule discovery + formatting for sidebar
 │   │   └── rules.test.ts     # Data layer tests
 ├── server.js                  # Root entry shim for v2 directory loading (re-exports dist/src)
