@@ -531,6 +531,8 @@ opencode-rules/
 │   ├── index.tsx             # CLI-plugin entrypoint, exports { id, setup(ctx) }
 │   ├── slots/
 │   │   ├── sidebar-content.tsx # Sidebar widget component (sidebar.content slot)
+│   │   ├── theme-colors.ts   # Host theme token to sidebar color mapping
+│   │   ├── theme-colors.test.ts # Theme resolution tests
 │   │   └── sidebar-mount.test.tsx # Mount smoke test
 │   ├── data/
 │   │   ├── project-dir.ts     # Session data to project directory resolution
