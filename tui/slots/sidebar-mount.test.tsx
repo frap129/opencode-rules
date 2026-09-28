@@ -126,7 +126,7 @@ describe('sidebar mount', () => {
       const captured = setup.captureSpans();
       const bullets = captured.lines
         .flatMap(line => line.spans)
-        .filter(span => span.text.trim() === '·');
+        .filter(span => span.text.trim() === '•');
       expect(bullets).toHaveLength(2);
       const active = bullets.filter(span =>
         span.fg.equals(theme.text.feedback.success.default)

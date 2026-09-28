@@ -85,7 +85,7 @@ function RuleSection(props: RuleSectionProps): JSX.Element {
                     onMouseDown={() => props.onExpandToggle(globalIndex())}
                   >
                     <box flexDirection="row" gap={1}>
-                      <text {...fgProps(bulletColor(rule))}>·</text>
+                      <text {...fgProps(bulletColor(rule))}>•</text>
                       <text {...fgProps(props.colors.text)}>{rule.name}</text>
                     </box>
                     {props.expandedIndex === globalIndex() && (
