@@ -143,6 +143,8 @@ Both built-in directories are scanned recursively, allowing you to organize rule
 
 Use the `additionalRuleDirectories` plugin option to load rules from extra directories, for example a rules folder you already share with other agents. Configured directories are scanned after the built-in locations, in the order you list them; they are additive and never replace or reorder the built-in ones.
 
+Set it in `opencode.jsonc`:
+
 ```jsonc
 // opencode.jsonc
 {
@@ -158,6 +160,25 @@ Use the `additionalRuleDirectories` plugin option to load rules from extra direc
   ],
 }
 ```
+
+Or in `cli.json`, with the same option shape and the same `.agents/rules` example:
+
+```jsonc
+// ~/.config/opencode/cli.json
+{
+  "$schema": "https://opencode.ai/v2/cli.json",
+  "plugins": [
+    {
+      "package": "opencode-rules@next",
+      "options": {
+        "additionalRuleDirectories": [".agents/rules", "~/shared/rules"],
+      },
+    },
+  ],
+}
+```
+
+The TUI sidebar lists these directories too, so it shows the rules that will actually load. Extra directories inside the project are listed under **Project**, anything outside it under **Global**.
 
 Details:
 
@@ -569,7 +590,9 @@ opencode-rules/
 │   │   ├── project-dir.ts     # Session data to project directory resolution
 │   │   ├── project-dir.test.ts # Project directory resolution tests
 │   │   ├── rules.ts          # Rule discovery + formatting for sidebar
-│   │   └── rules.test.ts     # Data layer tests
+│   │   ├── rules.test.ts     # Data layer tests
+│   │   ├── rules-load-coordinator.ts # Load/reset/refresh/retry sequencing for the sidebar
+│   │   └── rules-load-coordinator.test.ts # Load coordinator tests
 ├── server.js                  # Root entry shim for v2 directory loading (re-exports dist/src)
 ├── tui.js                     # Root entry shim for v2 directory loading (re-exports dist/tui)
 ├── docs/

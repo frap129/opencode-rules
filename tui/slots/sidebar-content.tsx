@@ -25,6 +25,7 @@ import {
 interface SidebarContentProps {
   sessionId: string;
   projectDir: string | null;
+  additionalRuleDirectories: readonly string[];
   data: TuiPluginNamespace.Context['data'];
   theme: TuiPluginNamespace.Context['theme'];
 }
@@ -131,7 +132,10 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   const rulesLoadCoordinator = createRulesLoadCoordinator({
-    load: target => loadSidebarRules(target.projectDir, target.sessionId),
+    load: target =>
+      loadSidebarRules(target.projectDir, target.sessionId, {
+        additionalRuleDirectories: props.additionalRuleDirectories,
+      }),
     onReset: target => {
       setLastDir(target.projectDir);
       setLastSessionId(target.sessionId);

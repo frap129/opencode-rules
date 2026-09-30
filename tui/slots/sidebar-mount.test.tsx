@@ -69,6 +69,7 @@ describe('sidebar mount', () => {
           <SidebarContent
             sessionId="ses_sidebar_mount_theme"
             projectDir={tmp}
+            additionalRuleDirectories={[]}
             data={data as never}
             theme={theme}
           />

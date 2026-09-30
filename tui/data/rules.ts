@@ -3,6 +3,7 @@ import {
   getCachedRule,
 } from '../../src/rules/rule-discovery.js';
 import { readMatchedRulesState } from '../../src/session/matched-rules-state.js';
+import { resolveAdditionalRuleDirectories } from '../../src/config/plugin-options.js';
 import {
   hasConditions,
   type RuleMetadata,
@@ -27,13 +28,26 @@ export interface LoadSidebarRulesResult {
   hasEvaluationState: boolean;
 }
 
+export interface LoadSidebarRulesOptions {
+  readonly stateDir?: string;
+  readonly additionalRuleDirectories?: readonly string[];
+}
+
 export async function loadSidebarRules(
   projectDir: string | null,
   sessionId?: string,
-  options: { stateDir?: string } = {}
+  options: LoadSidebarRulesOptions = {}
 ): Promise<LoadSidebarRulesResult> {
+  // Resolved per load rather than once at plugin setup: the sidebar can be
+  // mounted for a session whose project root is not known until it renders.
   // discoverRuleFiles accepts string | undefined, not null
-  const discovered = await discoverRuleFiles(projectDir ?? undefined);
+  const discovered = await discoverRuleFiles(
+    projectDir ?? undefined,
+    resolveAdditionalRuleDirectories(
+      options.additionalRuleDirectories ?? [],
+      projectDir
+    )
+  );
 
   const matchedState = sessionId
     ? await readMatchedRulesState(sessionId, options)
@@ -94,15 +108,20 @@ export async function loadSidebarRules(
   return { rules: entries, skippedCount, hasEvaluationState };
 }
 
-// Prefix boundary matters: /project/.opencode/rules-extra/ must not match.
+// Containment in the project root decides the split, so a rule from an
+// additional directory inside the project reads as Project too. A `..`
+// segment is the only way out of the root, so a sibling that merely shares a
+// string prefix (`/project-2` against `/project`) stays Global.
 export function classifyRuleScope(
   filePath: string,
   projectDir: string | null
 ): 'global' | 'project' {
   if (!projectDir) return 'global';
-  const projectRulesPrefix =
-    path.join(projectDir, '.opencode', 'rules') + path.sep;
-  return filePath.startsWith(projectRulesPrefix) ? 'project' : 'global';
+  const relative = path.relative(projectDir, filePath);
+  if (relative === '' || path.isAbsolute(relative)) return 'global';
+  return relative === '..' || relative.startsWith(`..${path.sep}`)
+    ? 'global'
+    : 'project';
 }
 
 export function formatConditionSummary(meta: RuleMetadata): string {

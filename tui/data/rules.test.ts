@@ -17,6 +17,7 @@ import {
   chmodSync,
 } from 'node:fs';
 import { clearRuleCache } from '../../src/rules/rule-discovery.js';
+import { parsePluginOptions } from '../../src/config/plugin-options.js';
 import {
   classifyRuleScope,
   hasConditions,
@@ -41,6 +42,57 @@ afterAll(() => {
   }
 });
 
+interface RuleFixture {
+  root(): string;
+  dir(...segments: string[]): string;
+  globalDir(): string;
+  writeRule(dir: string, name: string, contents?: string): string;
+}
+
+// Isolates the discovery sources for the duration of a suite: its own XDG
+// config tree, its own HOME for `~` expansion, and no ambient
+// OPENCODE_CONFIG_DIR. Call inside a describe body.
+function useRuleFixture(prefix: string): RuleFixture {
+  const envKeys = ['XDG_CONFIG_HOME', 'OPENCODE_CONFIG_DIR', 'HOME'] as const;
+  const saved: Partial<Record<(typeof envKeys)[number], string>> = {};
+  let root = '';
+
+  beforeEach(() => {
+    root = mkdtempSync(path.join(os.tmpdir(), prefix));
+    for (const key of envKeys) {
+      saved[key] = process.env[key];
+      delete process.env[key];
+    }
+    process.env['XDG_CONFIG_HOME'] = path.join(root, '.config');
+    clearRuleCache();
+  });
+
+  afterEach(() => {
+    for (const key of envKeys) {
+      const value = saved[key];
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  const dir = (...segments: string[]): string => path.join(root, ...segments);
+  return {
+    root: () => root,
+    dir,
+    globalDir: () => dir('.config', 'opencode', 'rules'),
+    writeRule(target, name, contents = '# Rule') {
+      mkdirSync(target, { recursive: true });
+      const filePath = path.join(target, name);
+      writeFileSync(filePath, contents);
+      return filePath;
+    },
+  };
+}
+
 describe('classifyRuleScope', () => {
   it('returns "global" when projectDir is null', () => {
     expect(
@@ -60,16 +112,32 @@ describe('classifyRuleScope', () => {
     ).toBe('project');
   });
 
-  it('returns "global" for files not under projectDir/.opencode/rules/', () => {
+  it('returns "global" for global files outside projectDir', () => {
     expect(
       classifyRuleScope('/home/user/.config/opencode/rules/foo.md', '/project')
     ).toBe('global');
   });
 
+  it('returns "project" for an additional directory inside the project', () => {
+    expect(classifyRuleScope('/project/.agents/rules/foo.md', '/project')).toBe(
+      'project'
+    );
+  });
+
+  it('returns "global" for an additional directory outside the project', () => {
+    expect(
+      classifyRuleScope('/home/user/shared/rules/foo.md', '/project')
+    ).toBe('global');
+  });
+
   it('does not match partial path prefixes', () => {
     expect(
-      classifyRuleScope('/project/.opencode/rules-extra/foo.md', '/project')
+      classifyRuleScope('/project-sibling/.opencode/rules/foo.md', '/project')
     ).toBe('global');
+  });
+
+  it('returns "global" for the project root itself', () => {
+    expect(classifyRuleScope('/project', '/project')).toBe('global');
   });
 });
 
@@ -240,37 +308,10 @@ describe('disambiguateNames', () => {
 });
 
 describe('loadSidebarRules', () => {
-  let testDir: string;
-  let savedXDG: string | undefined;
-  let savedConfigDir: string | undefined;
-
-  beforeEach(() => {
-    testDir = mkdtempSync(path.join(os.tmpdir(), 'tui-rules-test-'));
-    savedXDG = process.env['XDG_CONFIG_HOME'];
-    savedConfigDir = process.env['OPENCODE_CONFIG_DIR'];
-    delete process.env['OPENCODE_CONFIG_DIR'];
-    clearRuleCache();
-  });
-
-  afterEach(() => {
-    rmSync(testDir, { recursive: true, force: true });
-    if (savedXDG === undefined) {
-      delete process.env['XDG_CONFIG_HOME'];
-    } else {
-      process.env['XDG_CONFIG_HOME'] = savedXDG;
-    }
-    if (savedConfigDir === undefined) {
-      delete process.env['OPENCODE_CONFIG_DIR'];
-    } else {
-      process.env['OPENCODE_CONFIG_DIR'] = savedConfigDir;
-    }
-  });
+  const fixture = useRuleFixture('tui-rules-test-');
 
   it('discovers global rules when projectDir is null', async () => {
-    const globalDir = path.join(testDir, '.config', 'opencode', 'rules');
-    mkdirSync(globalDir, { recursive: true });
-    writeFileSync(path.join(globalDir, 'rule.md'), '# Always');
-    process.env['XDG_CONFIG_HOME'] = path.join(testDir, '.config');
+    fixture.writeRule(fixture.globalDir(), 'rule.md', '# Always');
 
     const { rules, skippedCount } = await loadSidebarRules(null);
 
@@ -283,14 +324,13 @@ describe('loadSidebarRules', () => {
   });
 
   it('discovers both global and project rules', async () => {
-    const globalDir = path.join(testDir, '.config', 'opencode', 'rules');
-    const projDir = path.join(testDir, 'project');
-    const projRulesDir = path.join(projDir, '.opencode', 'rules');
-    mkdirSync(globalDir, { recursive: true });
-    mkdirSync(projRulesDir, { recursive: true });
-    writeFileSync(path.join(globalDir, 'global.md'), '# Global');
-    writeFileSync(path.join(projRulesDir, 'local.md'), '# Local');
-    process.env['XDG_CONFIG_HOME'] = path.join(testDir, '.config');
+    fixture.writeRule(fixture.globalDir(), 'global.md', '# Global');
+    const projDir = fixture.dir('project');
+    fixture.writeRule(
+      fixture.dir('project', '.opencode', 'rules'),
+      'local.md',
+      '# Local'
+    );
 
     const { rules } = await loadSidebarRules(projDir);
 
@@ -300,13 +340,11 @@ describe('loadSidebarRules', () => {
   });
 
   it('parses metadata for conditional rules', async () => {
-    const globalDir = path.join(testDir, '.config', 'opencode', 'rules');
-    mkdirSync(globalDir, { recursive: true });
-    writeFileSync(
-      path.join(globalDir, 'conditional.mdc'),
+    fixture.writeRule(
+      fixture.globalDir(),
+      'conditional.mdc',
       `---\nglobs:\n  - "**/*.ts"\nkeywords:\n  - testing\n---\nRule content`
     );
-    process.env['XDG_CONFIG_HOME'] = path.join(testDir, '.config');
 
     const { rules } = await loadSidebarRules(null);
 
@@ -318,18 +356,14 @@ describe('loadSidebarRules', () => {
   });
 
   it('sorts project rules before global, alphabetical within group', async () => {
-    const globalDir = path.join(testDir, '.config', 'opencode', 'rules');
-    const projDir = path.join(testDir, 'project');
-    const projRulesDir = path.join(projDir, '.opencode', 'rules');
-    mkdirSync(globalDir, { recursive: true });
-    mkdirSync(projRulesDir, { recursive: true });
-    writeFileSync(path.join(globalDir, 'zebra.md'), '# Z');
-    writeFileSync(path.join(globalDir, 'alpha.md'), '# A');
-    writeFileSync(path.join(projRulesDir, 'beta.md'), '# B');
-    writeFileSync(path.join(projRulesDir, 'aardvark.md'), '# AA');
-    process.env['XDG_CONFIG_HOME'] = path.join(testDir, '.config');
+    const globalDir = fixture.globalDir();
+    fixture.writeRule(globalDir, 'zebra.md', '# Z');
+    fixture.writeRule(globalDir, 'alpha.md', '# A');
+    const projRulesDir = fixture.dir('project', '.opencode', 'rules');
+    fixture.writeRule(projRulesDir, 'beta.md', '# B');
+    fixture.writeRule(projRulesDir, 'aardvark.md', '# AA');
 
-    const { rules } = await loadSidebarRules(projDir);
+    const { rules } = await loadSidebarRules(fixture.dir('project'));
 
     expect(rules.map(r => `${r.source}:${r.name}`)).toEqual([
       'project:aardvark',
@@ -341,13 +375,10 @@ describe('loadSidebarRules', () => {
 
   it('increments skippedCount for unreadable files', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const globalDir = path.join(testDir, '.config', 'opencode', 'rules');
-    mkdirSync(globalDir, { recursive: true });
-    writeFileSync(path.join(globalDir, 'readable.md'), '# OK');
-    const unreadable = path.join(globalDir, 'unreadable.md');
-    writeFileSync(unreadable, '# Nope');
+    const globalDir = fixture.globalDir();
+    fixture.writeRule(globalDir, 'readable.md', '# OK');
+    const unreadable = fixture.writeRule(globalDir, 'unreadable.md', '# Nope');
     chmodSync(unreadable, 0o000);
-    process.env['XDG_CONFIG_HOME'] = path.join(testDir, '.config');
 
     const { rules, skippedCount } = await loadSidebarRules(null);
 
@@ -364,47 +395,21 @@ describe('loadSidebarRules', () => {
 });
 
 describe('loadSidebarRules isActive behavior', () => {
-  let testDir: string;
-  let stateDir: string;
-  let savedXDG: string | undefined;
-  let savedConfigDir: string | undefined;
+  const fixture = useRuleFixture('tui-rules-active-test-');
 
-  beforeEach(() => {
-    testDir = mkdtempSync(path.join(os.tmpdir(), 'tui-rules-active-test-'));
-    stateDir = path.join(testDir, 'state');
-    mkdirSync(stateDir, { recursive: true });
-    savedXDG = process.env['XDG_CONFIG_HOME'];
-    savedConfigDir = process.env['OPENCODE_CONFIG_DIR'];
-    delete process.env['OPENCODE_CONFIG_DIR'];
-    clearRuleCache();
-  });
-
-  afterEach(() => {
-    rmSync(testDir, { recursive: true, force: true });
-    if (savedXDG === undefined) {
-      delete process.env['XDG_CONFIG_HOME'];
-    } else {
-      process.env['XDG_CONFIG_HOME'] = savedXDG;
-    }
-    if (savedConfigDir === undefined) {
-      delete process.env['OPENCODE_CONFIG_DIR'];
-    } else {
-      process.env['OPENCODE_CONFIG_DIR'] = savedConfigDir;
-    }
-  });
+  function stateDir(): string {
+    return fixture.dir('state');
+  }
 
   function writeStateFile(sessionID: string, matchedRulePaths: string[]): void {
     writeFileSync(
-      path.join(stateDir, `${sessionID}.json`),
+      path.join(stateDir(), `${sessionID}.json`),
       JSON.stringify({ sessionID, matchedRulePaths, evaluatedAt: 123 })
     );
   }
 
   it('sets hasEvaluationState to false when no sessionId provided', async () => {
-    const globalDir = path.join(testDir, '.config', 'opencode', 'rules');
-    mkdirSync(globalDir, { recursive: true });
-    writeFileSync(path.join(globalDir, 'rule.md'), '# Always');
-    process.env['XDG_CONFIG_HOME'] = path.join(testDir, '.config');
+    fixture.writeRule(fixture.globalDir(), 'rule.md', '# Always');
 
     const result = await loadSidebarRules(null);
 
@@ -412,36 +417,30 @@ describe('loadSidebarRules isActive behavior', () => {
   });
 
   it('sets hasEvaluationState to false when state file does not exist', async () => {
-    const globalDir = path.join(testDir, '.config', 'opencode', 'rules');
-    mkdirSync(globalDir, { recursive: true });
-    writeFileSync(path.join(globalDir, 'rule.md'), '# Always');
-    process.env['XDG_CONFIG_HOME'] = path.join(testDir, '.config');
+    fixture.writeRule(fixture.globalDir(), 'rule.md', '# Always');
+    mkdirSync(stateDir(), { recursive: true });
 
     const result = await loadSidebarRules(null, 'nonexistent-session', {
-      stateDir,
+      stateDir: stateDir(),
     });
 
     expect(result.hasEvaluationState).toBe(false);
   });
 
   it('sets hasEvaluationState to true when state file exists', async () => {
-    const globalDir = path.join(testDir, '.config', 'opencode', 'rules');
-    mkdirSync(globalDir, { recursive: true });
-    writeFileSync(path.join(globalDir, 'rule.md'), '# Always');
-    process.env['XDG_CONFIG_HOME'] = path.join(testDir, '.config');
-
+    fixture.writeRule(fixture.globalDir(), 'rule.md', '# Always');
+    mkdirSync(stateDir(), { recursive: true });
     writeStateFile('test-session', []);
 
-    const result = await loadSidebarRules(null, 'test-session', { stateDir });
+    const result = await loadSidebarRules(null, 'test-session', {
+      stateDir: stateDir(),
+    });
 
     expect(result.hasEvaluationState).toBe(true);
   });
 
   it('sets isActive to true for unconditional rules without state file', async () => {
-    const globalDir = path.join(testDir, '.config', 'opencode', 'rules');
-    mkdirSync(globalDir, { recursive: true });
-    writeFileSync(path.join(globalDir, 'always.md'), '# Always active');
-    process.env['XDG_CONFIG_HOME'] = path.join(testDir, '.config');
+    fixture.writeRule(fixture.globalDir(), 'always.md', '# Always active');
 
     const { rules } = await loadSidebarRules(null);
 
@@ -450,13 +449,11 @@ describe('loadSidebarRules isActive behavior', () => {
   });
 
   it('sets isActive to null for conditional rules without state file', async () => {
-    const globalDir = path.join(testDir, '.config', 'opencode', 'rules');
-    mkdirSync(globalDir, { recursive: true });
-    writeFileSync(
-      path.join(globalDir, 'conditional.mdc'),
+    fixture.writeRule(
+      fixture.globalDir(),
+      'conditional.mdc',
       `---\nglobs:\n  - "**/*.ts"\n---\nConditional rule`
     );
-    process.env['XDG_CONFIG_HOME'] = path.join(testDir, '.config');
 
     const { rules } = await loadSidebarRules(null);
 
@@ -465,18 +462,14 @@ describe('loadSidebarRules isActive behavior', () => {
   });
 
   it('sets isActive based on matchedRulePaths when state file exists', async () => {
-    const globalDir = path.join(testDir, '.config', 'opencode', 'rules');
-    mkdirSync(globalDir, { recursive: true });
-    const matchedPath = path.join(globalDir, 'matched.md');
-    const unmatchedPath = path.join(globalDir, 'unmatched.md');
-    writeFileSync(matchedPath, '# Matched');
-    writeFileSync(unmatchedPath, '# Unmatched');
-    process.env['XDG_CONFIG_HOME'] = path.join(testDir, '.config');
-
+    const globalDir = fixture.globalDir();
+    const matchedPath = fixture.writeRule(globalDir, 'matched.md', '# Matched');
+    fixture.writeRule(globalDir, 'unmatched.md', '# Unmatched');
+    mkdirSync(stateDir(), { recursive: true });
     writeStateFile('test-session', [matchedPath]);
 
     const { rules } = await loadSidebarRules(null, 'test-session', {
-      stateDir,
+      stateDir: stateDir(),
     });
 
     const matched = rules.find(r => r.name === 'matched');
@@ -487,19 +480,16 @@ describe('loadSidebarRules isActive behavior', () => {
   });
 
   it('correctly matches conditional rules with state file', async () => {
-    const globalDir = path.join(testDir, '.config', 'opencode', 'rules');
-    mkdirSync(globalDir, { recursive: true });
-    const conditionalPath = path.join(globalDir, 'conditional.mdc');
-    writeFileSync(
-      conditionalPath,
+    const conditionalPath = fixture.writeRule(
+      fixture.globalDir(),
+      'conditional.mdc',
       `---\nglobs:\n  - "**/*.ts"\n---\nConditional rule`
     );
-    process.env['XDG_CONFIG_HOME'] = path.join(testDir, '.config');
-
+    mkdirSync(stateDir(), { recursive: true });
     writeStateFile('test-session', [conditionalPath]);
 
     const { rules } = await loadSidebarRules(null, 'test-session', {
-      stateDir,
+      stateDir: stateDir(),
     });
 
     expect(rules[0]!.isConditional).toBe(true);
@@ -507,22 +497,109 @@ describe('loadSidebarRules isActive behavior', () => {
   });
 
   it('marks conditional rules as inactive when not in matchedRulePaths', async () => {
-    const globalDir = path.join(testDir, '.config', 'opencode', 'rules');
-    mkdirSync(globalDir, { recursive: true });
-    writeFileSync(
-      path.join(globalDir, 'conditional.mdc'),
+    fixture.writeRule(
+      fixture.globalDir(),
+      'conditional.mdc',
       `---\nglobs:\n  - "**/*.ts"\n---\nConditional rule`
     );
-    process.env['XDG_CONFIG_HOME'] = path.join(testDir, '.config');
-
+    mkdirSync(stateDir(), { recursive: true });
     writeStateFile('test-session', []);
 
     const { rules } = await loadSidebarRules(null, 'test-session', {
-      stateDir,
+      stateDir: stateDir(),
     });
 
     expect(rules[0]!.isConditional).toBe(true);
     expect(rules[0]!.isActive).toBe(false);
+  });
+});
+
+describe('loadSidebarRules additional rule directories', () => {
+  const fixture = useRuleFixture('tui-rules-extra-test-');
+
+  it('lists in-project and outside-project extra directories by containment', async () => {
+    fixture.writeRule(fixture.globalDir(), 'global.md', '# Global');
+    fixture.writeRule(
+      fixture.dir('project', '.opencode', 'rules'),
+      'built-in.md',
+      '# Built in'
+    );
+    fixture.writeRule(
+      fixture.dir('project', '.agents', 'rules'),
+      'in-project.md',
+      '# In project'
+    );
+    const outside = fixture.dir('shared', 'rules');
+    fixture.writeRule(outside, 'outside.md', '# Outside');
+
+    const { rules } = await loadSidebarRules(
+      fixture.dir('project'),
+      undefined,
+      {
+        additionalRuleDirectories: ['.agents/rules', outside],
+      }
+    );
+
+    expect(rules.map(r => `${r.source}:${r.name}`)).toEqual([
+      'project:built-in',
+      'project:in-project',
+      'global:global',
+      'global:outside',
+    ]);
+  });
+
+  it('skips relative entries but loads absolute and ~ entries without a project root', async () => {
+    process.env['HOME'] = fixture.dir('home');
+    fixture.writeRule(fixture.globalDir(), 'global.md', '# Global');
+    fixture.writeRule(fixture.dir('relative-rules'), 'skipped.md', '# Nope');
+    fixture.writeRule(fixture.dir('abs-rules'), 'absolute.md', '# Absolute');
+    fixture.writeRule(fixture.dir('home', 'shared-rules'), 'home.md', '# Home');
+
+    const { rules } = await loadSidebarRules(null, undefined, {
+      additionalRuleDirectories: [
+        'relative-rules',
+        fixture.dir('abs-rules'),
+        '~/shared-rules',
+      ],
+    });
+
+    expect(rules.map(r => `${r.source}:${r.name}`)).toEqual([
+      'global:absolute',
+      'global:global',
+      'global:home',
+    ]);
+  });
+
+  it('resolves relative entries against the project root of each load', async () => {
+    fixture.writeRule(fixture.dir('a', '.agents', 'rules'), 'from-a.md', '# A');
+    fixture.writeRule(fixture.dir('b', '.agents', 'rules'), 'from-b.md', '# B');
+    const options = { additionalRuleDirectories: ['.agents/rules'] };
+
+    const first = await loadSidebarRules(fixture.dir('a'), undefined, options);
+    const second = await loadSidebarRules(fixture.dir('b'), undefined, options);
+
+    expect(first.rules.map(r => r.name)).toEqual(['from-a']);
+    expect(second.rules.map(r => r.name)).toEqual(['from-b']);
+    expect(second.rules[0]!.source).toBe('project');
+  });
+
+  it('degrades to built-in discovery for malformed plugin options', async () => {
+    fixture.writeRule(fixture.globalDir(), 'global.md', '# Global');
+
+    // A hand-written config can hand over anything, including a getter that
+    // throws; the shared parser degrades to an empty entry list.
+    const hostile = Object.defineProperty({}, 'additionalRuleDirectories', {
+      get() {
+        throw new Error('hostile getter');
+      },
+    });
+    const { additionalRuleDirectories } = parsePluginOptions(hostile);
+
+    const { rules } = await loadSidebarRules(null, undefined, {
+      additionalRuleDirectories,
+    });
+
+    expect(rules.map(r => r.name)).toEqual(['global']);
   });
 });
 
