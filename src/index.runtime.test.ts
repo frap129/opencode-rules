@@ -30,6 +30,7 @@ import { createRuntime } from './runtime/create-runtime.js';
 import { clearRuleCache } from './rules/rule-discovery.js';
 import { buildDurableDeliveryPart } from './delivery/rule-delivery-codec.js';
 
+import * as pluginOptionsModule from './config/plugin-options.js';
 import * as ruleDiscoveryModule from './rules/rule-discovery.js';
 import * as ruleMetadataModule from './rules/rule-metadata.js';
 import * as ruleFilterModule from './rules/rule-filter.js';
@@ -41,6 +42,19 @@ import * as runtimeContextModule from './runtime/match-context.js';
 import * as runtimeChatModule from './runtime/chat-capture.js';
 
 describe('module boundary tests', () => {
+  it('should export PluginOptions type and only the option functions at runtime', () => {
+    const options: pluginOptionsModule.PluginOptions = {
+      additionalRuleDirectories: ['/abs/rules'],
+    };
+    expect(options.additionalRuleDirectories).toEqual(['/abs/rules']);
+    // The type adds no runtime export, so the config module's runtime surface
+    // stays exactly the two functions both plugin entries call.
+    expect(Object.keys(pluginOptionsModule).sort()).toEqual([
+      'parsePluginOptions',
+      'resolveAdditionalRuleDirectories',
+    ]);
+  });
+
   it('should export discoverRuleFiles from rule-discovery module', () => {
     expect(ruleDiscoveryModule.discoverRuleFiles).toBeDefined();
     expect(typeof ruleDiscoveryModule.discoverRuleFiles).toBe('function');

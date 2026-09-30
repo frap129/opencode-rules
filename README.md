@@ -494,6 +494,8 @@ opencode-rules/
 │   ├── index.ts              # Plugin entry point (v2 default export { id, setup })
 │   ├── test-fixtures.ts      # Shared test fixtures and builders
 │   ├── api-surface.typecheck.ts # Type-level privacy contract (checked by tsc)
+│   ├── config/
+│   │   └── plugin-options.ts   # Plugin entry `options` parsing and additional rule directory resolution (the config seam shared by the server and TUI entries)
 │   ├── rules/
 │   │   ├── rule-discovery.ts # Rule file scanning, discovery, and per-session snapshots
 │   │   ├── rule-metadata.ts  # YAML frontmatter parsing
