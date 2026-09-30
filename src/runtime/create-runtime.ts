@@ -13,6 +13,8 @@ export interface CreateRuntimeOptions {
   client: unknown;
   directory: string;
   projectDirectory: string;
+  /** Already resolved to absolute paths; ignored when ruleFiles is supplied. */
+  additionalRuleDirectories?: readonly string[];
   ruleFiles?: DiscoveredRuleInput[];
   sessionStore?: SessionStore;
   matchedRulesStateStore?: MatchedRulesStateStore;
@@ -32,7 +34,12 @@ export async function createRuntime(
   opts: CreateRuntimeOptions
 ): Promise<OpenCodeRulesRuntime> {
   const debugLog = opts.debugLog ?? createDebugLog();
-  const ruleFiles = opts.ruleFiles ?? (await discoverRuleFiles(opts.directory));
+  const ruleFiles =
+    opts.ruleFiles ??
+    (await discoverRuleFiles(
+      opts.directory,
+      opts.additionalRuleDirectories ?? []
+    ));
   debugLog(`Discovered ${ruleFiles.length} rule file(s)`);
   return new OpenCodeRulesRuntime({
     client: opts.client,

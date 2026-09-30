@@ -135,8 +135,37 @@ Rules are automatically discovered from these directories (including all subdire
 
 1. **Global rules**: `$OPENCODE_CONFIG_DIR/rules/` if set, otherwise `$XDG_CONFIG_HOME/opencode/rules/` (typically `~/.config/opencode/rules/`)
 2. **Project rules**: `.opencode/rules/` (in your project root)
+3. **Additional directories**: any directories you configure with `additionalRuleDirectories` (see below)
 
-Both directories are scanned recursively, allowing you to organize rules into subdirectories.
+Both built-in directories are scanned recursively, allowing you to organize rules into subdirectories.
+
+### Additional Rule Directories
+
+Use the `additionalRuleDirectories` plugin option to load rules from extra directories, for example a rules folder you already share with other agents. Configured directories are scanned after the built-in locations, in the order you list them; they are additive and never replace or reorder the built-in ones.
+
+```jsonc
+// opencode.jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": [
+    {
+      "package": "opencode-rules@next",
+      "options": {
+        // A bare string (".agents/rules") is shorthand for a one-entry list.
+        "additionalRuleDirectories": [".agents/rules", "~/shared/rules"],
+      },
+    },
+  ],
+}
+```
+
+Details:
+
+- Paths may be absolute, relative to the project root (`.agents/rules`), or start with `~` for your home directory.
+- Relative entries are skipped when there is no project directory.
+- Directories are scanned recursively with the same rules as the built-in ones: `.md` and `.mdc` files only, dot-prefixed entries skipped, and missing directories ignored.
+- A file reachable through more than one configured directory is loaded once.
+- Entries that are not a string or a list of strings are ignored, so a malformed value degrades to built-in discovery instead of failing to load.
 
 ### Supported File Formats
 

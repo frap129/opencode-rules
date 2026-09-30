@@ -93,6 +93,8 @@ export interface SyntheticCall {
 
 export interface MockPluginInput {
   testDir: string;
+  /** v2 plugin `options` block handed to the entry by the host. */
+  options?: Readonly<Record<string, unknown>>;
   /** v2 mcp.list() shape: McpServer[] tagged by status. */
   mcpServers?: Array<{ name: string; status: string }>;
   /** Session history returned by client.session.context(). */
@@ -130,6 +132,7 @@ export interface HookRecorders {
 
 export interface MockPluginContext {
   location: { directory: string };
+  options: Readonly<Record<string, unknown>>;
   tool: {
     hook: (
       name: 'execute.before' | 'execute.after',
@@ -203,6 +206,7 @@ export function createMockPluginInput(opts: MockPluginInput): {
 
   const context: MockPluginContext = {
     location: { directory: opts.testDir },
+    options: opts.options ?? {},
     tool: {
       hook: async (name, handler) => {
         if (name === 'execute.before') {

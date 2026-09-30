@@ -141,33 +141,41 @@ export async function loadRuleSnapshots(
 }
 
 // Priority: OPENCODE_CONFIG_DIR > XDG_CONFIG_HOME/opencode > ~/.config/opencode
+// Built-in locations are always scanned first; configured directories are
+// additive and cannot replace or reorder them.
 export async function discoverRuleFiles(
-  projectDir?: string
+  projectDir?: string,
+  additionalRuleDirectories: readonly string[] = []
 ): Promise<DiscoveredRule[]> {
   const files: DiscoveredRule[] = [];
+  // Identity is the absolute path, so a file reachable through more than one
+  // configured directory is loaded (and injected) once.
+  const seen = new Set<string>();
 
-  const globalRulesDir = getGlobalRulesDir();
-  if (globalRulesDir) {
-    const globalRules = await scanDirectoryRecursively(
-      globalRulesDir,
-      globalRulesDir
-    );
-    for (const { filePath, relativePath } of globalRules) {
-      debugLog(`Discovered global rule: ${relativePath} (${filePath})`);
+  const addFrom = async (dir: string | null, label: string) => {
+    if (!dir) return;
+    for (const { filePath, relativePath } of await scanDirectoryRecursively(
+      dir,
+      dir
+    )) {
+      if (seen.has(filePath)) {
+        debugLog(`Skipping already discovered rule: ${filePath}`);
+        continue;
+      }
+      seen.add(filePath);
+      debugLog(`Discovered ${label} rule: ${relativePath} (${filePath})`);
       files.push({ filePath, relativePath });
     }
-  }
+  };
+
+  await addFrom(getGlobalRulesDir(), 'global');
 
   if (projectDir) {
-    const projectRulesDir = path.join(projectDir, '.opencode', 'rules');
-    const projectRules = await scanDirectoryRecursively(
-      projectRulesDir,
-      projectRulesDir
-    );
-    for (const { filePath, relativePath } of projectRules) {
-      debugLog(`Discovered project rule: ${relativePath} (${filePath})`);
-      files.push({ filePath, relativePath });
-    }
+    await addFrom(path.join(projectDir, '.opencode', 'rules'), 'project');
+  }
+
+  for (const dir of additionalRuleDirectories) {
+    await addFrom(dir, 'additional');
   }
 
   return files;
