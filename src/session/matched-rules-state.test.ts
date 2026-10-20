@@ -46,6 +46,29 @@ describe('matched-rules-state', () => {
       expect(state!.evaluatedAt).toBeLessThanOrEqual(Date.now());
     });
 
+    it('writeIfChanged skips identical snapshots', async () => {
+      const sessionID = 'ses_write_if_changed';
+
+      await store.writeIfChanged(sessionID, ['/rule.md']);
+      const initial = await readMatchedRulesState(sessionID, {
+        stateDir: testStateDir,
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 20));
+      await store.writeIfChanged(sessionID, ['/rule.md']);
+      const unchanged = await readMatchedRulesState(sessionID, {
+        stateDir: testStateDir,
+      });
+      expect(unchanged?.evaluatedAt).toBe(initial?.evaluatedAt);
+
+      await store.writeIfChanged(sessionID, ['/other.md']);
+      const changed = await readMatchedRulesState(sessionID, {
+        stateDir: testStateDir,
+      });
+      expect(changed?.matchedRulePaths).toEqual(['/other.md']);
+      expect(changed!.evaluatedAt).toBeGreaterThan(initial!.evaluatedAt);
+    });
+
     it('returns null for missing file', async () => {
       const state = await readMatchedRulesState('ses_nonexistent', {
         stateDir: testStateDir,

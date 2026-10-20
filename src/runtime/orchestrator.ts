@@ -297,6 +297,7 @@ export class OpenCodeRulesRuntime {
       );
       this.sessionStore.upsert(sessionID, state => {
         state.compacted = true;
+        state.matchedStateTracking = false;
       });
     }
   }
@@ -443,6 +444,8 @@ export class OpenCodeRulesRuntime {
     }
 
     let ephemeralRules: MatchedRuleContent[] = [];
+    let matchedForState: MatchedRuleEntry[] = [];
+    let refreshMatchedState = false;
     try {
       const currentState = this.sessionStore.get(sessionID);
       if (currentState) {
@@ -454,6 +457,8 @@ export class OpenCodeRulesRuntime {
           modelID: currentState.lastModelID,
           agentType: currentState.lastAgentType,
         });
+        refreshMatchedState = currentState.matchedStateTracking === true;
+        matchedForState = matches;
         ephemeralRules = this.toDeliveryRules(
           matches.filter(rule => rule.lifetime === 'ephemeral')
         );
@@ -478,7 +483,19 @@ export class OpenCodeRulesRuntime {
         )
       );
     }
-    await this.ruleDelivery.retryPendingAdmissions(sessionID);
+    const retriedRules =
+      await this.ruleDelivery.retryPendingAdmissions(sessionID);
+    const retriedPaths = retriedRules.map(
+      rule => rule.identity ?? rule.relativePath
+    );
+
+    if (refreshMatchedState) {
+      const paths = new Set(matchedForState.map(rule => rule.filePath));
+      for (const path of retriedPaths) paths.add(path);
+      await this.matchedRulesStateStore.writeIfChanged(sessionID, [...paths]);
+    } else if (retriedPaths.length > 0) {
+      await this.matchedRulesStateStore.merge(sessionID, retriedPaths);
+    }
 
     // Compacted-session projection: v1 used the compaction hook's
     // output.context channel; v2 has none, so the projection rides the
@@ -608,6 +625,10 @@ export class OpenCodeRulesRuntime {
       // replay of our own framing) must never be treated as a user turn.
       if (promptText.startsWith('<system-message>')) return;
 
+      this.sessionStore.upsert(sessionID, state => {
+        state.matchedStateTracking = false;
+      });
+
       const captured = captureSessionPrompt(
         input,
         this.sessionStore,
@@ -671,6 +692,9 @@ export class OpenCodeRulesRuntime {
           sessionID,
           matched.map(r => r.filePath)
         );
+        this.sessionStore.upsert(sessionID, state => {
+          state.matchedStateTracking = true;
+        });
       }
     } catch (error) {
       this.debugLog(`session.prompt handler failed: ${formatError(error)}`);

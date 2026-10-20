@@ -558,6 +558,208 @@ describe('durable rule persistence', () => {
     ).toBeNull();
   });
 
+  it('does not refresh state from a deferred turn after tracking was enabled', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    const firstPath = path.join(globalRulesDir, 'first.md');
+    writeFileSync(firstPath, '---\nkeywords: [first]\n---\n\nFirst guidance.');
+    writeFileSync(
+      path.join(globalRulesDir, 'second.md'),
+      '---\nkeywords: [second]\n---\n\nSecond guidance.'
+    );
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const sessionID = 'ses_reject_after_track';
+    const mockInput = createMockPluginInput({ testDir });
+    await wire(mockInput);
+
+    await mockInput.hooks.sessionPrompt[0]!({
+      sessionID,
+      messageID: 'msg_reject_1',
+      prompt: { text: 'first' },
+    });
+    expect(
+      (await readMatchedRulesState(sessionID, { stateDir }))?.matchedRulePaths
+    ).toEqual([firstPath]);
+
+    // A compaction forces the next durable turn to re-read history; make
+    // that read fail so delivery is deferred instead of accepted.
+    mockInput.pushEvent({
+      type: 'session.compaction.started',
+      data: { sessionID },
+    });
+    await vi.waitFor(() =>
+      expect(sessionStore.snapshot(sessionID)?.compacted).toBe(true)
+    );
+    if (mockInput.context.session) {
+      mockInput.context.session.context = async () => {
+        throw new Error('server down');
+      };
+    }
+
+    await mockInput.hooks.sessionPrompt[0]!({
+      sessionID,
+      messageID: 'msg_reject_2',
+      prompt: { text: 'second' },
+    });
+    await mockInput.hooks.sessionContext[0]!({
+      sessionID,
+      messages: [
+        {
+          id: 'msg_reject_2',
+          role: 'user',
+          content: [{ type: 'text', text: 'second' }],
+        },
+      ],
+    });
+
+    expect(
+      (await readMatchedRulesState(sessionID, { stateDir }))?.matchedRulePaths
+    ).toEqual([firstPath]);
+    expect(mockInput.syntheticCalls).toHaveLength(1);
+  });
+
+  it('clears matched-state tracking on compaction', async () => {
+    const { testDir } = getTestDirs();
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const sessionID = 'ses_compact_clear';
+    const mockInput = createMockPluginInput({ testDir });
+    await wire(mockInput);
+
+    await mockInput.hooks.sessionPrompt[0]!({
+      sessionID,
+      messageID: 'msg_compact_clear',
+      prompt: { text: 'continue' },
+    });
+    expect(sessionStore.snapshot(sessionID)?.matchedStateTracking).toBe(true);
+
+    mockInput.pushEvent({
+      type: 'session.compaction.started',
+      data: { sessionID },
+    });
+    await vi.waitFor(() =>
+      expect(sessionStore.snapshot(sessionID)?.compacted).toBe(true)
+    );
+    expect(sessionStore.snapshot(sessionID)?.matchedStateTracking).toBe(false);
+  });
+
+  it('merges rules persisted by pending-admission retry into state', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    const rulePath = path.join(globalRulesDir, 'typescript.mdc');
+    writeFileSync(
+      rulePath,
+      `---\nglobs:\n  - "**/*.ts"\n---\n\nTypeScript guidance.`
+    );
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const sessionID = 'ses_pending_state';
+    const mockInput = createMockPluginInput({ testDir });
+    await wire(mockInput);
+
+    const session = mockInput.context.session;
+    const originalSynthetic = session?.synthetic;
+    if (!session || !originalSynthetic) {
+      throw new Error('missing synthetic sink');
+    }
+    let attempts = 0;
+    session.synthetic = async input => {
+      attempts++;
+      if (attempts === 1) throw new Error('persistence unavailable');
+      return originalSynthetic(input);
+    };
+
+    await mockInput.hooks.toolAfter[0]!({
+      tool: 'read',
+      sessionID,
+      id: 'call_pending_state',
+      input: { filePath: 'src/a.ts' },
+      status: 'completed',
+      result: { content: '<content>1: export const value = 1;</content>' },
+    });
+    expect(await readMatchedRulesState(sessionID, { stateDir })).toBeNull();
+
+    await mockInput.hooks.sessionContext[0]!({
+      sessionID,
+      messages: [
+        {
+          id: 'msg_pending_state',
+          role: 'user',
+          content: [{ type: 'text', text: 'continue' }],
+        },
+      ],
+    });
+
+    await vi.waitFor(async () => {
+      const state = await readMatchedRulesState(sessionID, { stateDir });
+      expect(state?.matchedRulePaths).toEqual([rulePath]);
+    });
+  });
+
+  it('keeps mid-turn durable admissions across context refreshes', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    const buildPath = path.join(globalRulesDir, 'build-only.mdc');
+    const tsPath = path.join(globalRulesDir, 'typescript.mdc');
+    writeFileSync(buildPath, `---\nagent: [build]\n---\n\nBuild guidance.`);
+    writeFileSync(
+      tsPath,
+      `---\nglobs:\n  - "**/*.ts"\n---\n\nTypeScript guidance.`
+    );
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const sessionID = 'ses_multi_dispatch';
+    const mockInput = createMockPluginInput({ testDir });
+    await wire(mockInput);
+    const dispatchMessages = () => [
+      {
+        id: 'msg_multi_dispatch',
+        role: 'user',
+        content: [{ type: 'text', text: 'build this' }],
+      },
+    ];
+
+    await mockInput.hooks.sessionPrompt[0]!({
+      sessionID,
+      messageID: 'msg_multi_dispatch',
+      prompt: { text: 'build this' },
+    });
+    await mockInput.hooks.sessionContext[0]!({
+      sessionID,
+      agent: 'build',
+      messages: dispatchMessages(),
+    });
+
+    await mockInput.hooks.toolAfter[0]!({
+      tool: 'read',
+      sessionID,
+      id: 'call_multi_dispatch',
+      input: { filePath: 'src/a.ts' },
+      status: 'completed',
+      result: { content: '<content>1: export const value = 1;</content>' },
+    });
+
+    await vi.waitFor(async () => {
+      const state = await readMatchedRulesState(sessionID, { stateDir });
+      expect(state?.matchedRulePaths).toEqual(
+        expect.arrayContaining([buildPath, tsPath])
+      );
+    });
+
+    // A later dispatch in the same turn must retain the mid-turn admission.
+    await mockInput.hooks.sessionContext[0]!({
+      sessionID,
+      agent: 'build',
+      messages: dispatchMessages(),
+    });
+
+    await vi.waitFor(async () => {
+      const state = await readMatchedRulesState(sessionID, { stateDir });
+      expect(state?.matchedRulePaths).toHaveLength(2);
+      expect(state?.matchedRulePaths).toEqual(
+        expect.arrayContaining([buildPath, tsPath])
+      );
+    });
+  });
+
   it('invokes session.context and session.prompt with bound receivers', async () => {
     const { testDir, globalRulesDir } = getTestDirs();
     writeFileSync(path.join(globalRulesDir, 'always.md'), '# Always Apply');
@@ -756,28 +958,56 @@ describe('durable rule persistence', () => {
     expect(hookPart?.text).not.toContain('Version two.');
   });
 
-  it('writes ephemeral matches to matched state without persisting their parts', async () => {
+  it('refreshes matched state after the context dispatch captures the agent', async () => {
     const { testDir, globalRulesDir } = getTestDirs();
-    const rulePath = path.join(globalRulesDir, 'plan-only.mdc');
-    writeFileSync(rulePath, `---\nagent: [plan]\n---\n\nPlan guidance.`);
+    const alwaysPath = path.join(globalRulesDir, 'always.md');
+    const buildPath = path.join(globalRulesDir, 'build-only.mdc');
+    writeFileSync(alwaysPath, '# Always Apply\nAlways guidance.');
+    writeFileSync(buildPath, `---\nagent: [build]\n---\n\nBuild guidance.`);
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
 
     const mockInput = createMockPluginInput({ testDir });
     await wire(mockInput);
-    await mockInput.hooks.sessionContext[0]!({
-      sessionID: 'ses_matched_eph',
-      agent: 'plan',
-      messages: [],
-    });
+
+    // The prompt hook runs before the context hook, so the current agent is
+    // not yet known when the first snapshot is written.
     await mockInput.hooks.sessionPrompt[0]!({
       sessionID: 'ses_matched_eph',
       messageID: 'msg_matched_eph',
-      prompt: { text: 'plan this' },
+      prompt: { text: 'build this' },
     });
 
-    await new Promise(resolve => setTimeout(resolve, 50));
-    const state = await readMatchedRulesState('ses_matched_eph', { stateDir });
-    expect(state?.matchedRulePaths).toEqual([rulePath]);
-    expect(mockInput.syntheticCalls).toHaveLength(0);
+    await vi.waitFor(async () => {
+      const state = await readMatchedRulesState('ses_matched_eph', {
+        stateDir,
+      });
+      expect(state?.matchedRulePaths).toEqual([alwaysPath]);
+    });
+
+    // The context dispatch captures agent=build and refreshes the snapshot.
+    await mockInput.hooks.sessionContext[0]!({
+      sessionID: 'ses_matched_eph',
+      agent: 'build',
+      messages: [
+        {
+          id: 'msg_matched_eph',
+          role: 'user',
+          content: [{ type: 'text', text: 'build this' }],
+        },
+      ],
+    });
+
+    await vi.waitFor(async () => {
+      const state = await readMatchedRulesState('ses_matched_eph', {
+        stateDir,
+      });
+      expect(state?.matchedRulePaths).toHaveLength(2);
+      expect(state?.matchedRulePaths).toEqual(
+        expect.arrayContaining([alwaysPath, buildPath])
+      );
+    });
+    expect(
+      mockInput.syntheticCalls.map(call => call.text).join('\n')
+    ).not.toContain('Build guidance.');
   });
 });

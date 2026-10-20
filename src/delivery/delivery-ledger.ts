@@ -82,16 +82,19 @@ export class DeliveryLedger {
   async persistPendingRules(
     sessionID: string,
     state: DeliveryState
-  ): Promise<boolean> {
-    if (!this.persistAdmission || state.pendingRuleQueue.length === 0) {
-      return state.pendingRuleQueue.length === 0;
+  ): Promise<MatchedRuleContent[] | undefined> {
+    if (!this.persistAdmission) {
+      return undefined;
+    }
+    if (state.pendingRuleQueue.length === 0) {
+      return [];
     }
     const pending = state.pendingRuleQueue.filter(
       rule => !hasDeliveryKey(state.ruleKeys, rule)
     );
     if (pending.length === 0) {
       state.pendingRuleQueue = [];
-      return true;
+      return [];
     }
     try {
       await this.persistAdmission(
@@ -102,13 +105,13 @@ export class DeliveryLedger {
       this.debugLog(
         `Rule admission persistence failed for ${sessionID}: ${formatError(error)}`
       );
-      return false;
+      return undefined;
     }
     for (const rule of pending) state.ruleKeys.add(deliveryKey(rule));
     const accepted = new Set(pending.map(deliveryKey));
     state.pendingRuleQueue = state.pendingRuleQueue.filter(
       rule => !accepted.has(deliveryKey(rule))
     );
-    return true;
+    return pending;
   }
 }

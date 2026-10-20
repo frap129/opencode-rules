@@ -18,7 +18,7 @@ import { TransientDispatcher } from './delivery-transient.js';
 export interface RuleDelivery {
   deliverDurableTurn(input: DurableTurnInput): Promise<DurableTurnResult>;
   deliverTransientDispatch(input: TransientDispatchInput): void;
-  retryPendingAdmissions(sessionID: string): Promise<void>;
+  retryPendingAdmissions(sessionID: string): Promise<MatchedRuleContent[]>;
   admitDurableMatches(
     input: DurableAdmissionInput
   ): Promise<DurableAdmissionResult>;
@@ -112,9 +112,11 @@ class DefaultRuleDelivery implements RuleDelivery {
 
       const added = this.ledger.queuePendingRules(state, input.rules);
       if (!added && state.pendingRuleQueue.length === 0) return 'duplicate';
-      return (await this.ledger.persistPendingRules(input.sessionID, state))
-        ? 'accepted'
-        : 'pending';
+      const persisted = await this.ledger.persistPendingRules(
+        input.sessionID,
+        state
+      );
+      return persisted === undefined ? 'pending' : 'accepted';
     });
   }
 
@@ -267,10 +269,12 @@ class DefaultRuleDelivery implements RuleDelivery {
     }
   }
 
-  async retryPendingAdmissions(sessionID: string): Promise<void> {
-    await this.states.serialize(sessionID, async () => {
+  async retryPendingAdmissions(
+    sessionID: string
+  ): Promise<MatchedRuleContent[]> {
+    return this.states.serialize(sessionID, async () => {
       const state = this.states.getState(sessionID);
-      await this.ledger.persistPendingRules(sessionID, state);
+      return (await this.ledger.persistPendingRules(sessionID, state)) ?? [];
     });
   }
 

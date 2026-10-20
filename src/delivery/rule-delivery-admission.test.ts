@@ -95,7 +95,9 @@ describe('durable admission', () => {
 
     expect(results).toEqual(['accepted', 'duplicate']);
     expect(harness.persisted).toHaveLength(1);
-    await harness.delivery.retryPendingAdmissions('ses_coalesce');
+    expect(
+      await harness.delivery.retryPendingAdmissions('ses_coalesce')
+    ).toEqual([]);
     expect(harness.persisted).toHaveLength(1);
   });
 
@@ -115,7 +117,8 @@ describe('durable admission', () => {
     expect(harness.persisted).toHaveLength(0);
 
     // The next durable dispatch retries the retained pending rules.
-    await harness.delivery.retryPendingAdmissions('ses_retry');
+    const retried = await harness.delivery.retryPendingAdmissions('ses_retry');
+    expect(retried).toEqual([ruleA]);
     expect(attempts).toBe(2);
     expect(harness.persisted).toHaveLength(1);
     expect(harness.persisted[0]?.metadata?.ruleKeys).toEqual(

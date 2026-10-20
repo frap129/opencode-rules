@@ -44,5 +44,5 @@ _Avoid_: Ephemeral injection
 Rule behavior triggered by a matching tool event; it may activate the owning rule's content, block the event, or run a command.
 
 **Matched-rule state**:
-The per-session record of Matched rule paths, written by the server after each durable turn and read by the sidebar so it can distinguish matched from unmatched rules.
+The per-session record of Matched rule paths, written after each accepted durable turn and refreshed by context dispatches while that turn remains armed, so it includes the current agent, model, and tools matches; read by the sidebar so it can distinguish matched from unmatched rules.
 _Avoid_: Active rules state

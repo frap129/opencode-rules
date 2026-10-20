@@ -2,6 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
+import { BoundedSessionMap } from '../shared/bounded-session-map.js';
 import { createDebugLog, logWarning } from '../shared/debug.js';
 
 const debugLog = createDebugLog();
@@ -34,9 +35,19 @@ function buildStateFilePath(sessionID: string, stateDir: string): string {
   return path.join(stateDir, `${sessionID}.json`);
 }
 
+function samePaths(left: readonly string[], right: readonly string[]): boolean {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
+}
+
 export class MatchedRulesStateStore {
   private readonly stateDir: string;
   private readonly writeQueues = new Map<string, Promise<void>>();
+  private readonly lastWrittenPaths = new BoundedSessionMap<{
+    paths: readonly string[];
+  }>({ max: 100 });
 
   constructor(opts: MatchedRulesStateStoreOptions = {}) {
     this.stateDir = opts.stateDir ?? resolveStateDir();
@@ -49,6 +60,24 @@ export class MatchedRulesStateStore {
       matchedRulePaths: [...matchedPaths],
       evaluatedAt: Date.now(),
     }));
+  }
+
+  writeIfChanged(
+    sessionID: string,
+    matchedPaths: readonly string[]
+  ): Promise<void> {
+    this.assertValidSessionID(sessionID);
+    return this.enqueue(sessionID, async () => {
+      const cached = this.lastWrittenPaths.get(sessionID);
+      if (cached && samePaths(cached.paths, matchedPaths)) {
+        return null;
+      }
+      return {
+        sessionID,
+        matchedRulePaths: [...matchedPaths],
+        evaluatedAt: Date.now(),
+      };
+    });
   }
 
   merge(sessionID: string, matchedPaths: readonly string[]): Promise<void> {
@@ -77,11 +106,16 @@ export class MatchedRulesStateStore {
   // merges cannot interleave read-modify-write.
   private enqueue(
     sessionID: string,
-    operation: () => Promise<MatchedRulesState>
+    operation: () => Promise<MatchedRulesState | null>
   ): Promise<void> {
     const previous = this.writeQueues.get(sessionID) ?? Promise.resolve();
     const current = previous
-      .then(async () => this.doAtomicWrite(sessionID, await operation()))
+      .then(async () => {
+        const state = await operation();
+        if (state) {
+          await this.doAtomicWrite(sessionID, state);
+        }
+      })
       .finally(() => {
         if (this.writeQueues.get(sessionID) === current) {
           this.writeQueues.delete(sessionID);
@@ -106,6 +140,9 @@ export class MatchedRulesStateStore {
       const content = JSON.stringify(state);
       await fs.writeFile(tempPath, content, 'utf-8');
       await fs.rename(tempPath, finalPath);
+      this.lastWrittenPaths.ensure(sessionID, () => ({ paths: [] })).paths = [
+        ...state.matchedRulePaths,
+      ];
     } catch (error) {
       logWarning(
         `Failed to write matched rules state for session ${sessionID}`,

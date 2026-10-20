@@ -9,6 +9,8 @@ export interface SessionState {
   compacted?: boolean;
   lastModelID?: string;
   lastAgentType?: string;
+  /** An accepted prompt turn arms Matched-rule state refresh for later context dispatches. */
+  matchedStateTracking?: boolean;
   ruleSnapshots?: RuleSnapshot[];
 }
 
