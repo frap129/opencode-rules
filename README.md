@@ -45,8 +45,15 @@ approach.
 
 ### Installation
 
+> [!WARNING]
+> The npm `latest` tag now tracks OpenCode 2-based releases. For legacy OpenCode v1 support, use `opencode-rules@1.0.0` specifically:
+>
+> ```bash
+> opencode plugin opencode-rules@1.0.0 --global
+> ```
+
 ```bash
-opencode plugin opencode-rules@next --global
+opencode plugin opencode-rules@latest --global
 ```
 
 <details>
@@ -57,7 +64,7 @@ Add the plugin to your opencode config (v2 uses the `plugins` key):
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugins": ["opencode-rules@next"]
+  "plugins": ["opencode-rules@latest"]
 }
 ```
 
@@ -66,22 +73,15 @@ To enable the TUI sidebar, add the same entry to your `cli.json`:
 ```json
 // ~/.config/opencode/cli.json
 {
-  "plugins": ["opencode-rules@next"]
+  "plugins": ["opencode-rules@latest"]
 }
 ```
 
 </details>
 
-### Beta Channel
+### Version Channels
 
-v2 pre-releases from the `v2` branch are published under the `next` npm dist-tag (`v2` cannot be a dist-tag: npm rejects tag names that parse as a SemVer range). These include upcoming features and fixes but may be unstable.
-
-```bash
-opencode plugin opencode-rules@next --global
-```
-
-> [!WARNING]
-> v2 betas target the OpenCode v2 beta line and may contain breaking changes or bugs. Test thoroughly in non-critical workflows before using. v1 users tracking `beta` are unaffected: v2 builds never move that tag.
+`latest` tracks OpenCode 2-based releases. Legacy OpenCode v1 support is available at `opencode-rules@1.0.0`.
 
 ### Create Your First Rule
 
@@ -151,7 +151,7 @@ Set it in `opencode.jsonc`:
   "$schema": "https://opencode.ai/config.json",
   "plugins": [
     {
-      "package": "opencode-rules@next",
+      "package": "opencode-rules@latest",
       "options": {
         // A bare string (".agents/rules") is shorthand for a one-entry list.
         "additionalRuleDirectories": [".agents/rules", "~/shared/rules"],
@@ -169,7 +169,7 @@ Or in `cli.json`, with the same option shape and the same `.agents/rules` exampl
   "$schema": "https://opencode.ai/v2/cli.json",
   "plugins": [
     {
-      "package": "opencode-rules@next",
+      "package": "opencode-rules@latest",
       "options": {
         "additionalRuleDirectories": [".agents/rules", "~/shared/rules"],
       },
