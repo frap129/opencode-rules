@@ -130,6 +130,11 @@ export interface HookRecorders {
   sessionPrompt: Array<(input: V2SessionPromptInput) => Promise<void> | void>;
 }
 
+interface MockEventSubscription {
+  types?: readonly string[];
+  signal?: AbortSignal;
+}
+
 export interface MockPluginContext {
   location: { directory: string };
   options: Readonly<Record<string, unknown>>;
@@ -157,7 +162,7 @@ export interface MockPluginContext {
     }) => Promise<unknown>;
   };
   event: {
-    subscribe(options?: { signal?: AbortSignal }): AsyncIterable<unknown>;
+    subscribe(options?: MockEventSubscription): AsyncIterable<unknown>;
   };
   mcp: {
     list(input?: { location?: { directory?: string } }): Promise<unknown>;
@@ -173,6 +178,7 @@ export function createMockPluginInput(opts: MockPluginInput): {
   hooks: HookRecorders;
   syntheticCalls: NonNullable<MockPluginInput['syntheticCalls']>;
   promptCalls: NonNullable<MockPluginInput['promptCalls']>;
+  eventSubscriptions: MockEventSubscription[];
   /** Delivers an event to the wired runtime's event loop. */
   pushEvent: (event: MockEvent) => void;
 } {
@@ -191,11 +197,22 @@ export function createMockPluginInput(opts: MockPluginInput): {
 
   const events: MockEvent[] = opts.events ?? [];
   opts.events = events;
+  const eventSubscriptions: MockEventSubscription[] = [];
   let wakeEventLoop: (() => void) | undefined;
   const waitForEvent = (): Promise<void> =>
     new Promise(resolve => {
       wakeEventLoop = resolve;
     });
+  const drainEvents = async function* (): AsyncGenerator<MockEvent> {
+    let index = 0;
+    while (true) {
+      while (index < events.length) {
+        yield events[index];
+        index++;
+      }
+      await waitForEvent();
+    }
+  };
   const pushEvent = (event: MockEvent): void => {
     events.push(event);
     wakeEventLoop?.();
@@ -249,15 +266,9 @@ export function createMockPluginInput(opts: MockPluginInput): {
       // Drains opts.events; suspends when empty until pushEvent wakes it,
       // so tests can inject v2 events through the runtime's real event
       // path at any point after wiring.
-      async *subscribe() {
-        let index = 0;
-        while (true) {
-          while (index < events.length) {
-            yield events[index];
-            index++;
-          }
-          await waitForEvent();
-        }
+      subscribe(options) {
+        eventSubscriptions.push(options ?? {});
+        return drainEvents();
       },
     },
     mcp: {
@@ -265,7 +276,14 @@ export function createMockPluginInput(opts: MockPluginInput): {
     },
   };
 
-  return { context, hooks, syntheticCalls, promptCalls, pushEvent };
+  return {
+    context,
+    hooks,
+    syntheticCalls,
+    promptCalls,
+    eventSubscriptions,
+    pushEvent,
+  };
 }
 
 type MockPluginContextOptions_promptCalls = MockPluginInput['promptCalls'];

@@ -1,3 +1,4 @@
+import type { OpenCodeEvent } from '@opencode/client';
 import {
   hasFileObservationFamily,
   matchRuleSnapshots,
@@ -35,6 +36,22 @@ import {
   type OpenCodeClient,
 } from './client-adapter.js';
 import { ToolHookFlow } from './tool-hook-flow.js';
+
+type HandledEventAction = 'revert' | 'compaction';
+
+const HANDLED_EVENTS = {
+  'session.revert.staged': 'revert',
+  'session.revert.committed': 'revert',
+  'session.revert.cleared': 'revert',
+  'session.compaction.started': 'compaction',
+  'session.compaction.ended': 'compaction',
+} as const satisfies Partial<Record<OpenCodeEvent['type'], HandledEventAction>>;
+
+type HandledEventType = keyof typeof HANDLED_EVENTS;
+
+const HANDLED_EVENT_TYPES = Object.keys(
+  HANDLED_EVENTS
+) as readonly HandledEventType[];
 
 // v2 hook payloads, kept structural so the orchestrator stays testable
 // without importing the beta package's Effect-branded types.
@@ -77,6 +94,13 @@ export interface V2SessionPromptInput {
 export interface V2EventInput {
   type?: string;
   data?: { sessionID?: unknown };
+}
+
+interface HandledEventDomain {
+  subscribe(options?: {
+    types?: readonly HandledEventType[];
+    signal?: AbortSignal;
+  }): AsyncIterable<V2EventInput>;
 }
 
 export interface V2DeliverySink {
@@ -192,11 +216,7 @@ export class OpenCodeRulesRuntime {
       ): Promise<HookRegistration>;
       synthetic?: V2DeliverySink['synthetic'];
     };
-    event: {
-      subscribe(options?: {
-        signal?: AbortSignal;
-      }): AsyncIterable<V2EventInput>;
-    };
+    event: HandledEventDomain;
   }): Promise<() => Promise<void>> {
     // Keep the session domain so sink calls (synthetic) stay method-bound.
     this.deliverySink = context.session.synthetic
@@ -239,11 +259,7 @@ export class OpenCodeRulesRuntime {
   }
 
   private async runEventLoop(
-    eventDomain: {
-      subscribe(options?: {
-        signal?: AbortSignal;
-      }): AsyncIterable<V2EventInput>;
-    },
+    eventDomain: HandledEventDomain,
     signal: AbortSignal
   ): Promise<void> {
     let events: AsyncIterable<V2EventInput>;
@@ -270,35 +286,30 @@ export class OpenCodeRulesRuntime {
    */
   private onEvent(event: V2EventInput): void {
     const type = event?.type;
+    if (!isHandledEventType(type)) return;
+
     const sessionID = event?.data?.sessionID;
     if (typeof sessionID !== 'string') return;
 
-    if (
-      type === 'session.revert.staged' ||
-      type === 'session.revert.committed' ||
-      type === 'session.revert.cleared'
-    ) {
-      this.ruleDelivery.markHistoryChanged(sessionID);
-      this.sessionWorkingContext.workingContext.invalidateHistoryReads(
-        sessionID
-      );
-      return;
-    }
+    switch (HANDLED_EVENTS[type]) {
+      case 'revert':
+        this.ruleDelivery.markHistoryChanged(sessionID);
+        this.sessionWorkingContext.workingContext.invalidateHistoryReads(
+          sessionID
+        );
+        return;
 
-    // Compaction invalidation only; projection rides the next context
-    // dispatch (map ticket #73).
-    if (
-      type === 'session.compaction.started' ||
-      type === 'session.compaction.ended'
-    ) {
-      this.ruleDelivery.markCompacted(sessionID);
-      this.sessionWorkingContext.workingContext.invalidateHistoryReads(
-        sessionID
-      );
-      this.sessionStore.upsert(sessionID, state => {
-        state.compacted = true;
-        state.matchedStateTracking = false;
-      });
+      // Compaction invalidation only; projection rides the next context
+      // dispatch (map ticket #73).
+      case 'compaction':
+        this.ruleDelivery.markCompacted(sessionID);
+        this.sessionWorkingContext.workingContext.invalidateHistoryReads(
+          sessionID
+        );
+        this.sessionStore.upsert(sessionID, state => {
+          state.compacted = true;
+          state.matchedStateTracking = false;
+        });
     }
   }
 
@@ -717,13 +728,17 @@ export class OpenCodeRulesRuntime {
   }
 }
 
+function isHandledEventType(
+  type: string | undefined
+): type is HandledEventType {
+  return type !== undefined && Object.hasOwn(HANDLED_EVENTS, type);
+}
+
 async function eventDomainSubscribe(
-  eventDomain: {
-    subscribe(options?: { signal?: AbortSignal }): AsyncIterable<V2EventInput>;
-  },
+  eventDomain: HandledEventDomain,
   signal: AbortSignal
 ): Promise<AsyncIterable<V2EventInput>> {
-  return eventDomain.subscribe({ signal });
+  return eventDomain.subscribe({ types: HANDLED_EVENT_TYPES, signal });
 }
 
 function extractToolResultText(

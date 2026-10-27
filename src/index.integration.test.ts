@@ -524,6 +524,71 @@ MCP Context7 rule content`;
     expect(mockInput.syntheticCalls).toHaveLength(0);
   });
 
+  it('revert invalidates the delivery ledger so missing durable rules are re-appended', async () => {
+    const { testDir, globalRulesDir } = getTestDirs();
+    writeFileSync(
+      path.join(globalRulesDir, 'persisted.md'),
+      'Persisted rule body.'
+    );
+    process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
+
+    const durablePart = buildDurableDeliveryPart(
+      [{ relativePath: 'persisted.md', content: 'Persisted rule body.' }],
+      [],
+      { sessionID: 'ses_revert', messageID: 'msg_u0' }
+    );
+    const history: unknown[] = [
+      {
+        id: durablePart.id,
+        type: 'synthetic',
+        text: durablePart.text,
+        metadata: durablePart.metadata,
+      },
+    ];
+    const mockInput = createMockPluginInput({
+      testDir,
+      history,
+      sessionContext: async () => history,
+    });
+    await wire(mockInput);
+    const prompt = mockInput.hooks.sessionPrompt[0]!;
+    const turn = (messageID: string) =>
+      prompt({
+        sessionID: 'ses_revert',
+        messageID,
+        prompt: { text: 'continue' },
+      });
+
+    await turn('msg_revert_1');
+    expect(mockInput.syntheticCalls).toHaveLength(0);
+
+    history.length = 0;
+    mockInput.pushEvent({
+      type: 'session.revert.staged',
+      data: { sessionID: 'ses_revert' },
+    });
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    await turn('msg_revert_2');
+    expect(mockInput.syntheticCalls).toHaveLength(1);
+  });
+
+  it('subscribes only to the handled session event types', async () => {
+    const { testDir } = getTestDirs();
+    const mockInput = createMockPluginInput({ testDir });
+    await wire(mockInput);
+
+    expect(mockInput.eventSubscriptions).toHaveLength(1);
+    expect(mockInput.eventSubscriptions[0]?.types).toEqual([
+      'session.revert.staged',
+      'session.revert.committed',
+      'session.revert.cleared',
+      'session.compaction.started',
+      'session.compaction.ended',
+    ]);
+    expect(mockInput.eventSubscriptions[0]?.signal).toBeInstanceOf(AbortSignal);
+  });
+
   it('compaction event invalidates history reads and the projection rides the next dispatch', async () => {
     const { testDir } = getTestDirs();
     process.env.XDG_CONFIG_HOME = path.join(testDir, '.config');
