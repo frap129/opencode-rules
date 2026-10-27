@@ -1,5 +1,5 @@
 /** @jsxImportSource @opentui/solid */
-import type { Plugin as TuiPluginNamespace } from '@opencode-ai/plugin/tui';
+import type { Plugin as TuiPluginNamespace } from '@opencode/plugin/tui';
 import { SidebarContent } from './slots/sidebar-content.js';
 import { projectDirFor } from './data/project-dir.js';
 import { parsePluginOptions } from '../src/config/plugin-options.js';

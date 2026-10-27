@@ -81,7 +81,7 @@ To enable the TUI sidebar, add the same entry to your `cli.json`:
 
 ### Version Channels
 
-`latest` tracks OpenCode 2-based releases. Legacy OpenCode v1 support is available at `opencode-rules@1.0.0`.
+`latest` tracks OpenCode 2-based releases and requires OpenCode 2.2.0 or newer with OpenTUI 0.7.0 or newer. Legacy OpenCode v1 support is available at `opencode-rules@1.0.0`.
 
 ### Create Your First Rule
 
@@ -634,7 +634,7 @@ The following highlights the primary runtime modules:
 
 The plugin registers a `sidebar.content` slot in the OpenCode v2 TUI, displaying all discovered rules (global and project-local) with their active state and metadata.
 
-**Requirements:** OpenCode v2 with `@opencode-ai/plugin` on the v2 beta line.
+**Requirements:** OpenCode 2.2.0 or newer with `@opencode/plugin` 2.2.0 or newer and OpenTUI 0.7.0 or newer.
 
 **What it shows:**
 
@@ -647,7 +647,7 @@ The plugin registers a `sidebar.content` slot in the OpenCode v2 TUI, displaying
 **Behavior:**
 
 - Active rules are sorted to the top within each section
-- Subscribes to `message.updated` and `session.status` events for real-time refresh (150ms debounce, filtered by session ID)
+- Subscribes to `session.text.ended` and `session.status` events for real-time refresh (150ms debounce, filtered by session ID)
 - Active state is read from `~/.opencode/state/opencode-rules/{sessionId}.json`, written by the server plugin after each rule evaluation
 
 ### Build and Test
@@ -678,7 +678,7 @@ bun run lint
 ### Tech Stack
 
 - **TypeScript** - Type-safe development
-- **@opencode-ai/plugin** (v2 beta) - OpenCode plugin framework
+- **@opencode/plugin** (2.2.0) - OpenCode plugin framework
 - **Vitest** - Fast unit testing
 - **Prettier** - Code formatting
 - **ESLint** - Linting and code quality

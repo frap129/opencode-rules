@@ -3,7 +3,104 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import path from 'node:path';
 import os from 'node:os';
 import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
-import { DEFAULT_THEME, resolveThemeDocument } from '@opencode-ai/theme/tui';
+import { resolveTheme, type ThemeDefinition } from '@opencode/theme/tui';
+
+const tokenColor = '#808080';
+const hue = {
+  100: '#eeeeee',
+  200: '#dddddd',
+  300: '#cccccc',
+  400: '#bbbbbb',
+  500: '#aaaaaa',
+  600: '#999999',
+  700: '#888888',
+  800: '#777777',
+  900: '#666666',
+};
+const testTheme = {
+  text: {
+    base: '#ffffff',
+    muted: tokenColor,
+    action: {
+      primary: { base: '#ffffff' },
+      secondary: { base: tokenColor },
+      destructive: { base: '#ff0000' },
+    },
+    formfield: { base: '#ffffff' },
+    feedback: {
+      error: { base: '#ff0000' },
+      warning: { base: '#ffff00' },
+      success: { base: '#00ff00' },
+      info: { base: '#0000ff' },
+    },
+  },
+  background: {
+    base: '#000000',
+    raised: { base: '#111111', high: '#222222', max: '#333333' },
+    action: {
+      primary: { base: '#000000' },
+      secondary: { base: '#000000' },
+      destructive: { base: '#000000' },
+    },
+    formfield: { base: '#000000' },
+    feedback: {
+      error: { base: '#000000' },
+      warning: { base: '#000000' },
+      success: { base: '#000000' },
+      info: { base: '#000000' },
+    },
+  },
+  border: { base: '#444444' },
+  scrollbar: { base: '#555555' },
+  diff: {
+    text: {
+      added: '#00ff00',
+      removed: '#ff0000',
+      context: tokenColor,
+      hunkHeader: tokenColor,
+    },
+    background: { added: '#002200', removed: '#220000', context: '#111111' },
+    highlight: { added: '#00ff00', removed: '#ff0000' },
+    lineNumber: {
+      text: tokenColor,
+      background: { added: '#002200', removed: '#220000' },
+    },
+  },
+  syntax: {
+    comment: tokenColor,
+    keyword: tokenColor,
+    function: tokenColor,
+    variable: tokenColor,
+    string: tokenColor,
+    number: tokenColor,
+    type: tokenColor,
+    operator: tokenColor,
+    punctuation: tokenColor,
+  },
+  markdown: {
+    text: tokenColor,
+    heading: tokenColor,
+    link: tokenColor,
+    linkText: tokenColor,
+    code: tokenColor,
+    blockQuote: tokenColor,
+    emphasis: tokenColor,
+    strong: tokenColor,
+    horizontalRule: tokenColor,
+    listItem: tokenColor,
+    listEnumeration: tokenColor,
+    image: tokenColor,
+    imageText: tokenColor,
+    codeBlock: tokenColor,
+  },
+  hue: {
+    gray: hue,
+    accent: '$hue.gray',
+    interactive: '$hue.gray',
+    neutral: '$hue.gray',
+  },
+  categorical: ['neutral'],
+} satisfies ThemeDefinition;
 
 let ffiAvailable = false;
 
@@ -60,7 +157,7 @@ describe('sidebar mount', () => {
     delete process.env.OPENCODE_CONFIG_DIR;
     process.env.HOME = tmpHome;
 
-    const theme = resolveThemeDocument(DEFAULT_THEME, 'dark');
+    const theme = resolveTheme(testTheme);
     const data = { on: () => () => {} };
 
     try {
@@ -130,11 +227,9 @@ describe('sidebar mount', () => {
         .filter(span => span.text.trim() === '•');
       expect(bullets).toHaveLength(2);
       const active = bullets.filter(span =>
-        span.fg.equals(theme.text.feedback.success.default)
+        span.fg.equals(theme.text.feedback.success.base)
       );
-      const subdued = bullets.filter(span =>
-        span.fg.equals(theme.text.subdued)
-      );
+      const subdued = bullets.filter(span => span.fg.equals(theme.text.muted));
       expect(active).toHaveLength(1);
       expect(subdued).toHaveLength(1);
     } finally {

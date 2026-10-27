@@ -7,7 +7,7 @@ import {
   For,
   type JSX,
 } from 'solid-js';
-import type { Plugin as TuiPluginNamespace } from '@opencode-ai/plugin/tui';
+import type { Plugin as TuiPluginNamespace } from '@opencode/plugin/tui';
 import {
   formatRuleDetail,
   loadSidebarRules,
@@ -199,10 +199,7 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
     }, 150);
   };
 
-  const unsubMessageUpdated = props.data.on(
-    'session.message.content.updated',
-    triggerRefresh
-  );
+  const unsubTextEnded = props.data.on('session.text.ended', triggerRefresh);
   const unsubSessionStatus = props.data.on('session.status', triggerRefresh);
 
   onCleanup(() => {
@@ -210,7 +207,7 @@ export function SidebarContent(props: SidebarContentProps): JSX.Element {
       clearTimeout(debounceTimer);
     }
     rulesLoadCoordinator.dispose();
-    unsubMessageUpdated();
+    unsubTextEnded();
     unsubSessionStatus();
   });
 

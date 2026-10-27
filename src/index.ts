@@ -1,4 +1,4 @@
-import type { Plugin } from '@opencode-ai/plugin';
+import type { Plugin } from '@opencode/plugin';
 import { createRuntime } from './runtime/create-runtime.js';
 import {
   parsePluginOptions,
