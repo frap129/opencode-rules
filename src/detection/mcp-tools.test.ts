@@ -11,27 +11,30 @@ describe('mcp-tools runtime exports', () => {
 
 describe('extractConnectedMcpCapabilityIDs', () => {
   it('returns mcp_<sanitizedName> for connected servers', () => {
-    const status = {
-      context7: { status: 'connected' },
-      'my server': { status: 'connected' },
-      disabled: { status: 'disabled' },
-      disconnected: { status: 'disconnected' },
-    };
+    const servers = [
+      { name: 'context7', status: { status: 'connected' } },
+      { name: 'my server', status: { status: 'connected' } },
+      { name: 'disabled', status: { status: 'disabled' } },
+      { name: 'disconnected', status: { status: 'disconnected' } },
+    ];
 
-    expect(extractConnectedMcpCapabilityIDs(status)).toEqual([
+    expect(extractConnectedMcpCapabilityIDs(servers)).toEqual([
       'mcp_context7',
       'mcp_my_server',
     ]);
   });
 
-  it('returns [] for null/undefined/non-object', () => {
+  it('returns [] for null/undefined/non-array', () => {
     expect(extractConnectedMcpCapabilityIDs(null)).toEqual([]);
     expect(extractConnectedMcpCapabilityIDs(undefined)).toEqual([]);
-    expect(extractConnectedMcpCapabilityIDs('nope' as any)).toEqual([]);
+    expect(extractConnectedMcpCapabilityIDs('nope')).toEqual([]);
   });
 
-  it('ignores entries without status.connected', () => {
-    const status = { context7: { status: 'failed' } };
-    expect(extractConnectedMcpCapabilityIDs(status)).toEqual([]);
+  it('ignores entries without a connected status tag', () => {
+    const servers = [
+      { name: 'failed', status: { status: 'failed' } },
+      { name: 'plain', status: 'connected' },
+    ];
+    expect(extractConnectedMcpCapabilityIDs(servers)).toEqual([]);
   });
 });

@@ -5,9 +5,6 @@
  * output.
  */
 
-// @ts-expect-error McpStatusMap is internal and should not be exported
-import type { McpStatusMap } from './detection/mcp-tools.js';
-
 // @ts-expect-error OpenCodeRulesRuntimeOptions is internal and should not be exported
 import type { OpenCodeRulesRuntimeOptions } from './runtime/orchestrator.js';
 
@@ -20,7 +17,6 @@ import type { MatchedRulesStateStoreOptions } from './session/matched-rules-stat
 // @ts-expect-error RuleDeliveryOptions is internal and should not be exported
 import type { RuleDeliveryOptions } from './delivery/rule-delivery.js';
 
-void (0 as unknown as McpStatusMap);
 void (0 as unknown as OpenCodeRulesRuntimeOptions);
 void (0 as unknown as SessionStoreOptions);
 void (0 as unknown as MatchedRulesStateStoreOptions);

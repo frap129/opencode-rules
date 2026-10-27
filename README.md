@@ -574,7 +574,7 @@ opencode-rules/
 │   │   └── chat-capture.ts   # Session context/prompt capture (model, agent, and user prompt from the v2 session hooks)
 │   ├── detection/
 │   │   ├── project-fingerprint.ts # Project type detection (Node.js, Python, etc.)
-│   │   ├── mcp-tools.ts      # MCP tool ID extraction (v2 McpServer[] or legacy status map)
+│   │   ├── mcp-tools.ts      # MCP tool ID extraction from v2 McpServer[] status tags
 │   │   └── git-branch.ts     # Git branch detection
 │   └── shared/
 │       ├── bounded-session-map.ts # Shared internal LRU-bounded per-session map (sole value owner; unstamped reads; optional eviction protection)

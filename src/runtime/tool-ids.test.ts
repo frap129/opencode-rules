@@ -43,11 +43,11 @@ describe('OpenCodeClientAdapter.queryAvailableToolIDs', () => {
     const adapter = new OpenCodeClientAdapter({
       client: {
         mcp: {
-          list: async () => ({
-            data: [{ name: 'context7', status: 'connected' }],
-          }),
+          list: async () => [
+            { name: 'context7', status: { status: 'connected' } },
+          ],
         },
-      } as never,
+      },
       directory: '/tmp',
       debugLog: () => {},
     });
@@ -61,20 +61,37 @@ describe('OpenCodeClientAdapter.queryAvailableToolIDs', () => {
     const adapter = new OpenCodeClientAdapter({
       client: {
         mcp: {
-          list: async () => ({
-            data: [
-              { name: 'context7', status: { status: 'connected' } },
-              { name: 'disabled', status: { status: 'disabled' } },
-            ],
-          }),
+          list: async () => [
+            { name: 'context7', status: { status: 'connected' } },
+            { name: 'disabled', status: { status: 'disabled' } },
+          ],
         },
-      } as never,
+      },
       directory: '/tmp',
       debugLog: () => {},
     });
 
     const ids: string[] = await adapter.queryAvailableToolIDs([]);
     expect(ids).toEqual(['mcp_context7']);
+  });
+
+  it('does not read the legacy mcp list data envelope', async () => {
+    const adapter = new OpenCodeClientAdapter({
+      client: {
+        mcp: {
+          // Intentional invalid input: the legacy SDK envelope must be ignored.
+          list: async () =>
+            ({
+              data: [{ name: 'context7', status: { status: 'connected' } }],
+            }) as unknown as readonly unknown[],
+        },
+      },
+      directory: '/tmp',
+      debugLog: () => {},
+    });
+
+    const ids: string[] = await adapter.queryAvailableToolIDs([]);
+    expect(ids).toEqual([]);
   });
 
   it('handles missing mcp.list gracefully', async () => {

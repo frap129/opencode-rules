@@ -420,7 +420,7 @@ describe('durable rule persistence', () => {
     if (mockInput.context.mcp) {
       mockInput.context.mcp.list = () => {
         if (failToolQuery) throw new Error('mcp list unavailable');
-        return Promise.resolve({ data: [] });
+        return Promise.resolve([]);
       };
     }
     await wire(mockInput);
@@ -782,7 +782,7 @@ describe('durable rule persistence', () => {
             "undefined is not an object (evaluating 'this._client')"
           );
         }
-        return { data: [] };
+        return [];
       },
       async synthetic(input: Record<string, unknown>) {
         syntheticCalls.push(input);

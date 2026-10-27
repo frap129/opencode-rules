@@ -505,7 +505,7 @@ MCP Context7 rule content`;
 
     const mockInput = createMockPluginInput({
       testDir,
-      mcpServers: [{ name: 'context7', status: 'connected' }],
+      mcpServers: [{ name: 'context7', status: { status: 'connected' } }],
     });
     await wire(mockInput);
 

@@ -22,12 +22,12 @@ export interface OpenCodeClient {
       metadata?: Record<string, unknown>;
       resume?: boolean;
     }) => Promise<unknown>;
-    context?: (input: { sessionID: string }) => Promise<{ data?: unknown }>;
+    context?: (input: { sessionID: string }) => Promise<readonly unknown[]>;
   };
   mcp?: {
     list?: (input?: {
       location?: { directory?: string; workspace?: string };
-    }) => Promise<{ data?: unknown }>;
+    }) => Promise<readonly unknown[]>;
   };
 }
 
@@ -76,10 +76,9 @@ export class OpenCodeClientAdapter {
     const session = this.client.session;
     if (!session?.context) return { ok: true, messages: [] };
     try {
-      const result = await session.context({ sessionID });
-      const data = result?.data;
-      if (!Array.isArray(data)) return { ok: true, messages: [] };
-      return { ok: true, messages: fromSessionMessages(data) };
+      const messages = await session.context({ sessionID });
+      if (!Array.isArray(messages)) return { ok: true, messages: [] };
+      return { ok: true, messages: fromSessionMessages(messages) };
     } catch (error) {
       logWarning('Failed to fetch session history', error);
       return { ok: false };
@@ -124,10 +123,8 @@ export class OpenCodeClientAdapter {
       logWarning(`Failed to query ${label}`, message);
     };
 
-    if (mcpResult.status === 'fulfilled' && mcpResult.value) {
-      const mcpIds = extractConnectedMcpCapabilityIDs(
-        mcpResult.value.data as unknown
-      );
+    if (mcpResult.status === 'fulfilled') {
+      const mcpIds = extractConnectedMcpCapabilityIDs(mcpResult.value);
       for (const id of mcpIds) {
         ids.add(id);
       }

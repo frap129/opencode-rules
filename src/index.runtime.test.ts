@@ -250,7 +250,7 @@ describe('OpenCodeRulesPlugin', () => {
     if (mockInput.context.session) {
       mockInput.context.session.context = async () => {
         historyReads++;
-        return { data: [] };
+        return [];
       };
     }
     await buildRuntime(mockInput);
@@ -738,27 +738,25 @@ describe('history scan and rescan', () => {
       testDir,
       sessionContext: async () => {
         historyReads++;
-        return {
-          data: [
-            {
-              id: 'msg_a1',
-              type: 'assistant',
-              agent: 'build',
-              model: { id: 'm' },
-              content: [
-                {
-                  type: 'tool',
-                  id: 'call_1',
-                  name: 'read',
-                  state: {
-                    status: 'completed',
-                    input: { filePath: 'src/shared.ts' },
-                  },
+        return [
+          {
+            id: 'msg_a1',
+            type: 'assistant',
+            agent: 'build',
+            model: { id: 'm' },
+            content: [
+              {
+                type: 'tool',
+                id: 'call_1',
+                name: 'read',
+                state: {
+                  status: 'completed',
+                  input: { filePath: 'src/shared.ts' },
                 },
-              ],
-            },
-          ],
-        };
+              },
+            ],
+          },
+        ];
       },
     });
     await wireWithStore(mockInput);

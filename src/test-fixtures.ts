@@ -96,7 +96,7 @@ export interface MockPluginInput {
   /** v2 plugin `options` block handed to the entry by the host. */
   options?: Readonly<Record<string, unknown>>;
   /** v2 mcp.list() shape: McpServer[] tagged by status. */
-  mcpServers?: Array<{ name: string; status: string }>;
+  mcpServers?: Array<{ name: string; status: { status: string } }>;
   /** Session history returned by client.session.context(). */
   history?: unknown[];
   /** Session context implementation; defaults to returning opts.history. */
@@ -160,9 +160,7 @@ export interface MockPluginContext {
     subscribe(options?: { signal?: AbortSignal }): AsyncIterable<unknown>;
   };
   mcp: {
-    list(input?: {
-      location?: { directory?: string };
-    }): Promise<{ data?: unknown }>;
+    list(input?: { location?: { directory?: string } }): Promise<unknown>;
   };
 }
 
@@ -234,7 +232,7 @@ export function createMockPluginInput(opts: MockPluginInput): {
       ...(opts.sessionContext
         ? { context: opts.sessionContext }
         : {
-            context: async () => ({ data: opts.history ?? [] }),
+            context: async () => opts.history ?? [],
           }),
       ...(opts.promptCalls
         ? {
@@ -263,7 +261,7 @@ export function createMockPluginInput(opts: MockPluginInput): {
       },
     },
     mcp: {
-      list: async () => ({ data: opts.mcpServers ?? [] }),
+      list: async () => opts.mcpServers ?? [],
     },
   };
 
