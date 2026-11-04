@@ -14,6 +14,9 @@ export async function getGitBranch(
         cwd: projectDir,
         timeout: GIT_TIMEOUT_MS,
         killSignal: 'SIGTERM',
+        // The OpenCode desktop background service has no console; without this
+        // Windows allocates a visible console window for git on every dispatch.
+        windowsHide: true,
       };
       execFn(
         'git',
