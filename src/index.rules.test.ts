@@ -853,6 +853,19 @@ describe('promptMatchesKeywords', () => {
     expect(promptMatchesKeywords('file.test.ts', ['test.ts'])).toBe(true);
     expect(promptMatchesKeywords('run tests now', ['test.ts'])).toBe(false);
   });
+
+  it('should match non-ASCII (Cyrillic) keywords at the start of a word', () => {
+    expect(promptMatchesKeywords('сделай ревью этого модуля', ['ревью'])).toBe(
+      true
+    );
+    expect(promptMatchesKeywords('поправь форму документа', ['форм'])).toBe(
+      true
+    );
+  });
+
+  it('should not match a Cyrillic keyword mid-word', () => {
+    expect(promptMatchesKeywords('платформа', ['форм'])).toBe(false);
+  });
 });
 
 describe('toolsMatchAvailable', () => {
