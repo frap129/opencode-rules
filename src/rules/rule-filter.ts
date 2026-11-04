@@ -78,9 +78,15 @@ export function promptMatchesKeywords(
   return keywords.some(keyword => {
     const lowerKeyword = keyword.toLowerCase();
     const escaped = lowerKeyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    // Leading word boundary only: "test" matches "testing".
-    const regex = new RegExp(`\\b${escaped}`, 'i');
-    return regex.test(lowerPrompt);
+    // Unicode-aware leading boundary: JavaScript \b only knows ASCII \w, so
+    // it never matches before a Cyrillic letter. "test" still matches
+    // "testing" because only the leading boundary is anchored.
+    try {
+      const regex = new RegExp(`(?<![\\p{L}\\p{N}_])${escaped}`, 'iu');
+      return regex.test(lowerPrompt);
+    } catch {
+      return lowerPrompt.includes(lowerKeyword);
+    }
   });
 }
 

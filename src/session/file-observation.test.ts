@@ -135,3 +135,171 @@ describe('normalizeToolObservation: lsp', () => {
     );
   });
 });
+
+describe('normalizeToolObservation: MCP file paths', () => {
+  it('extracts path= from MCP output regardless of language', () => {
+    const output1C = [
+      '# scope=core',
+      'path=Documents/Заказ покупателя/Forms/Форма/Ext/Form/Module.bsl lines=10-25',
+      '--- code ---',
+      'Процедура Тест()',
+    ].join('\n');
+
+    expect(
+      normalizeObservations({
+        tool: 'mcp__1c-index__read_method',
+        args: {},
+        output: output1C,
+      })
+    ).toEqual([
+      {
+        path: 'Documents/Заказ покупателя/Forms/Форма/Ext/Form/Module.bsl',
+        tool: 'mcp__1c-index__read_method',
+        content: output1C,
+      },
+    ]);
+
+    const outputTS = 'path=src/components/Button.tsx lines=1-20';
+    expect(
+      normalizeObservations({
+        tool: 'mcp__code_indexer__read',
+        args: {},
+        output: outputTS,
+      })
+    ).toEqual([
+      {
+        path: 'src/components/Button.tsx',
+        tool: 'mcp__code_indexer__read',
+        content: outputTS,
+      },
+    ]);
+  });
+
+  it('extracts module_path= and file= attributes', () => {
+    expect(
+      normalizeObservations({
+        tool: 'mcp__analyzer__object_info',
+        args: {},
+        output: 'module_path=services/auth.py',
+      })
+    ).toEqual([
+      {
+        path: 'services/auth.py',
+        tool: 'mcp__analyzer__object_info',
+        content: 'module_path=services/auth.py',
+      },
+    ]);
+
+    expect(
+      normalizeObservations({
+        tool: 'mcp__filesystem__get_file',
+        args: {},
+        output: 'file="src/My File.rs"',
+      })
+    ).toEqual([
+      {
+        path: 'src/My File.rs',
+        tool: 'mcp__filesystem__get_file',
+        content: 'file="src/My File.rs"',
+      },
+    ]);
+  });
+
+  it('extracts paths from grep-style output and caps at five', () => {
+    const output = [
+      '- src/core/a.go:10 found',
+      '- src/core/b.go:20 found',
+      '- src/core/c.go:30 found',
+      '- src/core/d.go:40 found',
+      '- src/core/e.go:50 found',
+      '- src/core/f.go:60 found',
+    ].join('\n');
+
+    const observations = normalizeObservations({
+      tool: 'mcp__ripgrep__search',
+      args: {},
+      output,
+    });
+
+    expect(observations).toHaveLength(5);
+    expect(observations.map(o => o.path)).toEqual([
+      'src/core/a.go',
+      'src/core/b.go',
+      'src/core/c.go',
+      'src/core/d.go',
+      'src/core/e.go',
+    ]);
+  });
+
+  it('supports JSON MCP results', () => {
+    const output = JSON.stringify({
+      path: 'src/app.ts',
+      results: [{ file_path: 'src/lib/a.py' }],
+    });
+
+    const observations = normalizeObservations({
+      tool: 'mcp__code_indexer__search',
+      args: {},
+      output,
+    });
+
+    expect(observations.map(o => o.path)).toEqual([
+      'src/app.ts',
+      'src/lib/a.py',
+    ]);
+  });
+
+  it('normalizes Windows separators and keeps spaces in paths', () => {
+    const output = 'path=C:\\repo\\src\\My File.ts lines=1-2';
+
+    expect(
+      normalizeObservations({
+        tool: 'mcp__filesystem__read',
+        args: {},
+        output,
+      })
+    ).toEqual([
+      {
+        path: 'C:/repo/src/My File.ts',
+        tool: 'mcp__filesystem__read',
+        content: output,
+      },
+    ]);
+  });
+
+  it('extracts Cyrillic grep rows and ignores URLs and plain text', () => {
+    expect(
+      normalizeObservations({
+        tool: '1c-index_search_code',
+        args: {},
+        output: '- Documents/Заказ покупателя/Module.bsl:42 found',
+      }).map(o => o.path)
+    ).toEqual(['Documents/Заказ покупателя/Module.bsl']);
+
+    expect(
+      normalizeObservations({
+        tool: 'mcp__search__run',
+        args: {},
+        output: 'See https://example.com/docs.ts for details\nJust plain text',
+      })
+    ).toEqual([]);
+  });
+
+  it('uses path-like MCP arguments when the output has no path', () => {
+    const output = '<file contents>';
+
+    expect(
+      normalizeObservations({
+        tool: 'mcp__filesystem__read_file',
+        args: { path: 'src/App.vue' },
+        output,
+      })
+    ).toEqual([
+      {
+        path: 'src/App.vue',
+        tool: 'mcp__filesystem__read_file',
+        content: output,
+      },
+    ]);
+  });
+});
