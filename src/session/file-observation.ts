@@ -148,7 +148,220 @@ function summaryPaths(output: string | undefined): FileObservation[] {
   return result;
 }
 
+// MCP tools are not part of OBSERVATION_TOOLS. Code-navigation MCP servers
+// (1c-index, ripgrep wrappers, language indexers, filesystem/memory servers)
+// report workspace paths in their output. Parse those into ordinary file
+// observations so glob rules auto-attach when the agent inspects code through
+// MCP instead of the native read tool.
+//
+// OpenCode names MCP tools either "mcp__<server>__<tool>" or
+// "<server>_<tool>" (for example "1c-index_read_method"), so detect a known
+// operation segment rather than hard-coding one server's full tool names.
+const MCP_TOOL_SEGMENTS = new Set([
+  'read',
+  'find',
+  'search',
+  'lookup',
+  'inspect',
+  'info',
+  'get',
+  'grep',
+  'list',
+  'scan',
+  'query',
+  'glob',
+]);
+
+// Native tools keep their own observation path; do not parse their output here.
+const NATIVE_TOOL_NAMES = new Set([
+  ...OBSERVATION_TOOLS,
+  'bash',
+  'shell',
+  'webfetch',
+  'websearch',
+  'glob',
+  'grep',
+  'task',
+  'skill',
+]);
+
+function isMcpFileTool(tool: string): boolean {
+  if (tool.startsWith('mcp__')) return true;
+  if (NATIVE_TOOL_NAMES.has(tool)) return false;
+  return tool
+    .toLowerCase()
+    .split(/[_-]+/)
+    .some(segment => MCP_TOOL_SEGMENTS.has(segment));
+}
+
+// path=src/app.ts, file="src/app.ts", module_path=..., filePath=...
+const PATH_KEY_PATTERN =
+  /(?:^|[\s,;])(path|file|file_path|filePath|filepath|relative_path|relativePath|module_path|modulePath|filename|file_name)\s*=\s*/g;
+
+const JSON_PATH_KEY =
+  /^(?:path|file|file_?path|relative_?path|module_?path|filename|file_?name)$/i;
+
+const PATH_EXTENSION = /\.[A-Za-z0-9_-]{1,12}$/;
+const URL_LIKE = /^(?:https?:|\/\/|file:|www\.)/i;
+const IGNORED_PATH_PREFIXES = /^(?:node_modules\/|\.git\/)/i;
+const ILLEGAL_PATH_CHARS = /[*?"<>|]/;
+
+function readPathValue(line: string, valueStart: number): string | undefined {
+  let start = valueStart;
+  while (line[start] === ' ' || line[start] === '\t') start++;
+
+  const quote = line[start];
+  if (quote === '"' || quote === "'") {
+    const end = line.indexOf(quote, start + 1);
+    return (
+      end === -1 ? line.slice(start + 1) : line.slice(start + 1, end)
+    ).trim();
+  }
+
+  const rest = line.slice(start);
+  // A path may contain spaces; stop at the next key= pair or punctuation.
+  const stop = /\s+(?=[A-Za-z_][A-Za-z0-9_]*\s*=)|\s*[,;)]/.exec(rest);
+  const value = (stop ? rest.slice(0, stop.index) : rest).trim();
+  return value || undefined;
+}
+
+function kvPaths(line: string): string[] {
+  const values: string[] = [];
+  for (const match of line.matchAll(PATH_KEY_PATTERN)) {
+    const value = readPathValue(line, (match.index ?? 0) + match[0].length);
+    if (value) values.push(value);
+  }
+  return values;
+}
+
+function linePath(line: string): string | undefined {
+  let rest = line.trim().replace(/^(?:[-*>]|→|->)\s*/, '');
+
+  // path/to/file.ext:42 or path/to/file.ext:42:7
+  const withLine = /^(.+?\.([A-Za-z0-9_-]{1,12}))(?::\d+)(?::\d+)?\b/.exec(
+    rest
+  );
+  if (withLine) return withLine[1].trim();
+
+  // A bare path line from an MCP file-list/glob result.
+  if (rest.includes('=')) return undefined;
+  const bare = /^(.+?\.([A-Za-z0-9_-]{1,12}))\s*$/.exec(rest);
+  return bare ? bare[1].trim() : undefined;
+}
+
+function collectJsonPaths(value: unknown, out: Set<string>, depth = 0): void {
+  if (depth > 6 || value === null || typeof value !== 'object') return;
+  if (Array.isArray(value)) {
+    for (const item of value) collectJsonPaths(item, out, depth + 1);
+    return;
+  }
+  for (const [key, child] of Object.entries(value)) {
+    if (JSON_PATH_KEY.test(key)) {
+      if (typeof child === 'string') {
+        out.add(child);
+      } else if (Array.isArray(child)) {
+        for (const item of child) {
+          if (typeof item === 'string') out.add(item);
+        }
+      }
+    }
+    collectJsonPaths(child, out, depth + 1);
+  }
+}
+
+function argPaths(args: unknown): string[] {
+  const paths: string[] = [];
+  const walk = (value: unknown, depth: number): void => {
+    if (depth > 3 || value === null || typeof value !== 'object') return;
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item, depth + 1);
+      return;
+    }
+    for (const [key, child] of Object.entries(value)) {
+      if (JSON_PATH_KEY.test(key)) {
+        if (typeof child === 'string') {
+          paths.push(child);
+        } else if (Array.isArray(child)) {
+          for (const item of child) {
+            if (typeof item === 'string') paths.push(item);
+          }
+        }
+      }
+      walk(child, depth + 1);
+    }
+  };
+  walk(args, 0);
+  return paths;
+}
+
+function normalizePathCandidate(raw: string): string | undefined {
+  let value = raw.trim().replace(/^[("'`]+|[)"'`,;]+$/g, '');
+  if (!value) return undefined;
+
+  // Normalize Windows separators so minimatch sees one path shape.
+  value = value.replace(/\\/g, '/');
+
+  if (URL_LIKE.test(value) || IGNORED_PATH_PREFIXES.test(value)) {
+    return undefined;
+  }
+  if (ILLEGAL_PATH_CHARS.test(value)) return undefined;
+  if (!PATH_EXTENSION.test(value)) return undefined;
+
+  const basename = value.split('/').pop() ?? value;
+  const dot = basename.lastIndexOf('.');
+  const stem = dot > 0 ? basename.slice(0, dot) : '';
+  if (!stem) return undefined;
+  // Reject version-like tokens such as "1.2.3" that slipped through a line.
+  if (!/\p{L}/u.test(stem) && !value.includes('/')) return undefined;
+
+  return value;
+}
+
+function mcpObservations(event: RawToolEvent): FileObservation[] {
+  const tool = event.tool;
+  if (!isMcpFileTool(tool)) return [];
+
+  const output = asString(event.output);
+  if (!output) return [];
+
+  const paths = new Set<string>();
+  const add = (raw: string | undefined): void => {
+    if (!raw) return;
+    const normalized = normalizePathCandidate(raw);
+    if (normalized) paths.add(normalized);
+  };
+
+  // Some MCP servers take the path as an argument and return only content.
+  for (const value of argPaths(event.args)) add(value);
+
+  for (const line of output.split(/\r?\n/)) {
+    const kv = kvPaths(line);
+    if (kv.length > 0) {
+      for (const value of kv) add(value);
+      continue;
+    }
+    add(linePath(line));
+  }
+
+  const trimmed = output.trim();
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      const jsonPaths = new Set<string>();
+      collectJsonPaths(parsed, jsonPaths);
+      for (const value of jsonPaths) add(value);
+    } catch {
+      // Not JSON; the line parser above already handled the text form.
+    }
+  }
+
+  return [...paths].slice(0, 5).map(path => ({ path, tool, content: output }));
+}
+
 export function normalizeObservations(event: RawToolEvent): FileObservation[] {
+  const mcp = mcpObservations(event);
+  if (mcp.length > 0) return mcp;
+
   if (!OBSERVATION_TOOLS.has(event.tool)) return [];
   if (!event.args || typeof event.args !== 'object') return [];
   const args = event.args as Record<string, unknown>;
