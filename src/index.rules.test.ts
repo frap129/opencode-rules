@@ -1191,7 +1191,7 @@ rule`;
       expect(metadata?.model).toEqual(['claude-opus']);
     });
 
-    it('should return undefined when all array values are empty after trim/filter', () => {
+    it('should return an empty array when all array values are empty after trim/filter', () => {
       const content = `---
 globs:
   - ""
@@ -1200,7 +1200,7 @@ globs:
 rule`;
 
       const metadata = parseRuleMetadata(content);
-      expect(metadata?.globs).toBeUndefined();
+      expect(metadata?.globs).toEqual([]);
     });
 
     it('should process all array fields consistently', () => {

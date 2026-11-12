@@ -39,6 +39,8 @@ Hidden files and directories (starting with `.`) are automatically excluded from
 
 You can define conditional rules in both `.md` and `.mdc` files using YAML frontmatter with various filter fields.
 
+List-valued filters (`globs`, `keywords`, `tools`, `model`, `agent`, `command`, `project`, `branch`, `os`) accept either a single string or a YAML array of strings. A declared filter with no valid entries never matches. Quote values that begin with `{` so YAML does not parse them as flow mappings.
+
 Set `name` to control the short label used when the rule is delivered. The
 value is trimmed; when omitted, the filename stem is used.
 
@@ -56,7 +58,7 @@ This is a rule for TypeScript components.
 
 #### File-Based Conditions (globs)
 
-The `globs` key contains a list of glob patterns. The rule applies if any observed file's path matches one of the patterns.
+The `globs` key accepts a single glob pattern or a list of glob patterns. The rule applies if any observed file's path matches one of the patterns.
 
 ```markdown
 ---
@@ -104,7 +106,7 @@ Notes:
 
 #### Prompt-Based Conditions (keywords)
 
-The `keywords` key contains a list of keywords. The rule applies if the user's prompt contains any of the keywords (case-insensitive, word-boundary matching).
+The `keywords` key accepts a single keyword or a list of keywords. The rule applies if the user's prompt contains any of the keywords (case-insensitive, word-boundary matching).
 
 ```markdown
 ---
@@ -124,7 +126,7 @@ Keyword matching uses word boundaries, so:
 
 #### Tool-Based Conditions (tools)
 
-The `tools` key contains a list of tool IDs. The rule applies if any listed tool is available in the current environment.
+The `tools` key accepts a single tool ID or a list of tool IDs. The rule applies if any listed tool is available in the current environment.
 
 ```markdown
 ---

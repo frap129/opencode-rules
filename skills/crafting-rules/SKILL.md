@@ -13,20 +13,21 @@ Rules are markdown files with optional YAML frontmatter, injected into the syste
 
 | Field          | Type                   | Category   | Purpose                                                         |
 | -------------- | ---------------------- | ---------- | --------------------------------------------------------------- |
-| `globs`        | `string[]`             | Legacy     | Apply when any observed file's path matches a pattern           |
+| `globs`        | `string` \| `string[]` | Legacy     | Apply when any observed file's path matches a pattern           |
 | `fileContains` | `string` \| `string[]` | Legacy     | Apply when an observed file's text contains a literal substring |
-| `keywords`     | `string[]`             | Legacy     | Apply when the user's latest prompt matches a keyword           |
-| `tools`        | `string[]`             | Legacy     | Apply when any listed tool ID is available                      |
-| `model`        | `string[]`             | Runtime    | Match against the current LLM model ID                          |
-| `agent`        | `string[]`             | Runtime    | Match against the current agent type (e.g., `programmer`)       |
-| `command`      | `string[]`             | Runtime    | Match against the current slash command (e.g., `/plan`)         |
-| `project`      | `string[]`             | Runtime    | Match against detected project tags (e.g., `node`, `rust`)      |
-| `branch`       | `string[]`             | Runtime    | Match against git branch name (supports glob patterns)          |
-| `os`           | `string[]`             | Runtime    | Match against OS (`linux`, `darwin`, `win32`)                   |
+| `keywords`     | `string` \| `string[]` | Legacy     | Apply when the user's latest prompt matches a keyword           |
+| `tools`        | `string` \| `string[]` | Legacy     | Apply when any listed tool ID is available                      |
+| `model`        | `string` \| `string[]` | Runtime    | Match against the current LLM model ID                          |
+| `agent`        | `string` \| `string[]` | Runtime    | Match against the current agent type (e.g., `programmer`)       |
+| `command`      | `string` \| `string[]` | Runtime    | Match against the current slash command (e.g., `/plan`)         |
+| `project`      | `string` \| `string[]` | Runtime    | Match against detected project tags (e.g., `node`, `rust`)      |
+| `branch`       | `string` \| `string[]` | Runtime    | Match against git branch name (supports glob patterns)          |
+| `os`           | `string` \| `string[]` | Runtime    | Match against OS (`linux`, `darwin`, `win32`)                   |
 | `ci`           | `boolean`              | Runtime    | Match against CI environment (`true` = in CI)                   |
 | `match`        | `'any'` \| `'all'`     | Combinator | `any` (default): OR logic. `all`: AND logic.                    |
 
 - All fields are optional; no frontmatter means the rule always applies.
+- List-valued fields accept either a single string or an array of strings; a string is one pattern. Glob and branch patterns support minimatch brace expansion (e.g. `{src,test}/**/*.ts`); quote brace patterns so YAML does not parse them as flow mappings. A declared field with no valid entries never matches.
 - With `match: any` (default), the rule applies if ANY declared condition matches.
 - With `match: all`, the rule applies only if ALL declared conditions match.
 - `globs` and `fileContains` form one file-observation family: when both are declared, the same observed file must satisfy both. The family counts as one condition in the algebra.
