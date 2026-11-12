@@ -24,13 +24,14 @@ describe('getGitBranch', () => {
     expect(mockExecFile).toHaveBeenCalledTimes(1);
   });
 
-  it('passes cwd, timeout, and killSignal in options', async () => {
+  it('passes cwd, timeout, killSignal, and windowsHide in options', async () => {
     const mockExecFile = vi
       .fn()
       .mockImplementation((_file, _args, opts, callback) => {
         expect(opts.cwd).toBe('/my/project/dir');
         expect(opts.timeout).toBe(5000);
         expect(opts.killSignal).toBe('SIGTERM');
+        expect(opts.windowsHide).toBe(true);
         (callback as ExecFileCallback)(null, 'main\n', '');
         return {} as ReturnType<typeof execFile>;
       });

@@ -14,6 +14,7 @@ export async function getGitBranch(
         cwd: projectDir,
         timeout: GIT_TIMEOUT_MS,
         killSignal: 'SIGTERM',
+        windowsHide: true,
       };
       execFn(
         'git',
