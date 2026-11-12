@@ -2,7 +2,7 @@
 
 This document explains how to use OpenCode Rules to inject custom instructions into the agent's context. Rules are automatically discovered and injected via OpenCode's hook system, enabling context-aware rule filtering based on:
 
-- **Legacy filters**: file paths (`globs`), file content (`fileContains`), user prompts (`keywords`), and available tools (`tools`)
+- **Legacy filters**: file paths (`globs`/`paths`), file content (`fileContains`), user prompts (`keywords`), and available tools (`tools`)
 - **Runtime filters**: model, agent, command, project type, git branch, OS, and CI environment
 - **Match semantics**: `match: any` (default OR logic) or `match: all` (AND logic)
 
@@ -33,13 +33,13 @@ You can create subdirectories to group related rules:
     └── git.md                # Git commit conventions
 ```
 
-Hidden files and directories (starting with `.`) are automatically excluded from discovery.
+Hidden entries inside a rules directory (names starting with `.`) are excluded from discovery. An explicitly configured rules directory may itself start with a dot, for example `.claude/rules` when added through `additionalRuleDirectories`.
 
 ## Conditional Rules
 
 You can define conditional rules in both `.md` and `.mdc` files using YAML frontmatter with various filter fields.
 
-List-valued filters (`globs`, `keywords`, `tools`, `model`, `agent`, `command`, `project`, `branch`, `os`) accept either a single string or a YAML array of strings. A declared filter with no valid entries never matches. Quote values that begin with `{` so YAML does not parse them as flow mappings.
+List-valued filters (`globs`, `paths`, `keywords`, `tools`, `model`, `agent`, `command`, `project`, `branch`, `os`) accept either a single string or a YAML array of strings. A string is one pattern, except for `paths`, which also accepts a comma-separated string; commas inside braces or character classes are preserved. A declared filter with no valid entries never matches. Quote values that begin with `{` so YAML does not parse them as flow mappings.
 
 Set `name` to control the short label used when the rule is delivered. The
 value is trimmed; when omitted, the filename stem is used.
@@ -56,9 +56,11 @@ This is a rule for TypeScript components.
 
 ### Legacy Filters
 
-#### File-Based Conditions (globs)
+#### File-Based Conditions (globs / paths)
 
 The `globs` key accepts a single glob pattern or a list of glob patterns. The rule applies if any observed file's path matches one of the patterns.
+
+`paths` is accepted as a Claude Code-compatible alias for `globs`. When both keys are present, their patterns are combined.
 
 ```markdown
 ---
@@ -85,9 +87,9 @@ fileContains: 'unsafe {'
 Review guidance for unsafe Rust.
 ```
 
-When both `globs` and `fileContains` are declared, they form one file-observation family: a single observed file must satisfy the path pattern AND contain a literal. The family counts as one condition in the `match: any|all` algebra — for example, `globs` + `fileContains` + `keywords` under `match: any` means `(globs AND fileContains) OR keywords`.
+When both a path filter (`globs` or `paths`) and `fileContains` are declared, they form one file-observation family: a single observed file must satisfy the path pattern AND contain a literal. The family counts as one condition in the `match: any|all` algebra — for example, `globs`/`paths` + `fileContains` + `keywords` under `match: any` means `(path filter AND fileContains) OR keywords`.
 
-`fileContains` can be used without `globs` to match content alone:
+`fileContains` can be used without a path filter to match content alone:
 
 ```markdown
 ---
@@ -291,7 +293,7 @@ The plugin uses OpenCode's hook system to track context and inject rules:
 2. **Rule Injection**:
    - Matching rules are evaluated against the accumulated context on every user message
    - Rules are filtered based on:
-     - **File paths and content** (`globs`, `fileContains`): Glob and literal matching against normalized file observations in context
+     - **File paths and content** (`globs`/`paths`, `fileContains`): Glob and literal matching against normalized file observations in context
      - **User prompts** (`keywords`): Keyword matching against the latest user message
      - **Available tools** (`tools`): Exact match against tool IDs available in the environment
      - **Model** (`model`): Exact match against current LLM model ID
@@ -306,7 +308,7 @@ The plugin uses OpenCode's hook system to track context and inject rules:
 Rule delivery is split by the rule's **lifetime classification**:
 
 - **Session-durable rules** — unconditional rules and rules gated only by
-  `globs`, `fileContains`, `keywords`, `command`, `project`, `os`, or `ci` — are
+  `globs`/`paths`, `fileContains`, `keywords`, `command`, `project`, `os`, or `ci` — are
   published once per turn as one persisted synthetic message via
   `session.synthetic` on the session `prompt` hook (`resume: false`, no
   description, so the admitted rule never triggers a reply and stays hidden

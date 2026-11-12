@@ -9,6 +9,7 @@ import openCodeRulesPlugin from './index.js';
 import { createRuntime } from './runtime/create-runtime.js';
 import { clearRuleCache } from './rules/rule-discovery.js';
 import {
+  admissionText,
   createMockPluginInput,
   getTestDirs,
   restoreEnv,
@@ -55,7 +56,7 @@ async function promptOnce(
   });
 }
 
-describe('plugin entry additionalRuleDirectories option', () => {
+describe('plugin entry additional rule directories and Claude Code compatibility', () => {
   async function setupWithOptions(
     options?: Record<string, unknown>
   ): Promise<ReturnType<typeof createMockPluginInput>> {
@@ -96,6 +97,39 @@ describe('plugin entry additionalRuleDirectories option', () => {
     expect(
       mockInput.syntheticCalls.some(call => call.text.includes('Relative Rule'))
     ).toBe(true);
+  });
+
+  it('treats Claude Code paths frontmatter as a path condition', async () => {
+    const claudeRulesDir = path.join(projectDir, '.claude', 'rules');
+    mkdirSync(claudeRulesDir, { recursive: true });
+    writeFileSync(
+      path.join(claudeRulesDir, 'typescript.md'),
+      `---
+paths: "src/**/*.ts, lib/**/*.js"
+---
+
+Use TypeScript conventions.`
+    );
+
+    const mockInput = await setupWithOptions({
+      additionalRuleDirectories: ['.claude/rules'],
+    });
+
+    await promptOnce(mockInput, 'session-paths');
+    expect(admissionText(mockInput)).not.toContain(
+      'Use TypeScript conventions.'
+    );
+
+    await mockInput.hooks.toolAfter[0]!({
+      tool: 'read',
+      sessionID: 'session-paths',
+      id: 'call_paths',
+      input: { filePath: 'src/index.ts' },
+      status: 'completed',
+      result: { content: 'Read file src/index.ts, lines 1-1\n1: export {};' },
+    });
+
+    expect(admissionText(mockInput)).toContain('Use TypeScript conventions.');
   });
 
   it('expands a leading ~ in an entry', async () => {

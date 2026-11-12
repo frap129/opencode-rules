@@ -99,6 +99,73 @@ rule`;
   });
 });
 
+describe('paths alias parsing', () => {
+  it('maps a scalar paths field to globs', () => {
+    expect(parseRuleMetadata('---\npaths: "**/*.ts"\n---\nrule')).toEqual({
+      globs: ['**/*.ts'],
+    });
+  });
+
+  it('maps an array paths field to globs', () => {
+    const content = `---
+paths:
+  - "src/**/*.ts"
+  - "lib/**/*.js"
+---
+rule`;
+
+    expect(parseRuleMetadata(content)).toEqual({
+      globs: ['src/**/*.ts', 'lib/**/*.js'],
+    });
+  });
+
+  it('combines globs and paths patterns', () => {
+    const content = `---
+globs: "src/**/*.ts"
+paths:
+  - "lib/**/*.js"
+---
+rule`;
+
+    expect(parseRuleMetadata(content)).toEqual({
+      globs: ['src/**/*.ts', 'lib/**/*.js'],
+    });
+  });
+
+  it('splits comma-separated paths without splitting brace patterns', () => {
+    const content = `---
+paths: "src/**/*.ts, lib/**/*.{ts,tsx}, tests/*.ts"
+---
+rule`;
+
+    expect(parseRuleMetadata(content)).toEqual({
+      globs: ['src/**/*.ts', 'lib/**/*.{ts,tsx}', 'tests/*.ts'],
+    });
+  });
+
+  it('splits comma-separated entries inside a paths array', () => {
+    const content = `---
+paths:
+  - "src/**/*.ts, lib/**/*.js"
+  - "tests/**/*.ts"
+---
+rule`;
+
+    expect(parseRuleMetadata(content)).toEqual({
+      globs: ['src/**/*.ts', 'lib/**/*.js', 'tests/**/*.ts'],
+    });
+  });
+
+  it.each([
+    ['null', '---\npaths:\n---\nrule'],
+    ['an object', '---\npaths: {}\n---\nrule'],
+    ['an empty array', '---\npaths: []\n---\nrule'],
+    ['an empty string', '---\npaths: ""\n---\nrule'],
+  ])('keeps a declared %s paths field fail-closed', (_, content) => {
+    expect(parseRuleMetadata(content)).toEqual({ globs: [] });
+  });
+});
+
 describe('fileContains parsing', () => {
   it('parses a scalar string as a one-element array', () => {
     const content = `---
