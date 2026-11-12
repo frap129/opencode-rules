@@ -143,6 +143,8 @@ Both built-in directories are scanned recursively, allowing you to organize rule
 
 Use the `additionalRuleDirectories` plugin option to load rules from extra directories, for example a rules folder you already share with other agents. Configured directories are scanned after the built-in locations, in the order you list them; they are additive and never replace or reorder the built-in ones.
 
+`.claude/rules` is not discovered automatically. Add it to this option to reuse Claude Code rules; rules with `paths` frontmatter are treated as path-scoped conditions.
+
 Set it in `opencode.jsonc`:
 
 ```jsonc
@@ -154,14 +156,18 @@ Set it in `opencode.jsonc`:
       "package": "opencode-rules@latest",
       "options": {
         // A bare string (".agents/rules") is shorthand for a one-entry list.
-        "additionalRuleDirectories": [".agents/rules", "~/shared/rules"],
+        "additionalRuleDirectories": [
+          ".agents/rules",
+          ".claude/rules",
+          "~/shared/rules",
+        ],
       },
     },
   ],
 }
 ```
 
-Or in `cli.json`, with the same option shape and the same `.agents/rules` example:
+Or in `cli.json`, with the same option shape and example:
 
 ```jsonc
 // ~/.config/opencode/cli.json
@@ -171,7 +177,11 @@ Or in `cli.json`, with the same option shape and the same `.agents/rules` exampl
     {
       "package": "opencode-rules@latest",
       "options": {
-        "additionalRuleDirectories": [".agents/rules", "~/shared/rules"],
+        "additionalRuleDirectories": [
+          ".agents/rules",
+          ".claude/rules",
+          "~/shared/rules",
+        ],
       },
     },
   ],
@@ -233,16 +243,17 @@ match: any
 ---
 ```
 
-All matching list fields accept either a YAML array or a single string, which is treated as a one-element array; a declared field with no valid entries never matches. `hooks` remains array-only. Quote values that begin with `{` so YAML does not parse them as flow mappings.
+All matching list fields accept either a YAML array or a single string. A string is one pattern, except for `paths`, which also accepts Claude Code's comma-separated string form; commas inside braces or character classes are preserved. A declared field with no valid entries never matches. `hooks` remains array-only. Quote values that begin with `{` so YAML does not parse them as flow mappings.
 
 ### Supported Fields
 
-- `globs` (optional): String or array of glob patterns for file-based matching
+- `globs` / `paths` (optional): String or array of glob patterns for file-based matching
+  - `paths` is accepted as a Claude Code-compatible alias; when both are present, their patterns are combined
   - Rule applies when any file in context matches a pattern
 - `fileContains` (optional): String or array of literal substrings to find in observed file content
-  - Rule applies when one observed file's path matches `globs` (if declared) AND the same observation's text contains any literal (OR across literals)
+  - Rule applies when one observed file's path matches `globs`/`paths` (if declared) AND the same observation's text contains any literal (OR across literals)
   - Case-sensitive literal matching; regex metacharacters have no special meaning and literals may span lines
-  - Usable without `globs` to match content alone; a declared field with no valid literal makes the rule never match (fail-closed, with a warning)
+  - Usable without `globs`/`paths` to match content alone; a declared field with no valid literal makes the rule never match (fail-closed, with a warning)
   - Observed only from successful Read, Write, Edit, Apply Patch, and LSP tool events
 - `keywords` (optional): String or array of keywords for prompt-based matching
   - Rule applies when the user's prompt contains any keyword
@@ -278,9 +289,9 @@ All matching list fields accept either a YAML array or a single string, which is
 ### Matching Behavior
 
 - **No metadata**: Rule applies unconditionally (always included)
-- **Only globs**: Rule applies when any observed file's path matches
+- **Only globs or paths**: Rule applies when any observed file's path matches
 - **Only fileContains**: Rule applies when any observed file's text contains a literal
-- **globs + fileContains**: One file-observation family — a single observed file must satisfy both (AND)
+- **globs/paths + fileContains**: One file-observation family — a single observed file must satisfy both (AND)
 - **Only keywords**: Rule applies when the user's prompt contains any keyword
 - **Only tools**: Rule applies when any listed tool is available
 - **Multiple conditions with `match: any` (default)**: Rule applies when ANY condition matches (OR logic across all fields; the file-observation family counts as one check)
@@ -301,13 +312,13 @@ The plugin uses `minimatch` for pattern matching:
 | `*.json`                      | JSON files in root directory only               |
 | `lib/{utils,helpers}/**/*.js` | JavaScript files in specific lib subdirectories |
 
-A brace pattern can be the whole `globs` value, e.g. `globs: "{src,test}/**/*.ts"`. The quoted scalar is one pattern; use an array to list unrelated patterns.
+A brace pattern can be the whole `globs` or `paths` value, e.g. `globs: "{src,test}/**/*.ts"`. For `globs`, the quoted scalar is one pattern; for `paths`, a quoted scalar may also contain comma-separated patterns. Use an array to list unrelated patterns.
 
 ## Included Skill: crafting-rules
 
 This repository includes a `crafting-rules/` skill that teaches AI agents how to create well-formatted rules. The skill provides:
 
-- **Rule format reference** - Frontmatter fields (`globs`, `fileContains`, `keywords`, `tools`, `model`, `agent`, `command`, `project`, `branch`, `os`, `ci`, `match`) and markdown body structure
+- **Rule format reference** - Frontmatter fields (`globs`/`paths`, `fileContains`, `keywords`, `tools`, `model`, `agent`, `command`, `project`, `branch`, `os`, `ci`, `match`) and markdown body structure
 - **Matching strategy guidance** - When to use globs vs keywords vs runtime filters vs combinations
 - **Pattern extraction workflow** - How to identify repeated conversation patterns that should become rules
 - **Keyword safety guidelines** - Denylist of overly broad keywords to avoid, allowlist of safe alternatives, and an audit checklist
@@ -645,7 +656,7 @@ The plugin registers a `sidebar.content` slot in the OpenCode v2 TUI, displaying
 - Collapsible "Project" and "Global" sections grouping rules by scope
 - Active/inactive status indicators (green bullet for active, muted for inactive) based on persisted state from the current session
 - Condition summary for conditional rules ("always active" for unconditional ones)
-- Expandable detail panel with all metadata fields (globs, fileContains, keywords, tools, model, agent, command, project, branch, os, ci, match)
+- Expandable detail panel with all metadata fields (globs/paths, fileContains, keywords, tools, model, agent, command, project, branch, os, ci, match); `paths` patterns display under `globs` because the alias is normalized at parse time
 - Loading, error, and empty states
 
 **Behavior:**

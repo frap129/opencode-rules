@@ -30,6 +30,7 @@ export interface RuleHook {
 interface ParsedFrontmatter {
   name?: unknown;
   globs?: unknown;
+  paths?: unknown;
   fileContains?: unknown;
   keywords?: unknown;
   tools?: unknown;
@@ -84,6 +85,62 @@ function extractStringArray(value: unknown): string[] | undefined {
     .filter(v => v.length > 0);
 }
 
+// `paths` accepts Claude Code's comma-separated string form in addition to
+// the scalar/array forms. Split on top-level commas only so brace expansions
+// and character classes keep their commas.
+function splitPathPatterns(value: string): string[] {
+  const patterns: string[] = [];
+  let current = '';
+  let braceDepth = 0;
+  let bracketDepth = 0;
+
+  for (let index = 0; index < value.length; index++) {
+    const character = value[index];
+
+    if (character === '\\') {
+      current += character;
+      const next = value[index + 1];
+      if (next !== undefined) {
+        current += next;
+        index++;
+      }
+      continue;
+    }
+
+    if (character === '{') {
+      braceDepth++;
+    } else if (character === '}' && braceDepth > 0) {
+      braceDepth--;
+    } else if (character === '[') {
+      bracketDepth++;
+    } else if (character === ']' && bracketDepth > 0) {
+      bracketDepth--;
+    }
+
+    if (character === ',' && braceDepth === 0 && bracketDepth === 0) {
+      patterns.push(current);
+      current = '';
+      continue;
+    }
+
+    current += character;
+  }
+
+  patterns.push(current);
+  return patterns;
+}
+
+function extractPaths(value: unknown): string[] | undefined {
+  if (typeof value !== 'string' && !Array.isArray(value)) {
+    return undefined;
+  }
+  return toEntries(value)
+    .filter((entry): entry is string => typeof entry === 'string')
+    .flatMap(entry => splitPathPatterns(entry))
+    .map(entry => entry.trim())
+    .filter(entry => entry.length > 0);
+}
+
 export function parseRuleMetadata(content: string): RuleMetadata | null {
   if (!content.startsWith('---')) {
     return null;
@@ -128,6 +185,16 @@ export function parseRuleMetadata(content: string): RuleMetadata | null {
       if (extracted) {
         metadata[field] = extracted;
       }
+    }
+
+    // Claude Code uses `paths` for the same condition; normalize it into
+    // globs so the rest of the pipeline sees one field. Presence, not
+    // truthiness, decides fail-closed handling for malformed declarations.
+    if (parsed.paths !== undefined) {
+      metadata.globs = [
+        ...(metadata.globs ?? []),
+        ...(extractPaths(parsed.paths) ?? []),
+      ];
     }
 
     if (parsed.fileContains !== undefined) {

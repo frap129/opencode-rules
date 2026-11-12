@@ -14,6 +14,7 @@ Rules are markdown files with optional YAML frontmatter, injected into the syste
 | Field          | Type                   | Category   | Purpose                                                         |
 | -------------- | ---------------------- | ---------- | --------------------------------------------------------------- |
 | `globs`        | `string` \| `string[]` | Legacy     | Apply when any observed file's path matches a pattern           |
+| `paths`        | `string` \| `string[]` | Legacy     | Alias for `globs`; patterns combine when both are present       |
 | `fileContains` | `string` \| `string[]` | Legacy     | Apply when an observed file's text contains a literal substring |
 | `keywords`     | `string` \| `string[]` | Legacy     | Apply when the user's latest prompt matches a keyword           |
 | `tools`        | `string` \| `string[]` | Legacy     | Apply when any listed tool ID is available                      |
@@ -27,11 +28,11 @@ Rules are markdown files with optional YAML frontmatter, injected into the syste
 | `match`        | `'any'` \| `'all'`     | Combinator | `any` (default): OR logic. `all`: AND logic.                    |
 
 - All fields are optional; no frontmatter means the rule always applies.
-- List-valued fields accept either a single string or an array of strings; a string is one pattern. Glob and branch patterns support minimatch brace expansion (e.g. `{src,test}/**/*.ts`); quote brace patterns so YAML does not parse them as flow mappings. A declared field with no valid entries never matches.
+- List-valued fields accept either a single string or an array of strings; a string is one pattern, except `paths`, which also accepts a comma-separated string (commas inside braces or character classes are preserved). Glob and branch patterns support minimatch brace expansion (e.g. `{src,test}/**/*.ts`); quote brace patterns so YAML does not parse them as flow mappings. A declared field with no valid entries never matches.
 - With `match: any` (default), the rule applies if ANY declared condition matches.
 - With `match: all`, the rule applies only if ALL declared conditions match.
-- `globs` and `fileContains` form one file-observation family: when both are declared, the same observed file must satisfy both. The family counts as one condition in the algebra.
-- File observations come only from successful live Read, Write, Edit, Apply Patch, and path-associated LSP tool events. Grep, Glob, shell, custom/MCP tools, message prose, and historical tool events contribute nothing to `globs`/`fileContains`.
+- `globs` (or `paths`) and `fileContains` form one file-observation family: when both are declared, the same observed file must satisfy both. The family counts as one condition in the algebra.
+- File observations come only from successful live Read, Write, Edit, Apply Patch, and path-associated LSP tool events. Grep, Glob, shell, custom/MCP tools, message prose, and historical tool events contribute nothing to `globs`/`paths`/`fileContains`.
 - A durable rule first matched by a live file observation takes effect at that earliest dispatch — not on the next user message.
 - When a runtime value is unavailable (e.g., no git repo), that dimension is a non-match.
 
@@ -59,8 +60,8 @@ match: any
 
 ## Matching Strategy
 
-- Use `globs` when the rule is about code in specific files/directories.
-- Use `fileContains` when the rule targets code patterns inside files (e.g., `unsafe {`, `TODO: fix`); combine with `globs` to scope content to file types.
+- Use `globs` (or the Claude Code-compatible `paths` alias) when the rule is about code in specific files/directories.
+- Use `fileContains` when the rule targets code patterns inside files (e.g., `unsafe {`, `TODO: fix`); combine with `globs`/`paths` to scope content to file types.
 - Use `keywords` when the rule is about a topic that may not include files.
 - Use `tools` when the rule depends on specific MCP tools being available.
 - Use runtime filters (`model`, `agent`, `command`, `project`, `branch`, `os`, `ci`) to scope rules to specific environments or workflows.
