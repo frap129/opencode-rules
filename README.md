@@ -233,36 +233,38 @@ match: any
 ---
 ```
 
+All matching list fields accept either a YAML array or a single string, which is treated as a one-element array; a declared field with no valid entries never matches. `hooks` remains array-only. Quote values that begin with `{` so YAML does not parse them as flow mappings.
+
 ### Supported Fields
 
-- `globs` (optional): Array of glob patterns for file-based matching
+- `globs` (optional): String or array of glob patterns for file-based matching
   - Rule applies when any file in context matches a pattern
 - `fileContains` (optional): String or array of literal substrings to find in observed file content
   - Rule applies when one observed file's path matches `globs` (if declared) AND the same observation's text contains any literal (OR across literals)
   - Case-sensitive literal matching; regex metacharacters have no special meaning and literals may span lines
   - Usable without `globs` to match content alone; a declared field with no valid literal makes the rule never match (fail-closed, with a warning)
   - Observed only from successful Read, Write, Edit, Apply Patch, and LSP tool events
-- `keywords` (optional): Array of keywords for prompt-based matching
+- `keywords` (optional): String or array of keywords for prompt-based matching
   - Rule applies when the user's prompt contains any keyword
   - Case-insensitive, word-boundary matching (e.g., "test" matches "testing")
   - Does NOT match mid-word (e.g., "test" does NOT match "contest")
-- `tools` (optional): Array of tool IDs for tool-availability matching
+- `tools` (optional): String or array of tool IDs for tool-availability matching
   - Rule applies when any listed tool is available to the agent
   - Uses exact string matching against tool IDs (e.g., `mcp_websearch`, `mcp_bash`)
   - Enable debug logging (`OPENCODE_RULES_DEBUG=1`) to see available tool IDs
-- `model` (optional): Array of model IDs to match against the current LLM
+- `model` (optional): String or array of model IDs to match against the current LLM
   - Example: `['gpt-5.3-codex', 'claude-sonnet-4']`
-- `agent` (optional): Array of agent types to match
+- `agent` (optional): String or array of agent types to match
   - Example: `['programmer', 'planner']`
-- `command` (optional): Array of slash commands to match
+- `command` (optional): String or array of slash commands to match
   - Example: `['/plan', '/review']`
-- `project` (optional): Array of project type tags to match
+- `project` (optional): String or array of project type tags to match
   - Detected automatically from marker files (e.g., `package.json` -> `node`)
   - Supported tags: `node`, `python`, `go`, `rust`, `monorepo`, `browser-extension`
-- `branch` (optional): Array of git branch patterns to match
+- `branch` (optional): String or array of git branch patterns to match
   - Supports exact names and glob patterns (e.g., `feature/*`, `release/**`)
   - Uses minimatch for glob matching
-- `os` (optional): Array of operating systems to match
+- `os` (optional): String or array of operating systems to match
   - Values: `linux`, `darwin`, `win32`
 - `ci` (optional): Boolean to match CI environment
   - `true` matches when running in CI, `false` matches when not in CI
@@ -298,6 +300,8 @@ The plugin uses `minimatch` for pattern matching:
 | `src/components/**/*.tsx`     | React components in components directory        |
 | `*.json`                      | JSON files in root directory only               |
 | `lib/{utils,helpers}/**/*.js` | JavaScript files in specific lib subdirectories |
+
+A brace pattern can be the whole `globs` value, e.g. `globs: "{src,test}/**/*.ts"`. The quoted scalar is one pattern; use an array to list unrelated patterns.
 
 ## Included Skill: crafting-rules
 

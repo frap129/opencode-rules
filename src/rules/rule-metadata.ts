@@ -55,14 +55,17 @@ type StringArrayField =
   | 'branch'
   | 'os';
 
+function toEntries(value: unknown): unknown[] {
+  if (typeof value === 'string') return [value];
+  return Array.isArray(value) ? value : [];
+}
+
 // Unlike the other condition fields, a declared fileContains that yields no
 // valid literal resolves to [] (not undefined) so the rule fails closed
 // instead of degrading to unconditional.
 function extractFileContains(value: unknown): string[] {
-  const entries =
-    typeof value === 'string' ? [value] : Array.isArray(value) ? value : [];
   const result: string[] = [];
-  for (const entry of entries) {
+  for (const entry of toEntries(value)) {
     if (typeof entry !== 'string') continue;
     const literal = entry.trim();
     if (literal.length === 0 || result.includes(literal)) continue;
@@ -72,14 +75,13 @@ function extractFileContains(value: unknown): string[] {
 }
 
 function extractStringArray(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) {
+  if (typeof value !== 'string' && !Array.isArray(value)) {
     return undefined;
   }
-  const result = value
+  return toEntries(value)
     .filter((v): v is string => typeof v === 'string')
     .map(v => v.trim())
     .filter(v => v.length > 0);
-  return result.length > 0 ? result : undefined;
 }
 
 export function parseRuleMetadata(content: string): RuleMetadata | null {

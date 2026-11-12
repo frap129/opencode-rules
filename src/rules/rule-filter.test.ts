@@ -160,6 +160,13 @@ describe('matchRuleSnapshots condition semantics (live delivery)', () => {
     ).toEqual(['base.mdc']);
   });
 
+  it('never matches a declared glob field with no valid patterns', () => {
+    const [entry] = matchRuleSnapshots([snapshot({ globs: [] }, 'empty.mdc')], {
+      fileObservations: [{ path: 'src/index.ts', tool: 'read', content: '' }],
+    });
+    expect(entry).toBeUndefined();
+  });
+
   it('matches model, agent, and command conditions', () => {
     const entries = matchRuleSnapshots(
       [
@@ -311,6 +318,33 @@ Keywords fail rule.`
     expect(entries.map(entry => entry.relativePath)).toEqual(['cross-dim.mdc']);
     expect(entries[0]?.filePath).toBe(matchingPath);
     expect(entries[0]?.lifetime).toBe('ephemeral');
+  });
+
+  it('matches a scalar brace glob loaded through loadRuleSnapshots', async () => {
+    const { globalRulesDir } = setupTestDirs();
+    const rulePath = path.join(globalRulesDir, 'scalar-brace.mdc');
+    writeFileSync(
+      rulePath,
+      `---
+globs: "{src/platform/win32/*.cpp,src/core/*.cpp,tests/*.cpp}"
+---
+
+Scalar brace rule.`
+    );
+
+    const snapshots = await loadRuleSnapshots([
+      { filePath: rulePath, relativePath: 'scalar-brace.mdc' },
+    ]);
+    const entries = matchRuleSnapshots(snapshots, {
+      fileObservations: [
+        { path: 'src/core/engine.cpp', tool: 'read', content: '' },
+        { path: 'other/engine.cpp', tool: 'read', content: '' },
+      ],
+    });
+
+    expect(entries.map(entry => entry.relativePath)).toEqual([
+      'scalar-brace.mdc',
+    ]);
   });
 });
 

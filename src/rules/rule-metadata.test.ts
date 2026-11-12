@@ -62,6 +62,43 @@ hooks:
   });
 });
 
+describe('list field parsing', () => {
+  it('accepts a scalar string for every list field', () => {
+    const content = `---
+globs: "{src,test}/**/*.ts"
+keywords: "  refactoring  "
+tools: mcp_bash
+model: claude-sonnet-4
+agent: programmer
+command: /plan
+project: node
+branch: feature/*
+os: linux
+---
+rule`;
+
+    const meta = parseRuleMetadata(content);
+    expect(meta).toEqual({
+      globs: ['{src,test}/**/*.ts'],
+      keywords: ['refactoring'],
+      tools: ['mcp_bash'],
+      model: ['claude-sonnet-4'],
+      agent: ['programmer'],
+      command: ['/plan'],
+      project: ['node'],
+      branch: ['feature/*'],
+      os: ['linux'],
+    });
+  });
+
+  it('yields an empty array for declared list fields with no valid entries', () => {
+    expect(parseRuleMetadata('---\nglobs: ""\n---\nrule')?.globs).toEqual([]);
+    expect(parseRuleMetadata('---\nkeywords: []\n---\nrule')?.keywords).toEqual(
+      []
+    );
+  });
+});
+
 describe('fileContains parsing', () => {
   it('parses a scalar string as a one-element array', () => {
     const content = `---
